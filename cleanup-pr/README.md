@@ -33,7 +33,7 @@ jobs:
       - name: PR Cleanup
         uses: bcgov/actions-openshift/cleanup-pr@v1
         with:
-          cleanup: helm
+          cleanup: label
           target: ${{ github.event.number }}
           oc_namespace: ${{ secrets.OC_NAMESPACE }}
           oc_token: ${{ secrets.OC_TOKEN }}
