@@ -4,7 +4,8 @@ description: "Cleans up Helm releases, labeled resources, and PVCs in a target O
 inputs:
   cleanup:
     description: "Type of cleanup; e.g. helm or label"
-    required: true
+    required: false
+    default: "label"
   cleanup_name:
     description: "Cleanup label app name (defaults to repository-target)"
     required: false
