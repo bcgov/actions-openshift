@@ -3,9 +3,9 @@ Consolidated repo for bcgov-specific openshift actions. Please feel free to cont
 
 ## Workflows and Actions
 
-### 1. [Teardown PR Env](./cleanup) (Composite Action)
+### 1. [PR Cleanup](./cleanup-pr) (Composite Action)
 Cleans up Helm releases, labeled resources, and PVCs in a target OpenShift namespace on pull request close or merge.
-* See [cleanup/README.md](./cleanup/README.md) for detailed inputs and usage.
+* See [cleanup-pr/README.md](./cleanup-pr/README.md) for detailed inputs and usage.
 
 ### 2. Deployer (`.github/workflows/.deployer.yml`)
 A reusable workflow that manages Helm and Template-based application deployments to OpenShift. It configures variables, handles release/tag naming conventions, and automates target environment promotions.

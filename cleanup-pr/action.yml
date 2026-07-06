@@ -1,4 +1,4 @@
-name: "Teardown PR Env"
+name: "PR Cleanup"
 description: "Cleans up Helm releases, labeled resources, and PVCs in a target OpenShift namespace"
 
 inputs:

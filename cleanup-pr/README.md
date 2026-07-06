@@ -1,4 +1,4 @@
-# Teardown PR Env
+# PR Cleanup
 
 This composite action cleans up resources in a target OpenShift namespace on pull request close or merge. It handles Helm release uninstalls, label-based resource deletion, and selective PVC removals using the `bcgov/action-oc-runner` action.
 
@@ -30,8 +30,8 @@ jobs:
   cleanup:
     runs-on: ubuntu-24.04
     steps:
-      - name: Teardown PR Env
-        uses: bcgov/actions-openshift/cleanup@v1
+      - name: PR Cleanup
+        uses: bcgov/actions-openshift/cleanup-pr@v1
         with:
           cleanup: helm
           target: ${{ github.event.number }}
