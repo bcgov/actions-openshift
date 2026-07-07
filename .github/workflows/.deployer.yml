@@ -99,12 +99,18 @@ jobs:
 
       - name: Vars
         id: vars
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_ENVIRONMENT: ${{ inputs.environment }}
+          PR_NUM: ${{ steps.pr.outputs.pr }}
+          PROMOTE_IMAGES: ${{ inputs.promote_images }}
         run: |
           # Tag defaults to PR number, but can be overridden by inputs.tag
-          tag=${{ inputs.tag || steps.pr.outputs.pr }}
+          tag=${INPUT_TAG:-$PR_NUM}
 
           # Release name includes run numbers to ensure uniqueness
-          release=${{ github.event.repository.name }}-${{ inputs.environment || inputs.tag || steps.pr.outputs.pr }}
+          target_env=${INPUT_ENVIRONMENT:-$tag}
+          release="${{ github.event.repository.name }}-${target_env}"
           
           # Version, used for non-PR releases
           version=1.0.0-${{ github.run_number }}
@@ -120,7 +126,8 @@ jobs:
           echo "version=${version}" >> $GITHUB_OUTPUT
 
           # Convert packages to JSON array for job matrix
-          echo "packages=$(jq -cn '$ARGS.positional' --args ${{ inputs.promote_images }})" >> $GITHUB_OUTPUT
+          read -r -a pkgs <<< "$PROMOTE_IMAGES"
+          echo "packages=$(jq -cn '$ARGS.positional' --args "${pkgs[@]}")" >> $GITHUB_OUTPUT
 
       ### Deploy
       - name: Interrupt deployments (PR only)

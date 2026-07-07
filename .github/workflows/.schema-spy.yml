@@ -73,7 +73,9 @@ jobs:
           chmod a+rwx -R output
 
       - name: Run Schemaspy
-        run: docker run --network host -v "$PWD/output:/output" schemaspy/schemaspy:6.2.4 -t pgsql11 -db default -host 127.0.0.1 -port 5432 -u postgres -p default -schemas ${{ inputs.schemaspy_schema }}
+        env:
+          SCHEMASPY_SCHEMA: ${{ inputs.schemaspy_schema }}
+        run: docker run --network host -v "$PWD/output:/output" schemaspy/schemaspy:6.2.4 -t pgsql11 -db default -host 127.0.0.1 -port 5432 -u postgres -p default -schemas "$SCHEMASPY_SCHEMA"
 
       - name: Deploy to Pages
         uses: JamesIves/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f # v4
