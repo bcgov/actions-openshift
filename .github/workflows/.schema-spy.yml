@@ -1,0 +1,84 @@
+name: .Schema-Spy
+
+on:
+  workflow_call:
+    inputs:
+      ### Typical / recommended
+      flyway_args:
+        description: "Flyway arguments"
+        default: "info migrate info"
+        required: false
+        type: string
+      flyway_locations:
+        description: "Flyway migrations location"
+        default: "filesystem:./migrations"
+        required: false
+        type: string
+      flyway_schema:
+        description: "Flyway default schema"
+        default: "users"
+        required: false
+        type: string
+      schemaspy_schema:
+        description: "SchemaSpy default schema"
+        default: "users"
+        required: false
+        type: string
+      deploy_dir:
+        description: "Target directory in gh-pages branch (leave empty for root)"
+        default: ""
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  schemaspy:
+    name: Generate Documentation
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgis/postgis:17-3.4@sha256:d0b5a6ecab18997637f55a83cb4a9467391de5645916cfa1b6f2a8d19eee7be5
+        env:
+          POSTGRES_DB: default
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: default
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Flyway
+        uses: docker://flyway/flyway:12@sha256:c345513c9240ff3543599fac78f59d0fa3806c2e38ad7e75b6bc5533078c0bc9
+        env:
+          FLYWAY_URL: jdbc:postgresql://postgres:5432/default
+          FLYWAY_USER: postgres
+          FLYWAY_PASSWORD: default
+          FLYWAY_LOCATIONS: ${{ inputs.flyway_locations }}
+          FLYWAY_DEFAULT_SCHEMA: ${{ inputs.flyway_schema }}
+        with:
+          args: ${{ inputs.flyway_args }}
+
+      - name: Create Output Folder
+        run: |
+          mkdir -p output/schema
+          chmod a+rwx -R output
+
+      - name: Run Schemaspy
+        env:
+          SCHEMASPY_SCHEMA: ${{ inputs.schemaspy_schema }}
+        run: docker run --network host -v "$PWD/output:/output" schemaspy/schemaspy:6.2.4 -t pgsql11 -db default -host 127.0.0.1 -port 5432 -u postgres -p default -schemas "$SCHEMASPY_SCHEMA"
+
+      - name: Deploy to Pages
+        uses: JamesIves/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f # v4
+        with:
+          folder: output
+          target-folder: ${{ inputs.deploy_dir }}
