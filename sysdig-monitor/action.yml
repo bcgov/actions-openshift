@@ -1,0 +1,76 @@
+name: Sysdig Monitor
+description: Create/update Sysdig email alerts for an OpenShift app on PROD deploy
+branding:
+  icon: activity
+  color: blue
+
+inputs:
+  ### Required
+  sysdig_api_token:
+    description: |
+      Sysdig API token, scoped to the project's Sysdig team.
+      Should be stored as a GitHub secret (SYSDIG_API_TOKEN).
+      If empty/unset the action will log a warning and exit 0 — it
+      never blocks the deploy.
+    required: false
+    default: ''
+  oc_namespace:
+    description: |
+      Prod OpenShift namespace, matching ^[a-z0-9]{6}-prod$.
+      Example: abc123-prod
+    required: true
+  app:
+    description: |
+      Application name. Used to namespace alert + channel names so
+      teams running many apps can scan their Sysdig alert list.
+      Example: nr-rept
+    required: true
+
+  ### Typical / recommended
+  alerts_dir:
+    description: |
+      Path (relative to the consuming repo's checkout) to a directory
+      containing alert template *.json files. Each file is upserted as
+      an alert per component. Filename (without .json) becomes the
+      alert-name suffix (e.g. crashloop.json -> <app>-<component>-crashloop).
+      Add or remove files in this directory to extend or trim the alert
+      set. The action never deletes Sysdig alerts when files are removed
+      — clean those up in the Sysdig UI if needed.
+    default: 'monitoring/alerts'
+  components:
+    description: |
+      Comma-separated list of Deployment names to monitor.
+      Each component gets one alert per file in alerts_dir.
+      Example: frontend,backend
+    default: 'frontend,backend'
+  alert_duration_minutes:
+    description: |
+      Minutes a condition must hold before an alert fires.
+      Acts as the debounce that absorbs rolling-deploy noise.
+    default: '5'
+  sysdig_api_url:
+    description: |
+      Sysdig SaaS API base URL.
+      Override only if BC Gov migrates to a different tenancy.
+    default: 'https://app.sysdigcloud.com'
+  debug:
+    description: |
+      Enable verbose logging (prints API requests/responses).
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Apply Sysdig monitoring
+      shell: bash
+      env:
+        SYSDIG_API_TOKEN: ${{ inputs.sysdig_api_token }}
+        SYSDIG_API_URL: ${{ inputs.sysdig_api_url }}
+        OC_NAMESPACE: ${{ inputs.oc_namespace }}
+        APP: ${{ inputs.app }}
+        COMPONENTS: ${{ inputs.components }}
+        ALERT_DURATION_MINUTES: ${{ inputs.alert_duration_minutes }}
+        DEBUG: ${{ inputs.debug }}
+        CHANNEL_TEMPLATE: ${{ github.action_path }}/templates/channel.json
+        ALERTS_DIR: ${{ github.workspace }}/${{ inputs.alerts_dir }}
+      run: ${{ github.action_path }}/scripts/apply.sh
