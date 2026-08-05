@@ -34,7 +34,9 @@ CHANNEL_NAME="${APP}-team-email"
 log() { echo "[sysdig-monitor] $*"; }
 # debug() writes to stderr so it never pollutes the stdout JSON captured
 # by callers like `$(api GET ...)`.
-debug() { [[ "${DEBUG}" == "true" ]] && echo "[sysdig-monitor:debug] $*" >&2 || true; }
+# The `if` form (rather than `A && B || true`) keeps the exit status 0 under
+# `set -e` when DEBUG is off, without tripping SC2015.
+debug() { if [[ "${DEBUG}" == "true" ]]; then echo "[sysdig-monitor:debug] $*" >&2; fi; }
 
 # ---------------------------------------------------------------------------
 # 1. Discover alert template files in the consuming repo
