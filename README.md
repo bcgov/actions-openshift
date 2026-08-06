@@ -7,7 +7,11 @@ Consolidated repo for bcgov-specific openshift actions. Please feel free to cont
 Cleans up Helm releases, labeled resources, and PVCs in a target OpenShift namespace on pull request close or merge.
 * See [cleanup-pr/README.md](./cleanup-pr/README.md) for detailed inputs and usage.
 
-### 2. Deployer (`.github/workflows/.deployer.yml`)
+### 2. [TLS Route Provisioner](./tls-route-provisioner) (Composite Action)
+Dynamically provisions a secure Vanity Route in OpenShift with cryptographic pre-validation and automated archival backups.
+* See [tls-route-provisioner/README.md](./tls-route-provisioner/README.md) for detailed inputs and usage.
+
+### 3. Deployer (`.github/workflows/.deployer.yml`)
 A reusable workflow that manages Helm and Template-based application deployments to OpenShift. It configures variables, handles release/tag naming conventions, and automates target environment promotions.
 
 #### Example Usage:
