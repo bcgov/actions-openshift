@@ -1,0 +1,131 @@
+name: "OpenShift TLS Vanity Route Provisioner"
+description: "Dynamically provisions a secure Vanity Route in OpenShift with cryptographic pre-validation and automated archival backups."
+inputs:
+  vanity_url:
+    description: "The custom vanity URL host (e.g., myapp.bcgov.ca)"
+    required: true
+  route_name:
+    description: "The name of the OpenShift route to create (e.g., myapp-prod-frontend-vanity)"
+    required: true
+  target_service:
+    description: "The name of the OpenShift service to route traffic to"
+    required: true
+  tls_certificate:
+    description: "The public TLS certificate"
+    required: true
+  tls_private_key:
+    description: "The private TLS key"
+    required: true
+  tls_ca_certificate:
+    description: "The CA certificate bundle (optional)"
+    required: false
+    default: ""
+  oc_namespace:
+    description: "OpenShift namespace"
+    required: true
+  oc_server:
+    description: "OpenShift server URL"
+    required: true
+  oc_token:
+    description: "OpenShift token"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Cryptographic Pre-Validation
+      shell: bash
+      env:
+        TLS_CERT: ${{ inputs.tls_certificate }}
+        TLS_KEY: ${{ inputs.tls_private_key }}
+      run: |
+        echo "Validating cryptographic binding between certificate and private key..."
+        
+        echo "$TLS_CERT" > /tmp/cert.pem
+        echo "$TLS_KEY" > /tmp/key.pem
+        
+        CERT_MOD=$(openssl x509 -noout -modulus -in /tmp/cert.pem 2>/dev/null)
+        KEY_MOD=$(openssl rsa -noout -modulus -in /tmp/key.pem 2>/dev/null)
+        
+        if [ -z "$CERT_MOD" ] || [ -z "$KEY_MOD" ] || [ "$CERT_MOD" != "$KEY_MOD" ]; then
+          echo "::error::The provided TLS certificate and private key are either invalid or do not mathematically match."
+          exit 1
+        fi
+
+    - name: Configure OpenShift Connection
+      shell: bash
+      run: |
+        kubectl config set-cluster cluster --server=${{ inputs.oc_server }} --insecure-skip-tls-verify=true > /dev/null
+        kubectl config set-credentials user --token=${{ inputs.oc_token }} > /dev/null
+        kubectl config set-context context --cluster=cluster --user=user --namespace=${{ inputs.oc_namespace }} > /dev/null
+        kubectl config use-context context > /dev/null
+
+    - name: Automated Archival Backup
+      shell: bash
+      run: |
+        ROUTE_NAME="${{ inputs.route_name }}"
+        
+        if kubectl get route "$ROUTE_NAME" > /dev/null 2>&1; then
+          echo "Existing route found. Archiving working certificates..."
+          
+          OLD_CERT=$(kubectl get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.certificate}')
+          OLD_KEY=$(kubectl get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.key}')
+          
+          if [ -n "$OLD_KEY" ]; then
+            CERT_HASH=$(echo "$OLD_CERT" | md5sum | cut -d' ' -f1)
+            BACKUP_NAME="${ROUTE_NAME}-backup-${CERT_HASH:0:8}"
+            
+            kubectl create secret generic "$BACKUP_NAME" \
+              --from-literal=tls.crt="$OLD_CERT" \
+              --from-literal=tls.key="$OLD_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+              
+            echo "Certificates archived to secret: $BACKUP_NAME"
+          fi
+        else
+          echo "No existing route found. Skipping archival backup."
+        fi
+
+    - name: Provision Vanity Route
+      shell: bash
+      env:
+        VANITY_URL: ${{ inputs.vanity_url }}
+        ROUTE_NAME: ${{ inputs.route_name }}
+        TARGET_SERVICE: ${{ inputs.target_service }}
+        TLS_CERT: ${{ inputs.tls_certificate }}
+        TLS_KEY: ${{ inputs.tls_private_key }}
+        TLS_CA: ${{ inputs.tls_ca_certificate }}
+      run: |
+        echo "Dynamically generating and deploying OpenShift Route..."
+        
+        cat <<EOF > route.yml
+        apiVersion: route.openshift.io/v1
+        kind: Route
+        metadata:
+          name: $ROUTE_NAME
+          labels:
+            app: $TARGET_SERVICE
+        spec:
+          host: $VANITY_URL
+          to:
+            kind: Service
+            name: $TARGET_SERVICE
+            weight: 100
+          tls:
+            termination: edge
+            insecureEdgeTerminationPolicy: Redirect
+            certificate: |
+        $(echo "$TLS_CERT" | sed 's/^/      /')
+            key: |
+        $(echo "$TLS_KEY" | sed 's/^/      /')
+        EOF
+        
+        # Remove leading spaces from the cat here-doc block
+        sed -i 's/^        //' route.yml
+        
+        if [ -n "$TLS_CA" ]; then
+          echo "  caCertificate: |" >> route.yml
+          echo "$TLS_CA" | sed 's/^/    /' >> route.yml
+        fi
+
+        kubectl apply -f route.yml
