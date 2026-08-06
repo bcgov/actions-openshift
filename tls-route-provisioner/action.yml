@@ -1,3 +1,21 @@
+# ==============================================================================
+# ARCHITECTURE DECISION RECORD: DO NOT CONVERT THIS ACTION TO JAVASCRIPT
+# ==============================================================================
+# While BC Gov is standardizing on JavaScript/TypeScript for GitHub Actions, 
+# this specific action MUST remain a Composite Bash action. 
+#
+# Rationale:
+# 1. Cryptography: We rely on the natively-installed `openssl` binary for RSA 
+#    modulus extraction and matching. Re-implementing this in Node.js requires 
+#    importing custom crypto libraries and writing complex parsing logic, which 
+#    is inherently risky and less audited than OpenSSL.
+# 2. Kubernetes API: We rely on the natively-installed `kubectl` binary to 
+#    interact with OpenShift. Re-implementing this in JS would require bundling 
+#    the massive `@kubernetes/client-node` SDK, compiling TypeScript, and 
+#    building complex authentication payloads that `kubectl` handles flawlessly.
+#
+# For infrastructure CLI orchestration, Bash remains the superior and safer tool.
+# ==============================================================================
 name: "OpenShift TLS Vanity Route Provisioner"
 description: "Dynamically provisions a secure Vanity Route in OpenShift with cryptographic pre-validation and automated archival backups."
 inputs:
