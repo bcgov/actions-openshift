@@ -70,33 +70,34 @@ runs:
           exit 1
         fi
 
+    - name: Install OpenShift CLI
+      uses: bcgov/action-oc-runner@main
+
     - name: Configure OpenShift Connection
       shell: bash
       run: |
-        kubectl config set-cluster cluster --server=${{ inputs.oc_server }} --insecure-skip-tls-verify=true > /dev/null
-        kubectl config set-credentials user --token=${{ inputs.oc_token }} > /dev/null
-        kubectl config set-context context --cluster=cluster --user=user --namespace=${{ inputs.oc_namespace }} > /dev/null
-        kubectl config use-context context > /dev/null
+        oc login --server=${{ inputs.oc_server }} --token=${{ inputs.oc_token }} --insecure-skip-tls-verify=true > /dev/null
+        oc project ${{ inputs.oc_namespace }} > /dev/null
 
     - name: Automated Archival Backup
       shell: bash
       run: |
         ROUTE_NAME="${{ inputs.route_name }}"
         
-        if kubectl get route "$ROUTE_NAME" > /dev/null 2>&1; then
+        if oc get route "$ROUTE_NAME" > /dev/null 2>&1; then
           echo "Existing route found. Archiving working certificates..."
           
-          OLD_CERT=$(kubectl get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.certificate}')
-          OLD_KEY=$(kubectl get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.key}')
+          OLD_CERT=$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.certificate}')
+          OLD_KEY=$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.key}')
           
           if [ -n "$OLD_KEY" ]; then
             CERT_HASH=$(echo "$OLD_CERT" | md5sum | cut -d' ' -f1)
             BACKUP_NAME="${ROUTE_NAME}-backup-${CERT_HASH:0:8}"
             
-            kubectl create secret generic "$BACKUP_NAME" \
+            oc create secret generic "$BACKUP_NAME" \
               --from-literal=tls.crt="$OLD_CERT" \
               --from-literal=tls.key="$OLD_KEY" \
-              --dry-run=client -o yaml | kubectl apply -f -
+              --dry-run=client -o yaml | oc apply -f -
               
             echo "Certificates archived to secret: $BACKUP_NAME"
           fi
@@ -146,4 +147,4 @@ runs:
           echo "$TLS_CA" | sed 's/^/    /' >> route.yml
         fi
 
-        kubectl apply -f route.yml
+        oc apply -f route.yml
