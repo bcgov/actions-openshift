@@ -45,3 +45,4 @@ jobs:
 | `oc_namespace` | OpenShift namespace | Yes | |
 | `oc_server` | OpenShift server URL | Yes | |
 | `oc_token` | OpenShift token | Yes | |
+| `dry_run` | If true, skips cluster connection and only validates cryptography and YAML | No | `false` |

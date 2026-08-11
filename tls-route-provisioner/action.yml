@@ -48,6 +48,10 @@ inputs:
   oc_token:
     description: "OpenShift token"
     required: true
+  dry_run:
+    description: "If true, skips OpenShift connection and only validates cryptography and YAML generation"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -72,15 +76,18 @@ runs:
         fi
 
     - name: Install OpenShift CLI
+      if: ${{ inputs.dry_run != 'true' }}
       uses: bcgov/action-oc-runner@main
 
     - name: Configure OpenShift Connection
+      if: ${{ inputs.dry_run != 'true' }}
       shell: bash
       run: |
         oc login --server=${{ inputs.oc_server }} --token=${{ inputs.oc_token }} --insecure-skip-tls-verify=true > /dev/null
         oc project ${{ inputs.oc_namespace }} > /dev/null
 
     - name: Automated Archival Backup
+      if: ${{ inputs.dry_run != 'true' }}
       shell: bash
       run: |
         ROUTE_NAME="${{ inputs.route_name }}"
@@ -148,4 +155,11 @@ runs:
           echo "$TLS_CA" | sed 's/^/    /' >> route.yml
         fi
 
-        oc apply -f route.yml
+        if [ "${{ inputs.dry_run }}" == "true" ]; then
+          echo "DRY RUN: Skipping OpenShift apply. Generated YAML payload:"
+          echo "---"
+          cat route.yml
+          echo "---"
+        else
+          oc apply -f route.yml
+        fi

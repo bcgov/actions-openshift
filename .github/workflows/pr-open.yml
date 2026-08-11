@@ -1,0 +1,46 @@
+name: PR
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-tls-route-provisioner:
+    name: Test TLS Route Provisioner
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Generate Dummy Certificates
+        run: |
+          # Generate a self-signed cert and key for testing
+          openssl req -x509 -newkey rsa:4096 -keyout /tmp/key.pem -out /tmp/cert.pem -days 365 -nodes -subj "/CN=myapp.bcgov.ca"
+          
+          # We export them to GITHUB_ENV so the action can use them
+          echo "DUMMY_CERT<<EOF" >> $GITHUB_ENV
+          cat /tmp/cert.pem >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          
+          echo "DUMMY_KEY<<EOF" >> $GITHUB_ENV
+          cat /tmp/key.pem >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Test Action (Dry Run)
+        uses: ./tls-route-provisioner
+        with:
+          vanity_url: "myapp.bcgov.ca"
+          target_service: "my-test-service"
+          route_name: "my-test-route"
+          tls_certificate: ${{ env.DUMMY_CERT }}
+          tls_private_key: ${{ env.DUMMY_KEY }}
+          oc_namespace: "dummy-namespace"
+          oc_server: "https://api.dummy.openshift.com:6443"
+          oc_token: "dummy-token"
+          dry_run: "true"
