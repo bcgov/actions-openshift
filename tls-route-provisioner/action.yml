@@ -109,9 +109,10 @@ runs:
             
             oc create secret generic "$BACKUP_NAME" \
               --from-literal=tls.crt="$OLD_CERT" \
-              --from-literal=tls.key="$OLD_KEY" \
-              --dry-run=client -o yaml | oc apply -f -
+              --from-literal=tls.key="$OLD_KEY"
               
+            oc label secret "$BACKUP_NAME" backup-type=vanity-tls app="$TARGET_SERVICE"
+            
             echo "Certificates archived to secret: $BACKUP_NAME"
           fi
         else
