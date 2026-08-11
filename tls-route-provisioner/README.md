@@ -46,4 +46,4 @@ jobs:
 | `oc_server` | OpenShift server URL | Yes | |
 | `oc_token` | OpenShift token | Yes | |
 | `dry_run` | If true, skips cluster connection and only validates cryptography and YAML (note: `oc_*` inputs are still required by the action interface) | No | `false` |
-| `insecure_skip_tls_verify` | If true, disables server certificate validation for OpenShift API connection | No | `false` |
+| `insecure_skip_tls_verify` | If true, disables server certificate validation for OpenShift API connection | No | `true` |
