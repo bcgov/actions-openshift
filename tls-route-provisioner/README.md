@@ -7,8 +7,8 @@ Instead of carrying a dedicated OpenShift Template for vanity routing in your re
 
 It provides three massive architectural safety nets:
 1. **Cryptographic Validation (Fail-Fast)**: Uses `openssl` to mathematically validate that your private key matches your certificate *before* talking to OpenShift. This physically prevents a garbage secret from taking your live PROD route offline ("dead-in-place").
-2. **Automated Archival Backups**: Before overwriting any existing route, it reaches into OpenShift, extracts the live working certificates, and snapshots them into a permanent OpenShift `Secret` (named using a hash of the certificate to prevent secret sprawl). You will never permanently lose a working certificate due to a GitHub Secret overwrite.
-3. **No OpenShift Templates Required**: The action dynamically generates the `route.openshift.io/v1` YAML manifest on the fly inside the runner.
+2. **Automated Archival Backups**: Before overwriting any existing route, it reaches into OpenShift, extracts the live working certificates, and snapshots them into a permanent OpenShift `Secret` (named using a hash of the certificate to prevent secret sprawl). You will never permanently lose a working certificate due to a GitHub Secret overwrite. Backups are automatically labeled with `backup-type=vanity-tls` and `app=$target_service` for easy lifecycle management/sweeping by cleanup jobs.
+3. **No OpenShift Templates Required**: The action dynamically generates the `route.openshift.io/v1` YAML manifest on the fly inside the runner. Note: The generated Route hardcodes the TLS termination policy to `edge` (with `insecureEdgeTerminationPolicy: Redirect`), making it ideal for frontend applications.
 
 ## Usage
 
