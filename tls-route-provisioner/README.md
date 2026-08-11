@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: Provision Vanity Route
         if: ${{ inputs.vanity_url != '' }}
-        uses: bcgov/actions-openshift/tls-route-provisioner@main
+        uses: bcgov/actions-openshift/tls-route-provisioner@v1
         with:
           vanity_url: ${{ inputs.vanity_url }}
           target_service: "my-app-prod-frontend"
@@ -45,4 +45,5 @@ jobs:
 | `oc_namespace` | OpenShift namespace | Yes | |
 | `oc_server` | OpenShift server URL | Yes | |
 | `oc_token` | OpenShift token | Yes | |
-| `dry_run` | If true, skips cluster connection and only validates cryptography and YAML | No | `false` |
+| `dry_run` | If true, skips cluster connection and only validates cryptography and YAML (note: `oc_*` inputs are still required by the action interface) | No | `false` |
+| `insecure_skip_tls_verify` | If true, disables server certificate validation for OpenShift API connection | No | `false` |

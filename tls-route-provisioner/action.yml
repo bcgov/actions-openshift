@@ -52,6 +52,10 @@ inputs:
     description: "If true, skips OpenShift connection and only validates cryptography and YAML generation"
     required: false
     default: "false"
+  insecure_skip_tls_verify:
+    description: "If true, disables server certificate validation for OpenShift API connection"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -64,13 +68,14 @@ runs:
       run: |
         echo "Validating cryptographic binding between certificate and private key..."
         
+        umask 077
         echo "$TLS_CERT" > /tmp/cert.pem
         echo "$TLS_KEY" > /tmp/key.pem
         
-        CERT_MOD=$(openssl x509 -noout -modulus -in /tmp/cert.pem 2>/dev/null)
-        KEY_MOD=$(openssl rsa -noout -modulus -in /tmp/key.pem 2>/dev/null)
+        CERT_PUB_SHA=$(openssl x509 -in /tmp/cert.pem -noout -pubkey 2>/dev/null | openssl pkey -pubin -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)
+        KEY_PUB_SHA=$(openssl pkey -in /tmp/key.pem -pubout -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)
         
-        if [ -z "$CERT_MOD" ] || [ -z "$KEY_MOD" ] || [ "$CERT_MOD" != "$KEY_MOD" ]; then
+        if [ -z "$CERT_PUB_SHA" ] || [ -z "$KEY_PUB_SHA" ] || [ "$CERT_PUB_SHA" != "$KEY_PUB_SHA" ]; then
           echo "::error::The provided TLS certificate and private key are either invalid or do not mathematically match."
           exit 1
         fi
@@ -83,7 +88,7 @@ runs:
       if: ${{ inputs.dry_run != 'true' }}
       shell: bash
       run: |
-        oc login --server=${{ inputs.oc_server }} --token=${{ inputs.oc_token }} --insecure-skip-tls-verify=true > /dev/null
+        oc login --server=${{ inputs.oc_server }} --token=${{ inputs.oc_token }} --insecure-skip-tls-verify=${{ inputs.insecure_skip_tls_verify }} > /dev/null
         oc project ${{ inputs.oc_namespace }} > /dev/null
 
     - name: Automated Archival Backup
@@ -99,7 +104,7 @@ runs:
           OLD_KEY=$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.key}')
           
           if [ -n "$OLD_KEY" ]; then
-            CERT_HASH=$(echo "$OLD_CERT" | md5sum | cut -d' ' -f1)
+            CERT_HASH=$(printf '%s' "$OLD_CERT" | sha256sum | cut -d' ' -f1)
             BACKUP_NAME="${ROUTE_NAME}-backup-${CERT_HASH:0:8}"
             
             oc create secret generic "$BACKUP_NAME" \
@@ -151,8 +156,8 @@ runs:
         sed -i 's/^        //' route.yml
         
         if [ -n "$TLS_CA" ]; then
-          echo "  caCertificate: |" >> route.yml
-          echo "$TLS_CA" | sed 's/^/    /' >> route.yml
+          echo "    caCertificate: |" >> route.yml
+          echo "$TLS_CA" | sed 's/^/      /' >> route.yml
         fi
 
         if [ "${{ inputs.dry_run }}" == "true" ]; then
