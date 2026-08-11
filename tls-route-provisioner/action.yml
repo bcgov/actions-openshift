@@ -55,7 +55,7 @@ inputs:
   insecure_skip_tls_verify:
     description: "If true, disables server certificate validation for OpenShift API connection"
     required: false
-    default: "false"
+    default: "true"
 
 runs:
   using: "composite"
