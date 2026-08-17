@@ -23,11 +23,54 @@ For each `<basename>.json` × each component, the action upserts an alert named 
 
 ## Prerequisites
 
-1. **SysdigTeam provisioned in your tools namespace.** The `SysdigTeam` CRD (`ops.gov.bc.ca/v1alpha1`) creates a Sysdig team scoped to your project's four namespaces and materializes an API token Secret. Manifest lives in `openshift/sysdig-team.yaml` in the consuming repo.
-2. **`SYSDIG_API_TOKEN` set as a GitHub repo secret**, copied from the in-cluster Secret created in step 1.
-3. **Alert templates committed to your repo** under `monitoring/alerts/` (see [Alert templates](#alert-templates) below for the schema and a starter file).
+### 1. SysdigTeam provisioned in your TOOLS namespace
 
-Adding/removing alert recipients is done by editing `spec.team.users[]` in the SysdigTeam CR — the action re-syncs the email channel on every deploy.
+**Do this first.** Until the `SysdigTeam` CR exists and has reconciled, nobody on the team can log into Sysdig at all, and there is no API token to pull — so steps 2 and 3 are blocked on it.
+
+The `SysdigTeam` CRD (`ops.gov.bc.ca/v1alpha1`) is reconciled by the platform's monitoring operator. It creates a Sysdig team scoped to your project set's four namespaces, grants the listed users access to that team, and materializes an API token Secret in the TOOLS namespace.
+
+Commit the manifest as `openshift/sysdig-team.yaml` and apply it to `<licenseplate>-tools` — the CR belongs in the **tools** namespace, not `-prod`:
+
+```yaml
+apiVersion: ops.gov.bc.ca/v1alpha1
+kind: SysdigTeam
+metadata:
+  name: <licenseplate>-sysdigteam
+  namespace: <licenseplate>-tools
+spec:
+  team:
+    description: The Sysdig Team for the OpenShift Project Set <licenseplate>
+    users:
+      - name: first.last@gov.bc.ca
+        role: ROLE_TEAM_MANAGER
+      - name: team-shared-account@gov.bc.ca
+        role: ROLE_TEAM_MANAGER
+      - name: another.dev@gov.bc.ca
+        role: ROLE_TEAM_MANAGER
+```
+
+> **`role` must be `ROLE_TEAM_MANAGER` for every user — the other role values do not work.**
+> This applies even to members who only need to read dashboards or receive alert email. Don't try to scope people down with a lesser role; use `ROLE_TEAM_MANAGER` for everyone in `spec.team.users[]`.
+
+Note that the live object on cluster will carry a finalizer (`monitoring.devops.gov.bc.ca/finalizer`), `metadata.managedFields`, and a `status` block that the operator writes — none of that belongs in the manifest you commit. Author only `metadata.name`, `metadata.namespace`, and `spec`.
+
+Confirm the operator reconciled before moving on:
+
+```bash
+oc -n <licenseplate>-tools get sysdigteam <licenseplate>-sysdigteam -o yaml
+```
+
+A healthy CR has `status.monitorTeamID` and `status.secureTeamID` populated and a passing `status.conditions` entry. Team members can then log in to <https://app.sysdigcloud.com> and see the team.
+
+### 2. `SYSDIG_API_TOKEN` set as a GitHub repo secret
+
+Copy it from the in-cluster Secret created in step 1. The token is team-scoped, so it is only as broad as the team the CR provisioned.
+
+### 3. Alert templates committed to your repo
+
+Under `monitoring/alerts/` — see [Alert templates](#alert-templates) below for the schema and a starter file.
+
+Adding/removing alert recipients is done by editing `spec.team.users[]` in the SysdigTeam CR (again, `ROLE_TEAM_MANAGER` on each entry) — the action re-syncs the email channel on every deploy.
 
 ## Usage
 
