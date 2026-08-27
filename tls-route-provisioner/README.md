@@ -1,49 +1,72 @@
 # OpenShift TLS Vanity Route Provisioner
 
-Dynamically provisions a secure Vanity Route in OpenShift with cryptographic pre-validation and automated archival backups.
+Provisions an edge-terminated vanity Route with openssl cert/key/host checks and an archival backup of whatever TLS is already on that Route. The GitHub Action is a thin wrapper around `provision.sh`; run that script locally with real PEMs.
 
-## Why Use This Action?
-Instead of carrying a dedicated OpenShift Template for vanity routing in your repository and copy-pasting complex deployment scripts, this composite action natively handles everything.
+The generated Route always uses `termination: edge` and `insecureEdgeTerminationPolicy: Redirect`. Keep the platform `*.apps.gold.devops.gov.bc.ca` Route in place as a second Route to the same Service.
 
-It provides three massive architectural safety nets:
-1. **Cryptographic Validation (Fail-Fast)**: Uses `openssl` to mathematically validate that your private key matches your certificate *before* talking to OpenShift. This physically prevents a garbage secret from taking your live PROD route offline ("dead-in-place").
-2. **Automated Archival Backups**: Before overwriting any existing route, it reaches into OpenShift, extracts the live working certificates, and snapshots them into a permanent OpenShift `Secret` (named using a hash of the certificate to prevent secret sprawl). You will never permanently lose a working certificate due to a GitHub Secret overwrite. Backups are automatically labeled with `backup-type=vanity-tls` and `app=$target_service` for easy lifecycle management/sweeping by cleanup jobs.
-3. **No OpenShift Templates Required**: The action dynamically generates the `route.openshift.io/v1` YAML manifest on the fly inside the runner. Note: The generated Route hardcodes the TLS termination policy to `edge` (with `insecureEdgeTerminationPolicy: Redirect`), making it ideal for frontend applications.
+## Local dry-run (real certs, no GitHub, no cluster)
 
-## Usage
+```bash
+cd tls-route-provisioner
+export VANITY_URL=fam.example.gov.bc.ca
+export ROUTE_NAME=nr-fam-prod-frontend-vanity
+export TARGET_SERVICE=nr-fam-prod-frontend
+export APP=nr-fam-prod          # same app= label your PR-close cleanup uses
+export TLS_CERTIFICATE_FILE=/path/to/cert.pem
+export TLS_PRIVATE_KEY_FILE=/path/to/key.pem
+export TLS_CA_CERTIFICATE_FILE=/path/to/ca.pem   # optional
+export DRY_RUN=true
+./provision.sh
+```
+
+That checks the cert matches the key, covers `$VANITY_URL`, is not expired, and writes `route.yml` (contains the private key; gitignored; not printed). `oc_*` is not required.
+
+To apply from a laptop you already have `oc` on, unset `DRY_RUN` and set `OC_NAMESPACE`, `OC_SERVER`, and `OC_TOKEN`. Prefer applying from the prod GitHub environment so the apply is audited.
+
+## GitHub Actions
+
+Pin a tag or commit SHA, not `@main`. Put the PEMs on the **prod** GitHub environment, not repository secrets, so pull requests cannot read them.
 
 ```yaml
-jobs:
-  deploy:
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Provision Vanity Route
-        if: ${{ inputs.vanity_url != '' }}
-        uses: bcgov/actions-openshift/tls-route-provisioner@v1
-        with:
-          vanity_url: ${{ inputs.vanity_url }}
-          target_service: "my-app-prod-frontend"
-          route_name: "my-app-prod-frontend-vanity"
-          tls_certificate: ${{ secrets.TLS_CERTIFICATE }}
-          tls_private_key: ${{ secrets.TLS_PRIVATE_KEY }}
-          tls_ca_certificate: ${{ secrets.TLS_CA_CERTIFICATE }}
-          oc_namespace: ${{ secrets.OC_NAMESPACE }}
-          oc_server: ${{ vars.OC_SERVER }}
-          oc_token: ${{ secrets.OC_TOKEN }}
+- uses: bcgov/actions-openshift/tls-route-provisioner@v1
+  with:
+    vanity_url: fam.example.gov.bc.ca
+    route_name: myapp-prod-frontend-vanity
+    target_service: myapp-prod-frontend
+    app: myapp-prod
+    tls_certificate: ${{ secrets.TLS_CERTIFICATE }}
+    tls_private_key: ${{ secrets.TLS_PRIVATE_KEY }}
+    tls_ca_certificate: ${{ secrets.TLS_CA_CERTIFICATE }}
+    oc_namespace: ${{ secrets.oc_namespace }}
+    oc_server: ${{ vars.oc_server }}
+    oc_token: ${{ secrets.oc_token }}
 ```
+
+First prod run: add `dry_run: "true"` until the job is green, then drop it.
+
+`app` must be the same label cleanup deletes (`name-zone`, e.g. `nr-fam-prod` or `nr-fam-123`). If omitted it falls back to `target_service`, which will **not** match NR `oc delete -l app=name-zone` and the vanity Route plus backup Secrets will leak.
 
 ## Inputs
 
 | Input | Description | Required | Default |
 | --- | --- | --- | --- |
-| `vanity_url` | The custom vanity URL host (e.g., `myapp.bcgov.ca`) | Yes | |
-| `route_name` | The name of the OpenShift route to create | Yes | |
-| `target_service` | The name of the OpenShift service to route traffic to | Yes | |
-| `tls_certificate` | The public TLS certificate | Yes | |
-| `tls_private_key` | The private TLS key | Yes | |
-| `tls_ca_certificate` | The CA certificate bundle | No | `""` |
-| `oc_namespace` | OpenShift namespace | Yes | |
-| `oc_server` | OpenShift server URL | Yes | |
-| `oc_token` | OpenShift token | Yes | |
-| `dry_run` | If true, skips cluster connection and only validates cryptography and YAML (note: `oc_*` inputs are still required by the action interface) | No | `false` |
-| `insecure_skip_tls_verify` | If true, disables server certificate validation for OpenShift API connection | No | `true` |
+| `vanity_url` | Route host (no `https://`) | Yes | |
+| `route_name` | OpenShift Route name | Yes | |
+| `target_service` | Service to send traffic to | Yes | |
+| `app` | `app=` label for the Route and backup Secrets | No | `target_service` |
+| `tls_certificate` | Leaf (or chain) PEM | Yes | |
+| `tls_private_key` | Private key PEM | Yes | |
+| `tls_ca_certificate` | CA bundle PEM | No | `""` |
+| `oc_namespace` | Namespace | unless `dry_run` | |
+| `oc_server` | API URL | unless `dry_run` | |
+| `oc_token` | Token | unless `dry_run` | |
+| `dry_run` | Validate and write YAML only | No | `false` |
+| `insecure_skip_tls_verify` | Skip API TLS verify | No | `true` |
+
+Local-only env (not GitHub inputs): `TLS_CERTIFICATE_FILE`, `TLS_PRIVATE_KEY_FILE`, `TLS_CA_CERTIFICATE_FILE`, `ROUTE_OUT` (default `route.yml`).
+
+## What it does
+
+1. Fail if the cert and key do not match, the cert is expired, or the cert does not cover `vanity_url` (CN or SAN, including `*.example.gov.bc.ca`).
+2. Unless `dry_run`, snapshot the live Route's TLS into a Secret named `<route>-backup-<sha256-prefix>`, labeled `backup-type=vanity-tls` and `app=<app>`. Re-applying the same cert is a no-op on that Secret.
+3. `oc apply` the generated Route. Private keys are never printed.

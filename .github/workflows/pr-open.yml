@@ -18,29 +18,92 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Generate Dummy Certificates
+      - name: Generate dummy certificates
         run: |
-          # Generate a self-signed cert and key for testing
-          openssl req -x509 -newkey rsa:4096 -keyout /tmp/key.pem -out /tmp/cert.pem -days 365 -nodes -subj "/CN=myapp.bcgov.ca"
-          
-          # We export them to GITHUB_ENV so the action can use them
-          echo "DUMMY_CERT<<EOF" >> $GITHUB_ENV
-          cat /tmp/cert.pem >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-          
-          echo "DUMMY_KEY<<EOF" >> $GITHUB_ENV
-          cat /tmp/key.pem >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          set -euo pipefail
+          openssl req -x509 -newkey rsa:2048 -keyout /tmp/key.pem -out /tmp/cert.pem \
+            -days 30 -nodes -subj "/CN=myapp.bcgov.ca" \
+            -addext "subjectAltName=DNS:myapp.bcgov.ca"
+          openssl req -x509 -newkey rsa:2048 -keyout /tmp/other-key.pem -out /tmp/other.pem \
+            -days 30 -nodes -subj "/CN=other.example"
+          cp /tmp/cert.pem /tmp/ca.pem
+          echo "DUMMY_CERT<<EOF" >> "$GITHUB_ENV"
+          cat /tmp/cert.pem >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+          echo "DUMMY_KEY<<EOF" >> "$GITHUB_ENV"
+          cat /tmp/key.pem >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+          echo "DUMMY_CA<<EOF" >> "$GITHUB_ENV"
+          cat /tmp/ca.pem >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
 
-      - name: Test Action (Dry Run)
+      - name: Script dry-run
+        env:
+          VANITY_URL: myapp.bcgov.ca
+          ROUTE_NAME: my-test-route
+          TARGET_SERVICE: my-test-service
+          APP: my-test-app
+          TLS_CERTIFICATE_FILE: /tmp/cert.pem
+          TLS_PRIVATE_KEY_FILE: /tmp/key.pem
+          TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
+          DRY_RUN: "true"
+          ROUTE_OUT: /tmp/route.yml
+        run: |
+          set -euo pipefail
+          output="$(./tls-route-provisioner/provision.sh 2>&1)" || { echo "$output"; exit 1; }
+          printf '%s\n' "$output"
+          if printf '%s\n' "$output" | grep -qE 'BEGIN (PRIVATE KEY|RSA PRIVATE KEY)'; then
+            echo "provision.sh leaked a private key to stdout/stderr"
+            exit 1
+          fi
+          grep -q '^    caCertificate: |' /tmp/route.yml
+          grep -q '^    certificate: |' /tmp/route.yml
+          grep -q '^    key: |' /tmp/route.yml
+          if grep -q '^  caCertificate:' /tmp/route.yml; then
+            echo "caCertificate was written as a spec sibling"
+            exit 1
+          fi
+
+      - name: Script rejects mismatched key
+        env:
+          VANITY_URL: myapp.bcgov.ca
+          ROUTE_NAME: my-test-route
+          TARGET_SERVICE: my-test-service
+          APP: my-test-app
+          TLS_CERTIFICATE_FILE: /tmp/cert.pem
+          TLS_PRIVATE_KEY_FILE: /tmp/other-key.pem
+          DRY_RUN: "true"
+          ROUTE_OUT: /tmp/route-mismatch.yml
+        run: |
+          if ./tls-route-provisioner/provision.sh; then
+            echo "expected cert/key mismatch to fail"
+            exit 1
+          fi
+
+      - name: Script rejects host mismatch
+        env:
+          VANITY_URL: wrong.example
+          ROUTE_NAME: my-test-route
+          TARGET_SERVICE: my-test-service
+          APP: my-test-app
+          TLS_CERTIFICATE_FILE: /tmp/cert.pem
+          TLS_PRIVATE_KEY_FILE: /tmp/key.pem
+          DRY_RUN: "true"
+          ROUTE_OUT: /tmp/route-host.yml
+        run: |
+          if ./tls-route-provisioner/provision.sh; then
+            echo "expected host mismatch to fail"
+            exit 1
+          fi
+
+      - name: Composite action dry-run
         uses: ./tls-route-provisioner
         with:
-          vanity_url: "myapp.bcgov.ca"
-          target_service: "my-test-service"
-          route_name: "my-test-route"
+          vanity_url: myapp.bcgov.ca
+          target_service: my-test-service
+          route_name: my-test-route
+          app: my-test-app
           tls_certificate: ${{ env.DUMMY_CERT }}
           tls_private_key: ${{ env.DUMMY_KEY }}
-          oc_namespace: "dummy-namespace"
-          oc_server: "https://api.dummy.openshift.com:6443"
-          oc_token: "dummy-token"
+          tls_ca_certificate: ${{ env.DUMMY_CA }}
           dry_run: "true"
