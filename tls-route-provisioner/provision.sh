@@ -77,12 +77,31 @@ if [ "$DRY_RUN" != "true" ]; then
   [ -n "$OC_NAMESPACE" ] || die "OC_NAMESPACE is required unless DRY_RUN=true"
   [ -n "$OC_SERVER" ] || die "OC_SERVER is required unless DRY_RUN=true"
   [ -n "$OC_TOKEN" ] || die "OC_TOKEN is required unless DRY_RUN=true"
-  command -v oc >/dev/null || die "oc is not on PATH (install the OpenShift CLI, or use DRY_RUN=true)"
 fi
 
 umask 077
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
+
+ensure_oc() {
+  if command -v oc >/dev/null 2>&1; then
+    return 0
+  fi
+  [ -n "${GITHUB_ACTIONS:-}" ] || die "oc is not on PATH (install the OpenShift CLI, or use DRY_RUN=true)"
+  echo "Installing oc from the OpenShift client mirror..."
+  local tarball="$WORKDIR/oc.tgz"
+  curl -fsSL -o "$tarball" \
+    "${OC_CLIENT_URL:-https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz}"
+  tar -xzf "$tarball" -C "$WORKDIR" oc
+  PATH="$WORKDIR:$PATH"
+  export PATH
+  command -v oc >/dev/null || die "failed to install oc"
+}
+
+if [ "$DRY_RUN" != "true" ]; then
+  ensure_oc
+fi
+
 CERT_PEM="$WORKDIR/cert.pem"
 KEY_PEM="$WORKDIR/key.pem"
 printf '%s\n' "$TLS_CERTIFICATE" > "$CERT_PEM"

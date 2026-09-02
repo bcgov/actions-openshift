@@ -9,10 +9,13 @@
 #    public-key extraction and matching. Re-implementing this in Node.js
 #    requires custom crypto libraries and PEM parsing, which is inherently
 #    riskier and less audited than OpenSSL.
-# 2. Kubernetes API: We rely on the `oc` binary (installed via
-#    bcgov/action-oc-runner) to interact with OpenShift. Re-implementing this
-#    in JS would require bundling `@kubernetes/client-node` and reconstructing
-#    authentication that `oc` already handles.
+# 2. Kubernetes API: We rely on the `oc` binary. GitHub runners download it
+#    from the OpenShift client mirror; laptops use a local install. We do
+#    not use bcgov/action-oc-runner: that action logs in and checkouts, so
+#    it needs oc_* in `with:` and a GITHUB_TOKEN with contents: read.
+#    Re-implementing this in JS would require bundling
+#    `@kubernetes/client-node` and reconstructing authentication that `oc`
+#    already handles.
 # 3. Local testing: the same bash (`provision.sh`) is the GitHub entrypoint
 #    and the laptop dry-run path. A JS action would not be runnable with a
 #    PEM on disk and no Node toolchain.
@@ -69,10 +72,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Install OpenShift CLI
-      if: ${{ inputs.dry_run != 'true' }}
-      uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
-
     - name: Provision vanity route
       shell: bash
       env:

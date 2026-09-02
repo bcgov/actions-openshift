@@ -25,7 +25,7 @@ To apply from a laptop you already have `oc` on, unset `DRY_RUN` and set `OC_NAM
 
 ## GitHub Actions
 
-Pin a tag or commit SHA, not `@main`. Put the PEMs on the **prod** GitHub environment, not repository secrets, so pull requests cannot read them.
+Pin a tag or commit SHA, not `@main`. Callers can keep `permissions: {}`; this action does not checkout and does not use `GITHUB_TOKEN`. On the runner it downloads `oc` itself, then logs in with `oc_server` / `oc_token`. Put the PEMs on the **prod** GitHub environment, not repository secrets, so pull requests cannot read them.
 
 ```yaml
 - uses: bcgov/actions-openshift/tls-route-provisioner@v1
