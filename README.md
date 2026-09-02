@@ -8,8 +8,8 @@ Cleans up Helm releases, labeled resources, and PVCs in a target OpenShift names
 * See [cleanup-pr/README.md](./cleanup-pr/README.md) for detailed inputs and usage.
 
 ### 2. [Route TLS](./route-tls) (Composite Action)
-Applies an OpenShift Route with a custom TLS certificate (openssl checks and archival backups). A vanity hostname is one use; any Route that needs its own PEMs is the same call.
-* See [route-tls/README.md](./route-tls/README.md) for detailed inputs and usage.
+GitHub Action that applies an OpenShift Route with a custom TLS certificate (openssl checks and archival backups).
+* See [route-tls/README.md](./route-tls/README.md) for secrets, inputs, and usage.
 
 ### 3. Deployer (`.github/workflows/.deployer.yml`)
 A reusable workflow that manages Helm and Template-based application deployments to OpenShift. It configures variables, handles release/tag naming conventions, and automates target environment promotions.
