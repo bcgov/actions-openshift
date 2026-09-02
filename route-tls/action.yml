@@ -22,14 +22,14 @@
 #
 # For infrastructure CLI orchestration, Bash remains the superior and safer tool.
 # ==============================================================================
-name: "OpenShift TLS Vanity Route Provisioner"
-description: "Provisions a secure vanity Route in OpenShift with cert/key validation and archival backups. Same script runs locally."
+name: "OpenShift Route TLS"
+description: "Applies an OpenShift Route with custom TLS (cert/key/CA), openssl checks, and archival backups. Same script runs locally."
 inputs:
-  vanity_url:
-    description: "The custom vanity URL host (e.g. myapp.gov.bc.ca). Hostname only, no scheme."
+  hostname:
+    description: "Route spec.host (e.g. myapp.gov.bc.ca). Hostname only, no scheme."
     required: true
   route_name:
-    description: "The OpenShift Route name (e.g. myapp-prod-frontend-vanity)"
+    description: "The OpenShift Route name (e.g. myapp-prod-frontend-tls)"
     required: true
   target_service:
     description: "The OpenShift Service to send traffic to"
@@ -72,10 +72,10 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Provision vanity route
+    - name: Apply route TLS
       shell: bash
       env:
-        VANITY_URL: ${{ inputs.vanity_url }}
+        ROUTE_HOST: ${{ inputs.hostname }}
         ROUTE_NAME: ${{ inputs.route_name }}
         TARGET_SERVICE: ${{ inputs.target_service }}
         APP: ${{ inputs.app }}

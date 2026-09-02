@@ -70,8 +70,8 @@ web_modules/
 .env.*
 !.env.example
 
-# Local tls-route-provisioner dry-run output (contains the private key)
-tls-route-provisioner/route.yml
+# Local route-tls dry-run output (contains the private key)
+route-tls/route.yml
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

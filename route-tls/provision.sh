@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# OpenShift TLS vanity route provisioner.
-# GitHub Action wrapper: action.yml. Run this file locally with the same env vars.
+# OpenShift Route TLS. GitHub Action wrapper: action.yml.
+# Run this file locally with the same env vars.
 set -euo pipefail
 
 DRY_RUN="${DRY_RUN:-false}"
@@ -61,9 +61,9 @@ load_file TLS_CERTIFICATE TLS_CERTIFICATE_FILE
 load_file TLS_PRIVATE_KEY TLS_PRIVATE_KEY_FILE
 load_file TLS_CA_CERTIFICATE TLS_CA_CERTIFICATE_FILE
 
-[ -n "${VANITY_URL:-}" ] || die "VANITY_URL is required (the Route host, not a URL)"
-case "$VANITY_URL" in
-  *://*) die "VANITY_URL must be a hostname (got '$VANITY_URL'). Drop the scheme." ;;
+[ -n "${ROUTE_HOST:-}" ] || die "ROUTE_HOST is required (the Route host, not a URL)"
+case "$ROUTE_HOST" in
+  *://*) die "ROUTE_HOST must be a hostname (got '$ROUTE_HOST'). Drop the scheme." ;;
 esac
 [ -n "${ROUTE_NAME:-}" ] || die "ROUTE_NAME is required"
 [ -n "${TARGET_SERVICE:-}" ] || die "TARGET_SERVICE is required"
@@ -121,8 +121,8 @@ if ! openssl x509 -in "$CERT_PEM" -noout -checkend 1209600 >/dev/null 2>&1; then
   echo "warning: certificate expires within 14 days"
 fi
 
-if ! cert_covers_host "$CERT_PEM" "$VANITY_URL"; then
-  die "Certificate does not cover host '$VANITY_URL' (CN/SAN mismatch)."
+if ! cert_covers_host "$CERT_PEM" "$ROUTE_HOST"; then
+  die "Certificate does not cover host '$ROUTE_HOST' (CN/SAN mismatch)."
 fi
 
 openssl x509 -in "$CERT_PEM" -noout -subject -issuer -dates
@@ -143,7 +143,7 @@ metadata:
   labels:
     app: ${APP}
 spec:
-  host: ${VANITY_URL}
+  host: ${ROUTE_HOST}
   to:
     kind: Service
     name: ${TARGET_SERVICE}
@@ -191,7 +191,7 @@ if oc get route "$ROUTE_NAME" >/dev/null 2>&1; then
       oc create secret generic "$BACKUP_NAME" \
         --from-literal=tls.crt="$OLD_CERT" \
         --from-literal=tls.key="$OLD_KEY"
-      oc label secret "$BACKUP_NAME" backup-type=vanity-tls app="$APP"
+      oc label secret "$BACKUP_NAME" backup-type=route-tls app="$APP"
       echo "Certificates archived to secret: $BACKUP_NAME"
     fi
   fi
@@ -200,4 +200,4 @@ else
 fi
 
 oc apply -f "$ROUTE_OUT"
-echo "Applied route $ROUTE_NAME -> $TARGET_SERVICE (host $VANITY_URL)"
+echo "Applied route $ROUTE_NAME -> $TARGET_SERVICE (host $ROUTE_HOST)"

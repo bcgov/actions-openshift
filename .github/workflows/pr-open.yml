@@ -13,8 +13,8 @@ concurrency:
 permissions: {}
 
 jobs:
-  test-tls-route-provisioner:
-    name: Test TLS Route Provisioner
+  test-route-tls:
+    name: Test Route TLS
     permissions: {}
     runs-on: ubuntu-24.04
     steps:
@@ -44,7 +44,7 @@ jobs:
 
       - name: Script dry-run
         env:
-          VANITY_URL: myapp.bcgov.ca
+          ROUTE_HOST: myapp.bcgov.ca
           ROUTE_NAME: my-test-route
           TARGET_SERVICE: my-test-service
           APP: my-test-app
@@ -55,7 +55,7 @@ jobs:
           ROUTE_OUT: /tmp/route.yml
         run: |
           set -euo pipefail
-          output="$(./tls-route-provisioner/provision.sh 2>&1)" || { echo "$output"; exit 1; }
+          output="$(./route-tls/provision.sh 2>&1)" || { echo "$output"; exit 1; }
           printf '%s\n' "$output"
           if printf '%s\n' "$output" | grep -qE 'BEGIN (PRIVATE KEY|RSA PRIVATE KEY)'; then
             echo "provision.sh leaked a private key to stdout/stderr"
@@ -71,7 +71,7 @@ jobs:
 
       - name: Script rejects mismatched key
         env:
-          VANITY_URL: myapp.bcgov.ca
+          ROUTE_HOST: myapp.bcgov.ca
           ROUTE_NAME: my-test-route
           TARGET_SERVICE: my-test-service
           APP: my-test-app
@@ -80,14 +80,14 @@ jobs:
           DRY_RUN: "true"
           ROUTE_OUT: /tmp/route-mismatch.yml
         run: |
-          if ./tls-route-provisioner/provision.sh; then
+          if ./route-tls/provision.sh; then
             echo "expected cert/key mismatch to fail"
             exit 1
           fi
 
       - name: Script rejects host mismatch
         env:
-          VANITY_URL: wrong.example
+          ROUTE_HOST: wrong.example
           ROUTE_NAME: my-test-route
           TARGET_SERVICE: my-test-service
           APP: my-test-app
@@ -96,15 +96,15 @@ jobs:
           DRY_RUN: "true"
           ROUTE_OUT: /tmp/route-host.yml
         run: |
-          if ./tls-route-provisioner/provision.sh; then
+          if ./route-tls/provision.sh; then
             echo "expected host mismatch to fail"
             exit 1
           fi
 
       - name: Composite action dry-run
-        uses: ./tls-route-provisioner
+        uses: ./route-tls
         with:
-          vanity_url: myapp.bcgov.ca
+          hostname: myapp.bcgov.ca
           target_service: my-test-service
           route_name: my-test-route
           app: my-test-app
