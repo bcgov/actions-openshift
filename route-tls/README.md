@@ -8,15 +8,26 @@ Pin a tag or commit SHA, not `@main`. Callers can keep `permissions: {}`; this a
 
 ## GitHub secrets
 
-Put the PEMs on a **prod** GitHub Environment (not repository secrets), so pull-request jobs cannot read them. Typical names:
+Put the PEMs on a **prod** GitHub Environment (not repository secrets), so pull-request jobs cannot read them. The job that calls this action must use that environment. OpenShift login is unchanged: `oc_namespace` and `oc_token` from the environment, `oc_server` from variables.
 
-| Secret | What to paste |
-| --- | --- |
-| `TLS_CERTIFICATE` | Leaf certificate PEM (or leaf + chain) |
-| `TLS_PRIVATE_KEY` | Private key PEM |
-| `TLS_CA_CERTIFICATE` | Intermediate CA bundle PEM (optional; omit the public root) |
+NR cert packages from Entrust look like `app.example.gov.bc.ca/` and contain a leaf, a key, an issuing CA, Sectigo R46, and USERTrust. Map them like this:
 
-The job that calls this action must use `environment: prod` (or whichever environment holds those secrets). You still pass OpenShift login as today: `oc_namespace` and `oc_token` from that environment, `oc_server` from variables.
+| Secret | File in the package | Notes |
+| --- | --- | --- |
+| `TLS_CERTIFICATE` | `<host>.pem` | The leaf only (CN/SAN is `hostname`). Do not paste the chain in here. |
+| `TLS_PRIVATE_KEY` | `<host>.key` | Unencrypted PKCS#8 (`BEGIN PRIVATE KEY`). Never commit this. |
+| `TLS_CA_CERTIFICATE` | Concatenate **Entrust OV TLS Issuing RSA CA 2.pem** then **Sectigo Public Server Authentication Root R46.pem** | Intermediates the router must present so clients can chain to USERTrust. |
+
+Leave out **USERTrust RSA Certification Authority.pem**. That is a public root; browsers already have it. Leave out `<host>.csr`; the request is finished.
+
+Build the CA secret with:
+
+```bash
+cat "Entrust OV TLS Issuing RSA CA 2.pem" \
+    "Sectigo Public Server Authentication Root R46.pem"
+```
+
+Paste that combined PEM into `TLS_CA_CERTIFICATE`. Two `BEGIN CERTIFICATE` blocks is correct. One (issuing CA only) is not enough for clients that only trust USERTrust.
 
 ## Usage
 
