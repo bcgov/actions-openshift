@@ -8,7 +8,7 @@ Pin a tag or commit SHA, not `@main`. Callers can keep `permissions: {}`; this a
 
 ## GitHub secrets
 
-Put the PEMs on a **prod** GitHub Environment (not repository secrets), so pull-request jobs cannot read them. The job that calls this action must use that environment. OpenShift login is unchanged: `oc_namespace` and `oc_token` from the environment, `oc_server` from variables.
+Put the PEMs on a **prod** GitHub Environment (not repository secrets), so pull-request jobs cannot read them. The job that calls this action must use that environment. OpenShift login uses environment secrets `OC_NAMESPACE` and `OC_TOKEN`, and variable `OC_SERVER`.
 
 NR cert packages from Entrust look like `app.example.gov.bc.ca/` and contain a leaf, a key, an issuing CA, Sectigo R46, and USERTrust. Map them like this:
 
@@ -39,9 +39,9 @@ Paste that combined PEM into `TLS_CA_CERTIFICATE`. Two `BEGIN CERTIFICATE` block
     tls_certificate: ${{ secrets.TLS_CERTIFICATE }}
     tls_private_key: ${{ secrets.TLS_PRIVATE_KEY }}
     tls_ca_certificate: ${{ secrets.TLS_CA_CERTIFICATE }}
-    oc_namespace: ${{ secrets.oc_namespace }}
-    oc_server: ${{ vars.oc_server }}
-    oc_token: ${{ secrets.oc_token }}
+    oc_namespace: ${{ secrets.OC_NAMESPACE }}
+    oc_server: ${{ vars.OC_SERVER }}
+    oc_token: ${{ secrets.OC_TOKEN }}
 ```
 
 `route_name` defaults to `<repository>-vanity-url` (e.g. `nr-fam-vanity-url`) so PR-close `app=` sweeps do not delete it. Override `route_name` if you already have a name. The Route is not labeled `app`.
