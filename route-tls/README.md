@@ -48,7 +48,7 @@ First prod run: add `dry_run: "true"` until the job is green, then drop it.
 | `route_name` | OpenShift Route name | No | `<repo>-vanity-url` |
 | `tls_certificate` | Leaf (or chain) PEM | Yes | |
 | `tls_private_key` | Private key PEM | Yes | |
-| `tls_ca_certificate` | CA bundle PEM | No | `""` |
+| `tls_ca_certificate` | Issuing CA PEM | Yes | |
 | `oc_namespace` | Namespace | unless `dry_run` | |
 | `oc_server` | API URL | unless `dry_run` | |
 | `oc_token` | Token | unless `dry_run` | |

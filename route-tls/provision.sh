@@ -71,6 +71,7 @@ fi
 [ -n "$ROUTE_NAME" ] && [ "$ROUTE_NAME" != "-vanity-url" ] || die "ROUTE_NAME is required"
 [ -n "${TLS_CERTIFICATE:-}" ] || die "TLS_CERTIFICATE or TLS_CERTIFICATE_FILE is required"
 [ -n "${TLS_PRIVATE_KEY:-}" ] || die "TLS_PRIVATE_KEY or TLS_PRIVATE_KEY_FILE is required"
+[ -n "${TLS_CA_CERTIFICATE:-}" ] || die "TLS_CA_CERTIFICATE or TLS_CA_CERTIFICATE_FILE is required"
 
 if [ "$DRY_RUN" != "true" ]; then
   [ -n "$OC_NAMESPACE" ] || die "OC_NAMESPACE is required unless DRY_RUN=true"
@@ -153,19 +154,15 @@ EOF
   printf '%s\n' "$TLS_CERTIFICATE" | sed 's/^/      /'
   echo "    key: |"
   printf '%s\n' "$TLS_PRIVATE_KEY" | sed 's/^/      /'
-  if [ -n "$TLS_CA_CERTIFICATE" ]; then
-    echo "    caCertificate: |"
-    printf '%s\n' "$TLS_CA_CERTIFICATE" | sed 's/^/      /'
-  fi
+  echo "    caCertificate: |"
+  printf '%s\n' "$TLS_CA_CERTIFICATE" | sed 's/^/      /'
 } > "$ROUTE_OUT"
 
 if ! grep -q '^    certificate: |' "$ROUTE_OUT" || ! grep -q '^    key: |' "$ROUTE_OUT"; then
   die "Generated Route YAML is missing spec.tls.certificate/key."
 fi
-if [ -n "$TLS_CA_CERTIFICATE" ]; then
-  grep -q '^    caCertificate: |' "$ROUTE_OUT" || die "caCertificate was not nested under spec.tls."
-  grep -q '^  caCertificate:' "$ROUTE_OUT" && die "caCertificate was written as a spec sibling; expected spec.tls.caCertificate."
-fi
+grep -q '^    caCertificate: |' "$ROUTE_OUT" || die "caCertificate was not nested under spec.tls."
+grep -q '^  caCertificate:' "$ROUTE_OUT" && die "caCertificate was written as a spec sibling; expected spec.tls.caCertificate."
 
 if [ "$DRY_RUN" = "true" ]; then
   echo "DRY RUN: cert/key match, host covered, YAML written to $ROUTE_OUT (contains the private key; not printed)."

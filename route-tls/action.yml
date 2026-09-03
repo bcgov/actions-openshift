@@ -42,9 +42,8 @@ inputs:
     description: "The private TLS key PEM"
     required: true
   tls_ca_certificate:
-    description: "The CA certificate bundle PEM (optional)"
-    required: false
-    default: ""
+    description: "Issuing CA PEM (Entrust OV TLS Issuing RSA CA 2)"
+    required: true
   oc_namespace:
     description: "OpenShift namespace. Required unless dry_run is true."
     required: false

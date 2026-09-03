@@ -75,6 +75,7 @@ jobs:
           TARGET_SERVICE: my-test-service
           TLS_CERTIFICATE_FILE: /tmp/cert.pem
           TLS_PRIVATE_KEY_FILE: /tmp/other-key.pem
+          TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
           DRY_RUN: "true"
           ROUTE_OUT: /tmp/route-mismatch.yml
         run: |
@@ -90,6 +91,7 @@ jobs:
           TARGET_SERVICE: my-test-service
           TLS_CERTIFICATE_FILE: /tmp/cert.pem
           TLS_PRIVATE_KEY_FILE: /tmp/key.pem
+          TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
           DRY_RUN: "true"
           ROUTE_OUT: /tmp/route-host.yml
         run: |
