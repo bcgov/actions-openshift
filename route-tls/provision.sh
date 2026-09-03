@@ -32,10 +32,12 @@ load_file() {
 }
 
 host_matches_name() {
-  local host="$1" name="$2"
+  local host name suffix
+  host="$(printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+  name="$(printf '%s' "$2" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
   [ "$name" = "$host" ] && return 0
   if [ "${name#\*.}" != "$name" ]; then
-    local suffix="${name#\*}"
+    suffix="${name#\*}"
     [ "${host%"$suffix"}" != "$host" ] && [ "${host#*.}" = "${name#\*.}" ] && return 0
   fi
   return 1
@@ -94,10 +96,14 @@ printf '%s\n' "$TLS_PRIVATE_KEY" > "$KEY_PEM"
 printf '%s\n' "$TLS_CA_CERTIFICATE" > "$CA_PEM"
 
 echo "Validating certificate and private key..."
-CERT_PUB_SHA="$(openssl x509 -in "$CERT_PEM" -noout -pubkey 2>/dev/null | openssl pkey -pubin -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)"
-KEY_PUB_SHA="$(openssl pkey -in "$KEY_PEM" -pubout -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)"
+if ! CERT_PUB_SHA="$(openssl x509 -in "$CERT_PEM" -noout -pubkey 2>/dev/null | openssl pkey -pubin -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)"; then
+  die "TLS certificate is invalid."
+fi
+if ! KEY_PUB_SHA="$(openssl pkey -in "$KEY_PEM" -pubout -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)"; then
+  die "TLS private key is invalid."
+fi
 if [ -z "$CERT_PUB_SHA" ] || [ -z "$KEY_PUB_SHA" ] || [ "$CERT_PUB_SHA" != "$KEY_PUB_SHA" ]; then
-  die "TLS certificate and private key are invalid or do not match."
+  die "TLS certificate and private key do not match."
 fi
 
 if ! openssl verify -partial_chain -trusted "$CA_PEM" "$CERT_PEM" >/dev/null 2>&1; then
@@ -159,8 +165,12 @@ if [ "$DRY_RUN" = "true" ]; then
   exit 0
 fi
 
-oc login --server="$OC_SERVER" --token="$OC_TOKEN" --insecure-skip-tls-verify=true >/dev/null
-oc project "$OC_NAMESPACE" >/dev/null
+if oc whoami >/dev/null 2>&1; then
+  oc project "$OC_NAMESPACE" >/dev/null || die "oc is logged in, but not to namespace $OC_NAMESPACE"
+else
+  oc login --server="$OC_SERVER" --token="$OC_TOKEN" --insecure-skip-tls-verify=true >/dev/null
+  oc project "$OC_NAMESPACE" >/dev/null
+fi
 
 if oc get route "$ROUTE_NAME" >/dev/null 2>&1; then
   echo "Existing route found. Archiving working certificates..."
