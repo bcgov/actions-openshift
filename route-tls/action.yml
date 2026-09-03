@@ -1,0 +1,65 @@
+# Stay bash: openssl + oc. Do not convert to JavaScript.
+name: "Route TLS"
+description: "Applies an OpenShift Route with custom TLS (cert/key/CA), openssl checks, and archival backups."
+inputs:
+  hostname:
+    description: "Route spec.host (e.g. myapp.gov.bc.ca). Hostname only, no scheme."
+    required: true
+  route_name:
+    description: "OpenShift Route name. Defaults to <repository>-vanity-url so it is not swept up with app= label cleanup."
+    required: false
+    default: ${{ github.event.repository.name }}-vanity-url
+  target_service:
+    description: "The OpenShift Service to send traffic to"
+    required: true
+  tls_certificate:
+    description: "Leaf certificate PEM"
+    required: true
+  tls_private_key:
+    description: "The private TLS key PEM"
+    required: true
+  tls_ca_certificate:
+    description: "Issuing CA PEM (Entrust OV TLS Issuing RSA CA 2)"
+    required: true
+  oc_namespace:
+    description: "OpenShift namespace. Required unless dry_run is true."
+    required: false
+    default: ""
+  oc_server:
+    description: "OpenShift API URL. Required unless dry_run is true."
+    required: false
+    default: ""
+  oc_token:
+    description: "OpenShift token. Required unless dry_run is true."
+    required: false
+    default: ""
+  dry_run:
+    description: "If true, skip the cluster: validate cert/key/host and write YAML only"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: OpenShift CLI
+      if: ${{ inputs.dry_run != 'true' }}
+      uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
+      with:
+        oc_namespace: ${{ inputs.oc_namespace }}
+        oc_server: ${{ inputs.oc_server }}
+        oc_token: ${{ inputs.oc_token }}
+
+    - name: Apply route TLS
+      shell: bash
+      env:
+        ROUTE_HOST: ${{ inputs.hostname }}
+        ROUTE_NAME: ${{ inputs.route_name }}
+        TARGET_SERVICE: ${{ inputs.target_service }}
+        TLS_CERTIFICATE: ${{ inputs.tls_certificate }}
+        TLS_PRIVATE_KEY: ${{ inputs.tls_private_key }}
+        TLS_CA_CERTIFICATE: ${{ inputs.tls_ca_certificate }}
+        OC_NAMESPACE: ${{ inputs.oc_namespace }}
+        OC_SERVER: ${{ inputs.oc_server }}
+        OC_TOKEN: ${{ inputs.oc_token }}
+        DRY_RUN: ${{ inputs.dry_run }}
+      run: bash "${{ github.action_path }}/provision.sh"

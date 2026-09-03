@@ -1,0 +1,127 @@
+name: PR
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  test-route-tls:
+    name: Test Route TLS
+    permissions: {}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Generate dummy certificates
+        run: |
+          set -euo pipefail
+          openssl req -x509 -newkey rsa:2048 -keyout /tmp/key.pem -out /tmp/cert.pem \
+            -days 30 -nodes -subj "/CN=myapp.bcgov.ca" \
+            -addext "subjectAltName=DNS:myapp.bcgov.ca"
+          openssl req -x509 -newkey rsa:2048 -keyout /tmp/other-key.pem -out /tmp/other.pem \
+            -days 30 -nodes -subj "/CN=other.example"
+          cp /tmp/cert.pem /tmp/ca.pem
+          echo "DUMMY_CERT<<EOF" >> "$GITHUB_ENV"
+          cat /tmp/cert.pem >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+          echo "DUMMY_KEY<<EOF" >> "$GITHUB_ENV"
+          cat /tmp/key.pem >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+          echo "DUMMY_CA<<EOF" >> "$GITHUB_ENV"
+          cat /tmp/ca.pem >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+      - name: Script dry-run
+        env:
+          ROUTE_HOST: myapp.bcgov.ca
+          ROUTE_NAME: my-test-route
+          TARGET_SERVICE: my-test-service
+          TLS_CERTIFICATE_FILE: /tmp/cert.pem
+          TLS_PRIVATE_KEY_FILE: /tmp/key.pem
+          TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
+          DRY_RUN: "true"
+          ROUTE_OUT: /tmp/route.yml
+        run: |
+          set -euo pipefail
+          output="$(./route-tls/provision.sh 2>&1)" || { echo "$output"; exit 1; }
+          printf '%s\n' "$output"
+          if printf '%s\n' "$output" | grep -qE 'BEGIN (PRIVATE KEY|RSA PRIVATE KEY)'; then
+            echo "provision.sh leaked a private key to stdout/stderr"
+            exit 1
+          fi
+          grep -q '^    caCertificate: |' /tmp/route.yml
+          grep -q '^    certificate: |' /tmp/route.yml
+          grep -q '^    key: |' /tmp/route.yml
+          if grep -q '^  caCertificate:' /tmp/route.yml; then
+            echo "caCertificate was written as a spec sibling"
+            exit 1
+          fi
+
+      - name: Script rejects mismatched key
+        env:
+          ROUTE_HOST: myapp.bcgov.ca
+          ROUTE_NAME: my-test-route
+          TARGET_SERVICE: my-test-service
+          TLS_CERTIFICATE_FILE: /tmp/cert.pem
+          TLS_PRIVATE_KEY_FILE: /tmp/other-key.pem
+          TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
+          DRY_RUN: "true"
+          ROUTE_OUT: /tmp/route-mismatch.yml
+        run: |
+          if ./route-tls/provision.sh; then
+            echo "expected cert/key mismatch to fail"
+            exit 1
+          fi
+
+      - name: Script rejects wrong CA
+        env:
+          ROUTE_HOST: myapp.bcgov.ca
+          ROUTE_NAME: my-test-route
+          TARGET_SERVICE: my-test-service
+          TLS_CERTIFICATE_FILE: /tmp/cert.pem
+          TLS_PRIVATE_KEY_FILE: /tmp/key.pem
+          TLS_CA_CERTIFICATE_FILE: /tmp/other.pem
+          DRY_RUN: "true"
+          ROUTE_OUT: /tmp/route-ca.yml
+        run: |
+          if ./route-tls/provision.sh; then
+            echo "expected CA mismatch to fail"
+            exit 1
+          fi
+
+      - name: Script rejects host mismatch
+        env:
+          ROUTE_HOST: wrong.example
+          ROUTE_NAME: my-test-route
+          TARGET_SERVICE: my-test-service
+          TLS_CERTIFICATE_FILE: /tmp/cert.pem
+          TLS_PRIVATE_KEY_FILE: /tmp/key.pem
+          TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
+          DRY_RUN: "true"
+          ROUTE_OUT: /tmp/route-host.yml
+        run: |
+          if ./route-tls/provision.sh; then
+            echo "expected host mismatch to fail"
+            exit 1
+          fi
+
+      - name: Composite action dry-run
+        uses: ./route-tls
+        with:
+          hostname: myapp.bcgov.ca
+          target_service: my-test-service
+          tls_certificate: ${{ env.DUMMY_CERT }}
+          tls_private_key: ${{ env.DUMMY_KEY }}
+          tls_ca_certificate: ${{ env.DUMMY_CA }}
+          dry_run: "true"

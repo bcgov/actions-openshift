@@ -7,7 +7,11 @@ Consolidated repo for bcgov-specific openshift actions. Please feel free to cont
 Cleans up Helm releases, labeled resources, and PVCs in a target OpenShift namespace on pull request close or merge.
 * See [cleanup-pr/README.md](./cleanup-pr/README.md) for detailed inputs and usage.
 
-### 2. Deployer (`.github/workflows/.deployer.yml`)
+### 2. [Route TLS](./route-tls) (Composite Action)
+GitHub Action that applies an OpenShift Route with a custom TLS certificate (openssl checks and archival backups).
+* See [route-tls/README.md](./route-tls/README.md) for secrets, inputs, and usage.
+
+### 3. Deployer (`.github/workflows/.deployer.yml`)
 A reusable workflow that manages Helm and Template-based application deployments to OpenShift. It configures variables, handles release/tag naming conventions, and automates target environment promotions.
 
 #### Example Usage:
@@ -21,7 +25,7 @@ jobs:
       packages: backend frontend migrations
 ```
 
-### 3. SchemaSpy (`.github/workflows/.schema-spy.yml`)
+### 4. SchemaSpy (`.github/workflows/.schema-spy.yml`)
 A reusable workflow that spins up a Postgres/PostGIS service, runs migrations using Flyway, generates interactive database documentation with SchemaSpy, and automatically publishes the results to GitHub Pages.
 
 #### Example Usage:
