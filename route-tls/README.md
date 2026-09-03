@@ -2,7 +2,7 @@
 
 GitHub Action that applies an OpenShift Route with your TLS certificate, key, and issuing CA. openssl checks that the PEMs match, cover `hostname`, and are not expired. If the Route already has TLS, that material is snapshotted to a Secret before overwrite.
 
-The Route uses `termination: edge` and `insecureEdgeTerminationPolicy: Redirect`. A vanity DNS name is one use; a cluster that requires a custom cert on every Route is the same call.
+The Route uses `termination: edge` and `insecureEdgeTerminationPolicy: Redirect`.
 
 Pin a tag or commit SHA, not `@main`. Callers can keep `permissions: {}`; this action does not checkout and does not use `GITHUB_TOKEN`.
 
@@ -46,7 +46,7 @@ First prod run: add `dry_run: "true"` until the job is green, then drop it.
 | `hostname` | Route `spec.host` (no `https://`) | Yes | |
 | `target_service` | Service to send traffic to | Yes | |
 | `route_name` | OpenShift Route name | No | `<repo>-vanity-url` |
-| `tls_certificate` | Leaf (or chain) PEM | Yes | |
+| `tls_certificate` | Leaf PEM | Yes | |
 | `tls_private_key` | Private key PEM | Yes | |
 | `tls_ca_certificate` | Issuing CA PEM | Yes | |
 | `oc_namespace` | Namespace | unless `dry_run` | |
@@ -56,9 +56,9 @@ First prod run: add `dry_run: "true"` until the job is green, then drop it.
 
 ## What it does
 
-1. Fail if the cert and key do not match, the cert is expired, or the cert does not cover `hostname` (CN or SAN, including wildcards).
-2. Unless `dry_run`, snapshot the live Route's TLS into a Secret named `<route>-backup-<sha256-prefix>`, labeled `backup-type=route-tls` (no `app` label). Re-applying the same cert is a no-op on that Secret.
-3. Download `oc` on the runner if needed, log in, and `oc apply` the Route. Private keys are never printed.
+1. Fail if the cert and key do not match, the issuing CA did not sign the leaf, the cert is expired, or the cert does not cover `hostname` (CN or SAN, including wildcards).
+2. Unless `dry_run`, snapshot the live Route's TLS (cert, key, CA) into a Secret named `<route>-backup-<sha256-prefix>`, labeled `backup-type=route-tls` (no `app` label). Re-applying the same cert is a no-op on that Secret. Restore from that Secret if an apply goes wrong.
+3. Download a pinned `oc` 4.16 client on the runner if needed, log in, and `oc apply` the Route. Private keys are never printed.
 
 ## Local CLI (optional)
 

@@ -1,27 +1,4 @@
-# ==============================================================================
-# ARCHITECTURE DECISION RECORD: DO NOT CONVERT THIS ACTION TO JAVASCRIPT
-# ==============================================================================
-# While BC Gov is standardizing on JavaScript/TypeScript for GitHub Actions,
-# this specific action MUST remain a Composite Bash action.
-#
-# Rationale:
-# 1. Cryptography: We rely on the natively-installed `openssl` binary for
-#    public-key extraction and matching. Re-implementing this in Node.js
-#    requires custom crypto libraries and PEM parsing, which is inherently
-#    riskier and less audited than OpenSSL.
-# 2. Kubernetes API: We rely on the `oc` binary. GitHub runners download it
-#    from the OpenShift client mirror; laptops use a local install. We do
-#    not use bcgov/action-oc-runner: that action logs in and checkouts, so
-#    it needs oc_* in `with:` and a GITHUB_TOKEN with contents: read.
-#    Re-implementing this in JS would require bundling
-#    `@kubernetes/client-node` and reconstructing authentication that `oc`
-#    already handles.
-# 3. Local testing: the same bash (`provision.sh`) is the GitHub entrypoint
-#    and the laptop dry-run path. A JS action would not be runnable with a
-#    PEM on disk and no Node toolchain.
-#
-# For infrastructure CLI orchestration, Bash remains the superior and safer tool.
-# ==============================================================================
+# Stay bash: openssl + oc. Do not convert to JavaScript.
 name: "Route TLS"
 description: "Applies an OpenShift Route with custom TLS (cert/key/CA), openssl checks, and archival backups."
 inputs:
@@ -36,7 +13,7 @@ inputs:
     description: "The OpenShift Service to send traffic to"
     required: true
   tls_certificate:
-    description: "The public TLS certificate PEM"
+    description: "Leaf certificate PEM"
     required: true
   tls_private_key:
     description: "The private TLS key PEM"

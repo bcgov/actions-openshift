@@ -90,7 +90,7 @@ ensure_oc() {
   echo "Installing oc from the OpenShift client mirror..."
   local tarball="$WORKDIR/oc.tgz"
   curl -fsSL -o "$tarball" \
-    "${OC_CLIENT_URL:-https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz}"
+    "${OC_CLIENT_URL:-https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.16.45/openshift-client-linux.tar.gz}"
   tar -xzf "$tarball" -C "$WORKDIR" oc
   PATH="$WORKDIR:$PATH"
   export PATH
@@ -103,14 +103,20 @@ fi
 
 CERT_PEM="$WORKDIR/cert.pem"
 KEY_PEM="$WORKDIR/key.pem"
+CA_PEM="$WORKDIR/ca.pem"
 printf '%s\n' "$TLS_CERTIFICATE" > "$CERT_PEM"
 printf '%s\n' "$TLS_PRIVATE_KEY" > "$KEY_PEM"
+printf '%s\n' "$TLS_CA_CERTIFICATE" > "$CA_PEM"
 
 echo "Validating certificate and private key..."
 CERT_PUB_SHA="$(openssl x509 -in "$CERT_PEM" -noout -pubkey 2>/dev/null | openssl pkey -pubin -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)"
 KEY_PUB_SHA="$(openssl pkey -in "$KEY_PEM" -pubout -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)"
 if [ -z "$CERT_PUB_SHA" ] || [ -z "$KEY_PUB_SHA" ] || [ "$CERT_PUB_SHA" != "$KEY_PUB_SHA" ]; then
   die "TLS certificate and private key are invalid or do not match."
+fi
+
+if ! openssl verify -partial_chain -trusted "$CA_PEM" "$CERT_PEM" >/dev/null 2>&1; then
+  die "TLS_CA_CERTIFICATE did not issue TLS_CERTIFICATE."
 fi
 
 if ! openssl x509 -in "$CERT_PEM" -noout -checkend 0 >/dev/null 2>&1; then
@@ -175,6 +181,7 @@ if oc get route "$ROUTE_NAME" >/dev/null 2>&1; then
   echo "Existing route found. Archiving working certificates..."
   OLD_CERT="$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.certificate}')"
   OLD_KEY="$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.key}')"
+  OLD_CA="$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.caCertificate}')"
   if [ -n "$OLD_KEY" ]; then
     CERT_HASH="$(printf '%s' "$OLD_CERT" | sha256sum | cut -d' ' -f1)"
     BACKUP_NAME="${ROUTE_NAME}-backup-${CERT_HASH:0:8}"
@@ -183,7 +190,8 @@ if oc get route "$ROUTE_NAME" >/dev/null 2>&1; then
     else
       oc create secret generic "$BACKUP_NAME" \
         --from-literal=tls.crt="$OLD_CERT" \
-        --from-literal=tls.key="$OLD_KEY"
+        --from-literal=tls.key="$OLD_KEY" \
+        --from-literal=ca.crt="$OLD_CA"
       oc label secret "$BACKUP_NAME" backup-type=route-tls
       echo "Certificates archived to secret: $BACKUP_NAME"
     fi

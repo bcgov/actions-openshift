@@ -84,6 +84,22 @@ jobs:
             exit 1
           fi
 
+      - name: Script rejects wrong CA
+        env:
+          ROUTE_HOST: myapp.bcgov.ca
+          ROUTE_NAME: my-test-route
+          TARGET_SERVICE: my-test-service
+          TLS_CERTIFICATE_FILE: /tmp/cert.pem
+          TLS_PRIVATE_KEY_FILE: /tmp/key.pem
+          TLS_CA_CERTIFICATE_FILE: /tmp/other.pem
+          DRY_RUN: "true"
+          ROUTE_OUT: /tmp/route-ca.yml
+        run: |
+          if ./route-tls/provision.sh; then
+            echo "expected CA mismatch to fail"
+            exit 1
+          fi
+
       - name: Script rejects host mismatch
         env:
           ROUTE_HOST: wrong.example
