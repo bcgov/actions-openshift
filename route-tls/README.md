@@ -35,7 +35,7 @@ Leave out **Sectigo Public Server Authentication Root R46.pem** and **USERTrust 
     oc_token: ${{ secrets.OC_TOKEN }}
 ```
 
-`route_name` defaults to `<repository>-vanity-url` (e.g. `myapp-vanity-url`) so PR-close `app=` sweeps do not delete it. Override `route_name` if you already have a name. The Route is not labeled `app`.
+`route_name` defaults to `<repository>-vanity-url` (e.g. `myapp-vanity-url`) so PR-close `app=` sweeps do not delete it. Override `route_name` if you already have a name.
 
 First prod run: add `dry_run: "true"` until the job is green, then drop it.
 
