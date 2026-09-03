@@ -4,7 +4,6 @@
 set -euo pipefail
 
 DRY_RUN="${DRY_RUN:-false}"
-INSECURE_SKIP_TLS_VERIFY="${INSECURE_SKIP_TLS_VERIFY:-true}"
 TLS_CA_CERTIFICATE="${TLS_CA_CERTIFICATE:-}"
 OC_NAMESPACE="${OC_NAMESPACE:-}"
 OC_SERVER="${OC_SERVER:-}"
@@ -169,7 +168,7 @@ if [ "$DRY_RUN" = "true" ]; then
   exit 0
 fi
 
-oc login --server="$OC_SERVER" --token="$OC_TOKEN" --insecure-skip-tls-verify="$INSECURE_SKIP_TLS_VERIFY" >/dev/null
+oc login --server="$OC_SERVER" --token="$OC_TOKEN" --insecure-skip-tls-verify=true >/dev/null
 oc project "$OC_NAMESPACE" >/dev/null
 
 if oc get route "$ROUTE_NAME" >/dev/null 2>&1; then

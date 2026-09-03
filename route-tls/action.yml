@@ -60,10 +60,6 @@ inputs:
     description: "If true, skip the cluster: validate cert/key/host and write YAML only"
     required: false
     default: "false"
-  insecure_skip_tls_verify:
-    description: "If true, skip TLS verification when logging into the OpenShift API"
-    required: false
-    default: "true"
 
 runs:
   using: "composite"
@@ -81,5 +77,4 @@ runs:
         OC_SERVER: ${{ inputs.oc_server }}
         OC_TOKEN: ${{ inputs.oc_token }}
         DRY_RUN: ${{ inputs.dry_run }}
-        INSECURE_SKIP_TLS_VERIFY: ${{ inputs.insecure_skip_tls_verify }}
       run: bash "${{ github.action_path }}/provision.sh"

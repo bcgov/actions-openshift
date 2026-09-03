@@ -53,7 +53,6 @@ First prod run: add `dry_run: "true"` until the job is green, then drop it.
 | `oc_server` | API URL | unless `dry_run` | |
 | `oc_token` | Token | unless `dry_run` | |
 | `dry_run` | Validate and write YAML only | No | `false` |
-| `insecure_skip_tls_verify` | Skip API TLS verify | No | `true` |
 
 ## What it does
 
