@@ -10,24 +10,15 @@ Pin a tag or commit SHA, not `@main`. Callers can keep `permissions: {}`; this a
 
 Put the PEMs on a **prod** GitHub Environment (not repository secrets), so pull-request jobs cannot read them. The job that calls this action must use that environment. OpenShift login uses environment secrets `OC_NAMESPACE` and `OC_TOKEN`, and variable `OC_SERVER`.
 
-NR cert packages from Entrust look like `app.example.gov.bc.ca/` and contain a leaf, a key, an issuing CA, Sectigo R46, and USERTrust. Map them like this:
+NR cert packages from Entrust look like `app.example.gov.bc.ca/`. Map them like this:
 
 | Secret | File in the package | Notes |
 | --- | --- | --- |
-| `TLS_CERTIFICATE` | `<host>.pem` | The leaf only (CN/SAN is `hostname`). Do not paste the chain in here. |
+| `TLS_CERTIFICATE` | `<host>.pem` | The leaf only (CN/SAN is `hostname`). |
 | `TLS_PRIVATE_KEY` | `<host>.key` | Unencrypted PKCS#8 (`BEGIN PRIVATE KEY`). Never commit this. |
-| `TLS_CA_CERTIFICATE` | Concatenate **Entrust OV TLS Issuing RSA CA 2.pem** then **Sectigo Public Server Authentication Root R46.pem** | Intermediates the router must present so clients can chain to USERTrust. |
+| `TLS_CA_CERTIFICATE` | `Entrust OV TLS Issuing RSA CA 2.pem` | The issuing CA only. One PEM. |
 
-Leave out **USERTrust RSA Certification Authority.pem**. That is a public root; browsers already have it. Leave out `<host>.csr`; the request is finished.
-
-Build the CA secret with:
-
-```bash
-cat "Entrust OV TLS Issuing RSA CA 2.pem" \
-    "Sectigo Public Server Authentication Root R46.pem"
-```
-
-Paste that combined PEM into `TLS_CA_CERTIFICATE`. Two `BEGIN CERTIFICATE` blocks is correct. One (issuing CA only) is not enough for clients that only trust USERTrust.
+Leave out **Sectigo Public Server Authentication Root R46.pem** and **USERTrust RSA Certification Authority.pem**. Those are roots; clients already have them. Leave out `<host>.csr`; the request is finished.
 
 ## Usage
 
