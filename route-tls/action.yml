@@ -29,15 +29,12 @@ inputs:
     description: "Route spec.host (e.g. myapp.gov.bc.ca). Hostname only, no scheme."
     required: true
   route_name:
-    description: "The OpenShift Route name (e.g. myapp-prod-tls)"
-    required: true
+    description: "OpenShift Route name. Defaults to <repository>-vanity-url so it is not swept up with app= label cleanup."
+    required: false
+    default: ${{ github.event.repository.name }}-vanity-url
   target_service:
     description: "The OpenShift Service to send traffic to"
     required: true
-  app:
-    description: "app= label. Must match PR-close cleanup (typically name-zone, e.g. myapp-prod), not the Service name."
-    required: false
-    default: ""
   tls_certificate:
     description: "The public TLS certificate PEM"
     required: true
@@ -78,7 +75,6 @@ runs:
         ROUTE_HOST: ${{ inputs.hostname }}
         ROUTE_NAME: ${{ inputs.route_name }}
         TARGET_SERVICE: ${{ inputs.target_service }}
-        APP: ${{ inputs.app }}
         TLS_CERTIFICATE: ${{ inputs.tls_certificate }}
         TLS_PRIVATE_KEY: ${{ inputs.tls_private_key }}
         TLS_CA_CERTIFICATE: ${{ inputs.tls_ca_certificate }}

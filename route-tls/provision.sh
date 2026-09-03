@@ -5,7 +5,6 @@ set -euo pipefail
 
 DRY_RUN="${DRY_RUN:-false}"
 INSECURE_SKIP_TLS_VERIFY="${INSECURE_SKIP_TLS_VERIFY:-true}"
-APP="${APP:-}"
 TLS_CA_CERTIFICATE="${TLS_CA_CERTIFICATE:-}"
 OC_NAMESPACE="${OC_NAMESPACE:-}"
 OC_SERVER="${OC_SERVER:-}"
@@ -65,13 +64,13 @@ load_file TLS_CA_CERTIFICATE TLS_CA_CERTIFICATE_FILE
 case "$ROUTE_HOST" in
   *://*) die "ROUTE_HOST must be a hostname (got '$ROUTE_HOST'). Drop the scheme." ;;
 esac
-[ -n "${ROUTE_NAME:-}" ] || die "ROUTE_NAME is required"
 [ -n "${TARGET_SERVICE:-}" ] || die "TARGET_SERVICE is required"
+if [ -z "${ROUTE_NAME:-}" ]; then
+  ROUTE_NAME="${GITHUB_REPOSITORY##*/}-vanity-url"
+fi
+[ -n "$ROUTE_NAME" ] && [ "$ROUTE_NAME" != "-vanity-url" ] || die "ROUTE_NAME is required"
 [ -n "${TLS_CERTIFICATE:-}" ] || die "TLS_CERTIFICATE or TLS_CERTIFICATE_FILE is required"
 [ -n "${TLS_PRIVATE_KEY:-}" ] || die "TLS_PRIVATE_KEY or TLS_PRIVATE_KEY_FILE is required"
-if [ -z "$APP" ]; then
-  APP="$TARGET_SERVICE"
-fi
 
 if [ "$DRY_RUN" != "true" ]; then
   [ -n "$OC_NAMESPACE" ] || die "OC_NAMESPACE is required unless DRY_RUN=true"
@@ -140,8 +139,6 @@ apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: ${ROUTE_NAME}
-  labels:
-    app: ${APP}
 spec:
   host: ${ROUTE_HOST}
   to:
@@ -191,7 +188,7 @@ if oc get route "$ROUTE_NAME" >/dev/null 2>&1; then
       oc create secret generic "$BACKUP_NAME" \
         --from-literal=tls.crt="$OLD_CERT" \
         --from-literal=tls.key="$OLD_KEY"
-      oc label secret "$BACKUP_NAME" backup-type=route-tls app="$APP"
+      oc label secret "$BACKUP_NAME" backup-type=route-tls
       echo "Certificates archived to secret: $BACKUP_NAME"
     fi
   fi

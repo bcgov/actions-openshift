@@ -47,7 +47,6 @@ jobs:
           ROUTE_HOST: myapp.bcgov.ca
           ROUTE_NAME: my-test-route
           TARGET_SERVICE: my-test-service
-          APP: my-test-app
           TLS_CERTIFICATE_FILE: /tmp/cert.pem
           TLS_PRIVATE_KEY_FILE: /tmp/key.pem
           TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
@@ -74,7 +73,6 @@ jobs:
           ROUTE_HOST: myapp.bcgov.ca
           ROUTE_NAME: my-test-route
           TARGET_SERVICE: my-test-service
-          APP: my-test-app
           TLS_CERTIFICATE_FILE: /tmp/cert.pem
           TLS_PRIVATE_KEY_FILE: /tmp/other-key.pem
           DRY_RUN: "true"
@@ -90,7 +88,6 @@ jobs:
           ROUTE_HOST: wrong.example
           ROUTE_NAME: my-test-route
           TARGET_SERVICE: my-test-service
-          APP: my-test-app
           TLS_CERTIFICATE_FILE: /tmp/cert.pem
           TLS_PRIVATE_KEY_FILE: /tmp/key.pem
           DRY_RUN: "true"
@@ -106,8 +103,6 @@ jobs:
         with:
           hostname: myapp.bcgov.ca
           target_service: my-test-service
-          route_name: my-test-route
-          app: my-test-app
           tls_certificate: ${{ env.DUMMY_CERT }}
           tls_private_key: ${{ env.DUMMY_KEY }}
           tls_ca_certificate: ${{ env.DUMMY_CA }}
