@@ -41,6 +41,14 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: OpenShift CLI
+      if: ${{ inputs.dry_run != 'true' }}
+      uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
+      with:
+        oc_namespace: ${{ inputs.oc_namespace }}
+        oc_server: ${{ inputs.oc_server }}
+        oc_token: ${{ inputs.oc_token }}
+
     - name: Apply route TLS
       shell: bash
       env:

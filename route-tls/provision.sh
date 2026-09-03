@@ -82,23 +82,8 @@ umask 077
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
-ensure_oc() {
-  if command -v oc >/dev/null 2>&1; then
-    return 0
-  fi
-  [ -n "${GITHUB_ACTIONS:-}" ] || die "oc is not on PATH (install the OpenShift CLI, or use DRY_RUN=true)"
-  echo "Installing oc from the OpenShift client mirror..."
-  local tarball="$WORKDIR/oc.tgz"
-  curl -fsSL -o "$tarball" \
-    "${OC_CLIENT_URL:-https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.16.45/openshift-client-linux.tar.gz}"
-  tar -xzf "$tarball" -C "$WORKDIR" oc
-  PATH="$WORKDIR:$PATH"
-  export PATH
-  command -v oc >/dev/null || die "failed to install oc"
-}
-
 if [ "$DRY_RUN" != "true" ]; then
-  ensure_oc
+  command -v oc >/dev/null || die "oc is not on PATH (install the OpenShift CLI, or use DRY_RUN=true)"
 fi
 
 CERT_PEM="$WORKDIR/cert.pem"

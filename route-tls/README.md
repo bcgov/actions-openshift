@@ -4,7 +4,7 @@ GitHub Action that applies an OpenShift Route with your TLS certificate, key, an
 
 The Route uses `termination: edge` and `insecureEdgeTerminationPolicy: Redirect`.
 
-Pin a tag or commit SHA, not `@main`. Callers can keep `permissions: {}`; this action does not checkout and does not use `GITHUB_TOKEN`.
+Pin a tag or commit SHA, not `@main`. This action does not use `GITHUB_TOKEN` itself. Non-dry-run jobs use `bcgov/action-oc-runner`, which checkouts the caller repo (that step needs `contents: read` if the repository is private).
 
 ## GitHub secrets
 
@@ -58,7 +58,7 @@ First prod run: add `dry_run: "true"` until the job is green, then drop it.
 
 1. Fail if the cert and key do not match, the issuing CA did not sign the leaf, the cert is expired, or the cert does not cover `hostname` (CN or SAN, including wildcards).
 2. Unless `dry_run`, snapshot the live Route's TLS (cert, key, CA) into a Secret named `<route>-backup-<sha256-prefix>`, labeled `backup-type=route-tls` (no `app` label). Re-applying the same cert is a no-op on that Secret. Restore from that Secret if an apply goes wrong.
-3. Download a pinned `oc` 4.16 client on the runner if needed, log in, and `oc apply` the Route. Private keys are never printed.
+3. `oc apply` the Route (GitHub installs `oc` via `bcgov/action-oc-runner`). Private keys are never printed.
 
 ## Local CLI (optional)
 
