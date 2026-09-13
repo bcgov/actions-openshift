@@ -138,8 +138,8 @@ runs:
         TOKEN_INPUT="${{ inputs.oc_token }}"
         ATTEMPTS="${{ inputs.login_attempts }}"
 
-        if [ -z "${SERVER_URL}" ] || [[ ! "${SERVER_URL}" =~ ^https?:// ]]; then
-          echo "::error::Invalid or missing oc_server. Must start with http:// or https://"
+        if [ -z "${SERVER_URL}" ] || [[ ! "${SERVER_URL}" =~ ^https:// ]]; then
+          echo "::error::Invalid or missing oc_server. Must be https://"
           exit 1
         fi
         if [ -z "${NAMESPACE}" ]; then
@@ -337,9 +337,9 @@ runs:
       shell: bash
       run: sleep 3
 
-    # Action repo needs to be present for triggered cronjob scripts or cleanup (using override repo)
-    - if: steps.diff.outputs.triggered == 'true' || github.repository != inputs.repository
-      name: Checkout local repo to make sure action.yml is present
+    # Restore the caller workspace if we checked out a different repository.
+    - if: steps.diff.outputs.triggered == 'true' && inputs.repository != ''
+      name: Restore caller checkout
       uses: actions/checkout@v7
       with:
         token: ${{ inputs.github_token }}

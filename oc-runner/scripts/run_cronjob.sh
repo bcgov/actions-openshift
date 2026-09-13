@@ -15,9 +15,9 @@ MAX_RETRIES=3  # Number of times to retry job status check
 cleanup() {
     local exit_code=$?
     if [ $exit_code -ne 0 ]; then
-        log_error "Script failed with exit code $exit_code"
+        echo "ERROR: [$(date +'%Y-%m-%d %H:%M:%S')] Script failed with exit code $exit_code" >&2
     fi
-    exit $exit_code
+    exit "$exit_code"
 }
 trap cleanup EXIT
 
@@ -40,7 +40,10 @@ if ! command -v oc &> /dev/null; then
 fi
 
 # Create timestamped job name
-JOB_NAME="${CRONJOB}--$(date +"%Y-%m-%d--%H-%M-%S")"
+# Job names max 63. Timestamp is 22 chars (--YYYY-MM-DD--HH-MM-SS).
+PREFIX="${CRONJOB:0:41}"
+PREFIX="${PREFIX%-}"
+JOB_NAME="${PREFIX}--$(date +"%Y-%m-%d--%H-%M-%S")"
 log_info "Creating job: ${JOB_NAME}"
 
 # Create the job from cronjob
@@ -71,19 +74,21 @@ check_job_status() {
     sleep 3
 
     while [ $retry_count -lt $MAX_RETRIES ]; do
-        local status=$(oc get job "${JOB_NAME}" -o json)
-        local succeeded=$(echo "$status" | jq -r '.status.succeeded // 0')
-        local failed=$(echo "$status" | jq -r '.status.failed // 0')
-        local active=$(echo "$status" | jq -r '.status.active // 0')
+        local status
+        status=$(oc get job "${JOB_NAME}" -o json)
+        local complete failed active
+        complete=$(echo "$status" | jq -r '[.status.conditions[]? | select(.type=="Complete" and .status=="True")] | length')
+        failed=$(echo "$status" | jq -r '[.status.conditions[]? | select(.type=="Failed" and .status=="True")] | length')
+        active=$(echo "$status" | jq -r '.status.active // 0')
 
-        log_debug "Job status check attempt $((retry_count + 1)): succeeded=$succeeded, failed=$failed, active=$active"
+        log_debug "Job status check attempt $((retry_count + 1)): complete=$complete, failed=$failed, active=$active"
 
-        if [ "$succeeded" = "1" ]; then
+        if [ "$complete" != "0" ]; then
             log_success "Job completed successfully"
             return 0
-        elif [ "$failed" = "1" ]; then
-            log_error "Job failed with status: failed=$failed"
-        elif [ "$active" = "1" ]; then
+        elif [ "$failed" != "0" ]; then
+            log_error "Job failed"
+        elif [ "$active" != "0" ]; then
             log_info "Job is still running..."
         else
             log_warn "Job status unclear, will retry..."

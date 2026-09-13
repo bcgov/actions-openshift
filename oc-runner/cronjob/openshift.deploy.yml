@@ -23,8 +23,9 @@ objects:
         app: ${REPO}-${ZONE}
         cronjob: ${REPO}-${ZONE}
     spec:
-      # Every Feb 31 at midnight - so never!
-      schedule: "0 0 31 2 0"
+      # Suspended example; instantiate with oc create job --from=cronjob/...
+      schedule: "0 0 * * *"
+      suspend: true
       startingDeadlineSeconds: 60
       concurrencyPolicy: "Replace"
       successfulJobsHistoryLimit: 5
