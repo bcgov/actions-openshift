@@ -1,0 +1,209 @@
+name: 'Crunchy Database Deployment'
+description: 'Deploy a Crunchy PostgreSQL database to OpenShift'
+
+inputs:
+  # Required
+  oc_namespace:
+    description: 'OpenShift namespace'
+    required: true
+    validation: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+  oc_token:
+    description: 'OpenShift token'
+    required: true
+    validation: "^[A-Za-z0-9-_]+$"
+
+  # Typical / recommended
+  environment:
+    description: 'Environment name; omit for PRs'
+    required: false
+    validation: "^.+$"
+  triggers:
+    description: 'Paths used to trigger a deployment; e.g. (./backend/ ./frontend/).'
+    required: false
+    validation: "^(.+)$"
+  oc_server:
+    description: 'OpenShift server'
+    default: 'https://api.silver.devops.gov.bc.ca:6443'
+    required: false
+    validation: "^https?://.+:6443$"
+  values_file:
+    description: 'Path to the values.yml file to use for the deployment'
+    required: true
+    validation: "^.+\\.(yml|yaml)$"
+  s3_access_key:
+    description: 'S3 access key'
+    required: false
+  s3_secret_key:
+    description: 'S3 secret key'
+    required: false
+  s3_bucket:
+    description: 'S3 bucket'
+    required: false
+  s3_endpoint:
+    description: 'S3 endpoint'
+
+  # Usually a bad idea / not recommended
+  force_cleanup:
+    description: 'Force cleanup of the database'
+    default: false
+    required: false
+    type: boolean
+  directory:
+    description: 'Crunchy Chart directory'
+    default: 'charts/crunchy'
+    validation: "^.+$"
+    required: false
+  github_token:
+    description: Specify token (GH or PAT), instead of inheriting one from the calling workflow
+    default: ${{ github.token }}
+  repository:
+    description: 'GitHub repository; e.g. org/repo'
+    default: bcgov/action-crunchy
+    required: false
+    validation: "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$"
+  ref:
+    # This should be an empty string by default, but can be set to a specific branch/tag/sha
+    description: 'Git ref to use; e.g. branch, tag, sha'
+    default: 'main'
+    required: false
+  release_name:
+    description: 'Release name; e.g. pg-qsos-crunchy, make sure it is unique in the namespace you are deploying to'
+    default: ''
+    required: false
+  diff_branch:
+    description: 'Branch to compare against for diff triggers; defaults to the default branch of the repository'
+    required: false
+    
+outputs:
+  release:
+    description: 'Release name'
+    value: ${{ steps.vars.outputs.RELEASE_NAME }}
+  cluster:
+    description: 'Cluster name'
+    value: ${{ steps.vars.outputs.CLUSTER_NAME }}
+
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      id: vars
+      run: |
+        # Variables and Inputs
+
+        # Release and cluster name; based on a hash of the repository name
+        RELEASE_NAME=''
+        if [ -n "${{ inputs.release_name }}" ]; then
+          RELEASE_NAME="${{ inputs.release_name }}"
+        else
+          RELEASE_NAME=pg-$(echo -n "${{ github.event.repository.name }}" | md5sum | cut -c 1-8)
+        fi
+        CLUSTER_NAME=${RELEASE_NAME}-crunchy
+
+        # Process vars and send to GITHUB_ENV (local vars) and GITHUB_OUTPUT (outputs)
+        for var in RELEASE_NAME CLUSTER_NAME; do
+          if [ -n "${!var}" ]; then
+            echo "${var}=${!var}"
+            echo "${var}=${!var}" >> $GITHUB_ENV
+            echo "${var}=${!var}" >> $GITHUB_OUTPUT
+          else
+            echo "Warning: ${var} is not set."
+            exit 1
+          fi
+        done
+
+    - shell: bash
+      if: github.event.action != 'closed'
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        # Variables and Inputs (!= closed)
+
+        # Enable S3 backups if all required vars are set
+        s3_vars=("${{ inputs.s3_access_key }}" "${{ inputs.s3_secret_key }}" "${{ inputs.s3_bucket }}" "${{ inputs.s3_endpoint }}")
+        if [ "${#s3_vars[@]}" -eq 4 ]; then
+          echo "All S3 configuration variables are present. Enabling S3 backups."
+          S3_ENABLED=true
+        elif [ "$s3_vars_count" -gt 0 ]; then
+          echo "Warning: Some S3 configuration variables are set, but not all. Please ensure all S3 variables are configured."
+          exit 1
+        else
+          echo "S3 configuration not set. Disabling S3 backups."
+        fi
+
+        # Construct values.yml URL (ref_name = PR, ref_name = merge, default_branch = default)
+        BRANCH_OR_REF="${{ github.head_ref || github.ref_name || github.event.repository.default_branch }}"
+        VALUES_URL="https://raw.githubusercontent.com/${{ github.repository }}/${BRANCH_OR_REF}/${{ inputs.values_file }}"
+
+        # Build curl auth options if a token is provided (required for private repositories)
+        CURL_AUTH_OPTS=()
+        if [ -n "${GITHUB_TOKEN}" ]; then
+          CURL_AUTH_OPTS=(-H "Authorization: token ${GITHUB_TOKEN}")
+        fi
+
+        # Validate values.yml URL
+        if ! curl "${CURL_AUTH_OPTS[@]}" --output /dev/null --silent --head --fail "${VALUES_URL}"; then
+          echo "Error: The constructed values.yml URL is invalid or inaccessible: ${VALUES_URL}"
+          echo "Hint: If this is a private repository, please ensure that:"
+          echo "  1. The workflow permissions are set to 'contents: read'."
+          echo "  2. A valid 'github_token' is supplied if accessing a private file."
+          exit 1
+        fi
+
+        # Process vars and send to GITHUB_ENV
+        for var in S3_ENABLED VALUES_URL; do
+          if [ -n "${!var}" ]; then
+            echo "${var}=${!var}"
+            echo "${var}=${!var}" >> $GITHUB_ENV
+          else
+            echo "Warning: ${var} is not set."
+            exit 1
+          fi
+        done
+
+    - id: triggers
+      uses: bcgov/action-diff-triggers@a80e4b3cf77b7e05f84e74030e3bfa08b717a574 # v1.2.1
+      with:
+        triggers: ${{ inputs.triggers }}
+        ref: ${{ inputs.diff_branch }} 
+    # Alway install don't consider triggers here.
+    - uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
+      with:
+        oc_namespace: "${{ inputs.oc_namespace }}"
+        oc_token: "${{ inputs.oc_token }}"
+        oc_server: "${{ inputs.oc_server }}"
+        repository: ${{ github.repository }}                          # Always use the downstream
+        ref: ${{ github.event.pull_request.base.ref || github.ref }}  # repository to run diffs!
+
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: ${{ inputs.repository }}
+        ref: ${{ inputs.ref }}
+
+    - if: github.event.action != 'closed'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        # Deploy the database
+
+        # Check if S3 inputs are provided and construct the deploy_db.sh command accordingly
+        PARAMS="${{ inputs.directory }} ${VALUES_URL} ${{ github.event.repository.name }} ${RELEASE_NAME} ${{ steps.triggers.outputs.triggered}}"
+        if [ -n "${{ inputs.s3_access_key }}" ] && [ -n "${{ inputs.s3_secret_key }}" ] && [ -n "${{ inputs.s3_bucket }}" ] && [ -n "${{ inputs.s3_endpoint }}" ]; then
+          PARAMS+=" ${{ inputs.s3_access_key }} ${{ inputs.s3_secret_key }} ${{ inputs.s3_bucket }} ${{ inputs.s3_endpoint }}"
+        fi
+
+        # Execute the deploy command
+        echo $GITHUB_ACTION_PATH/scripts/deploy_db.sh $PARAMS
+        $GITHUB_ACTION_PATH/scripts/deploy_db.sh $PARAMS
+
+    - if: github.event_name == 'pull_request' && github.event.action != 'closed'
+      shell: bash
+      run: |
+        # Add user to Crunchy DB
+        $GITHUB_ACTION_PATH/scripts/user_change.sh add "${{ github.event.number }}" "${CLUSTER_NAME}"
+
+    - if: github.event.action == 'closed' || inputs.force_cleanup == 'true'
+      shell: bash
+      run: |
+        # Remove PR specific user from Crunchy DB
+        $GITHUB_ACTION_PATH/scripts/user_change.sh remove "${{ github.event.number }}" "${CLUSTER_NAME}"

@@ -1,0 +1,164 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+parameters:
+  - name: NAME
+    description: Module name
+    value: action-deployer-openshift
+  - name: COMPONENT
+    description: Component name
+    value: backend
+  - name: ZONE
+    description: Deployment zone, e.g. pr-### or prod
+    required: true
+  - name: DOMAIN
+    value: apps.silver.devops.gov.bc.ca
+  - name: CPU_REQUEST
+    value: "25m"
+  - name: MEMORY_REQUEST
+    value: "50Mi"
+  - name: CPU_LIMIT
+    value: "75m"
+  - name: MEMORY_LIMIT
+    value: "150Mi"
+  - name: CPU_REQUEST_INIT
+    value: "125m"
+  - name: MEMORY_REQUEST_INIT
+    value: "100Mi"
+  - name: CPU_LIMIT_INIT
+    value: "250m"
+  - name: MEMORY_LIMIT_INIT
+    value: "250Mi"
+  - name: RANDOM_EXPRESSION
+    description: Random expression to make sure deployments update
+    from: "[a-zA-Z0-9]{32}"
+    generate: expression
+objects:
+  - kind: Deployment
+    apiVersion: apps/v1
+    metadata:
+      labels:
+        app: ${NAME}-${ZONE}
+        component: ${COMPONENT}
+      name: "${NAME}-${ZONE}-${COMPONENT}"
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          deployment: "${NAME}-${ZONE}-${COMPONENT}"
+      strategy:
+        type: RollingUpdate
+      template:
+        metadata:
+          labels:
+            app: ${NAME}-${ZONE}
+            component: ${COMPONENT}
+            deployment: "${NAME}-${ZONE}-${COMPONENT}"
+        spec:
+          containers:
+            - image: "ghcr.io/bcgov/quickstart-openshift/backend:latest"
+              imagePullPolicy: Always
+              name: "${NAME}"
+              env:
+                - name: POSTGRES_HOST
+                  value: "${NAME}-${ZONE}-database"
+                - name: POSTGRES_DATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: "${NAME}-${ZONE}-database"
+                      key: database-name
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: "${NAME}-${ZONE}-database"
+                      key: database-password
+                - name: POSTGRES_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: "${NAME}-${ZONE}-database"
+                      key: database-user
+                - name: RANDOM_EXPRESSION
+                  value: ${RANDOM_EXPRESSION}
+              ports:
+                - containerPort: 3000
+                  protocol: TCP
+              resources:
+                requests:
+                  cpu: "${CPU_REQUEST}"
+                  memory: "${MEMORY_REQUEST}"
+                limits:
+                  cpu: "${CPU_LIMIT}"
+                  memory: "${MEMORY_LIMIT}"
+              readinessProbe:
+                httpGet:
+                  path: /api
+                  port: 3000
+                  scheme: HTTP
+                initialDelaySeconds: 5
+                periodSeconds: 2
+                timeoutSeconds: 2
+                successThreshold: 1
+                failureThreshold: 30
+              livenessProbe:
+                successThreshold: 1
+                failureThreshold: 3
+                httpGet:
+                  path: /api
+                  port: 3000
+                  scheme: HTTP
+                initialDelaySeconds: 60
+                periodSeconds: 30
+                timeoutSeconds: 5
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      labels:
+        app: ${NAME}-${ZONE}
+        component: ${COMPONENT}
+      name: "${NAME}-${ZONE}-${COMPONENT}"
+    spec:
+      ports:
+        - name: 3000-tcp
+          protocol: TCP
+          port: 80
+          targetPort: 3000
+      selector:
+        deployment: "${NAME}-${ZONE}-${COMPONENT}"
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      labels:
+        app: ${NAME}-${ZONE}
+        component: ${COMPONENT}
+      name: "${NAME}-${ZONE}-${COMPONENT}"
+    spec:
+      host: "${NAME}-${ZONE}-${COMPONENT}.${DOMAIN}"
+      port:
+        targetPort: 3000-tcp
+      to:
+        kind: Service
+        name: "${NAME}-${ZONE}-${COMPONENT}"
+        weight: 100
+      tls:
+        termination: edge
+        insecureEdgeTerminationPolicy: Redirect
+  - apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    metadata:
+      labels:
+        app: ${NAME}-${ZONE}
+        component: ${COMPONENT}
+      name: "${NAME}-${ZONE}-${COMPONENT}"
+    spec:
+      scaleTargetRef:
+        apiVersion: apps.openshift.io/v1
+        kind: Deployment
+        name: "${NAME}-${ZONE}-${COMPONENT}"
+      minReplicas: 1
+      maxReplicas: 2
+      metrics:
+        - type: Resource
+          resource:
+            name: cpu
+            target:
+              type: Utilization
+              averageUtilization: 100

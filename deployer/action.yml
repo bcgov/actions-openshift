@@ -1,0 +1,234 @@
+name: OpenShift Deployer
+description: OpenShift deployer
+branding:
+  icon: package
+  color: blue
+
+inputs:
+  ### Required
+  file:
+    description: |
+      Template file
+      Example frontend/openshift.deploy.yml
+    required: true
+  oc_namespace:
+    description: |
+      OpenShift namespace
+      Example: abc123-dev, abc123-test, abc123-prod
+    required: true
+    pattern: "^[a-z0-9]{6}-(dev|test|prod|tools)$"
+  oc_server:
+    description: |
+      OpenShift server URL with port
+      Example: https://api.silver.devops.gov.bc.ca:6443
+    required: true
+    pattern: '^https:\/\/.*:6443$'
+  oc_token:
+    description: |
+      OpenShift access token for authentication
+      Should be stored as a GitHub secret
+    required: true
+    minLength: 32
+
+  ### Typical / recommended
+  overwrite:
+    description: |
+      Replace existing objects/artifacts?
+      Example: true, false
+    default: true
+    type: boolean
+  parameters:
+    description: |
+      Template parameters/variables to pass
+      Example: -p ZONE=1234
+  timeout:
+    description: |
+      Timeout for deployment
+      Example: 30s, 10m, 1h
+    default: "15m"
+  triggers:
+    description: |
+      Omit to always build, otherwise trigger by path
+      Example: ('./backend/', './frontend/)
+  lite_mode:
+    description: |
+      Apply 'lite mode' modifications (scaling down, removing PDBs) for pull requests?
+      Example: true, false
+    default: ${{ github.event.pull_request != '' }}
+    type: boolean
+  debug:
+    description: |
+      Enable debug logging?
+      Example: true, false
+    default: false
+    type: boolean
+
+  ### Usually a bad idea / not recommended
+  ref:
+    description: |
+      Branch to diff against
+      Example: main
+    default: ${{ github.event.repository.default_branch }}
+  oc_version:
+    description: |
+      Override default OpenShift CLI (oc) version
+      Example: 4.16
+    pattern: '^4\.[0-9]+$'
+  repository:
+    description: |
+      Specify a different repo to clone
+      Example: bcgov/quickstart-openshift
+    default: ${{ github.repository }}
+    pattern: "^[a-zA-Z0-9-_]+/[a-zA-Z0-9-_]+$"
+  github_token:
+    description: |
+      Specify token (GH or PAT), instead of inheriting one from the calling workflow
+    default: ${{ github.token }}
+  oc_login_attempts:
+    description: |
+      Maximum number of connection retry attempts for logging into OpenShift
+      Example: 5, 10
+    default: "5"
+    pattern: "^[1-9][0-9]*$"
+
+outputs:
+  triggered:
+    description: Did a deployment trigger?  [true|false]
+    value: ${{ steps.triggers.outputs.triggered }}
+
+runs:
+  using: composite
+  steps:
+    - name: Context Diagnostics
+      if: inputs.debug
+      shell: bash
+      run: |
+        echo "---- CONTEXT DIAGNOSTICS ----"
+        echo "Event Name:   ${{ github.event_name }}"
+        echo "Pull Request: ${{ github.event.pull_request != '' }}"
+        echo "Base Ref:     ${{ github.base_ref }}"
+        echo "Lite Mode:    ${{ inputs.lite_mode }}"
+        echo "Debug Mode:   ${{ inputs.debug }}"
+        echo "---------------------------"
+
+    # Send triggers to diff action
+    - id: triggers
+      uses: bcgov/action-diff-triggers@a80e4b3cf77b7e05f84e74030e3bfa08b717a574 # v1.2.1
+      with:
+        triggers: ${{ inputs.triggers }}
+        ref: ${{ inputs.ref }}
+        github_token: ${{ inputs.github_token }}
+
+    - name: Validate oc login retry inputs
+      if: steps.triggers.outputs.triggered == 'true'
+      shell: bash
+      run: |
+        if ! [[ "${{ inputs.oc_login_attempts }}" =~ ^[1-9][0-9]*$ ]]; then
+          echo "::error::oc_login_attempts must be a positive integer"
+          exit 1
+        fi
+
+    - if: inputs.oc_version != '' && steps.triggers.outputs.triggered == 'true'
+      uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
+      with:
+        oc_namespace: ${{ inputs.oc_namespace }}
+        oc_token: ${{ inputs.oc_token }}
+        oc_server: ${{ inputs.oc_server }}
+        oc_version: ${{ inputs.oc_version }}
+        repository: ${{ inputs.repository }}
+        triggers: ${{ inputs.triggers }}
+        github_token: ${{ inputs.github_token }}
+        login_attempts: ${{ inputs.oc_login_attempts }}
+
+    - if: inputs.oc_version == '' && steps.triggers.outputs.triggered == 'true'
+      uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
+      with:
+        oc_namespace: ${{ inputs.oc_namespace }}
+        oc_token: ${{ inputs.oc_token }}
+        oc_server: ${{ inputs.oc_server }}
+        repository: ${{ inputs.repository }}
+        triggers: ${{ inputs.triggers }}
+        github_token: ${{ inputs.github_token }}
+        login_attempts: ${{ inputs.oc_login_attempts }}
+
+    - if: steps.triggers.outputs.triggered == 'true'
+      shell: bash
+      run: |
+        # Process template and variables
+        TEMPLATE="$(oc process -f ${{ inputs.file }} ${{ inputs.parameters }} --local)"
+
+        # Check for deprecated DeploymentConfig objects
+        DC_COUNT=$(echo "${TEMPLATE}" | jq '[.items[] | select(.kind=="DeploymentConfig")] | length')
+        if [ "${DC_COUNT}" -gt 0 ]; then
+          echo "Error: DeploymentConfig objects are deprecated and no longer supported. Please use Deployment objects instead."
+          exit 1
+        fi
+
+        # Clean any previous ImageStreams
+        for name in $(echo "${TEMPLATE}" | jq -r '.items[] | select(.kind=="ImageStream").metadata.name'); do
+          oc delete imagestream ${name} --ignore-not-found
+        done
+
+        # Apply lite mode modifications for pull requests if triggered
+        if [[ "${{ inputs.lite_mode }}" == "true" ]]; then
+          if [[ "${{ inputs.debug }}" == "true" ]]; then
+            echo "DEBUG: Template BEFORE lite mode modifications:"
+            echo "${TEMPLATE}"
+          fi
+
+          echo "Applying lite mode modifications"
+          echo "${TEMPLATE}" > .template.json
+          # Replace strategy entirely: Recreate forbids a leftover rollingUpdate block.
+          jq '
+            .items |= map(select(.kind != "HorizontalPodAutoscaler" and .kind != "PodDisruptionBudget")) |
+            .items |= map(
+              if .kind == "Deployment"
+              then .spec.replicas = 1 | .spec.strategy = {"type": "Recreate"}
+              else .
+              end
+            )' .template.json > .template_lite.json
+          
+          if [ -s .template_lite.json ]; then
+            TEMPLATE=$(cat .template_lite.json)
+          else
+            echo "::error::Failed to apply lite mode modifications (jq output was empty)"
+            exit 1
+          fi
+          rm .template.json .template_lite.json
+
+          if [[ "${{ inputs.debug }}" == "true" ]]; then
+            echo "DEBUG: Template AFTER lite mode modifications:"
+            echo "${TEMPLATE}"
+          fi
+        fi
+
+        # Store template in environment variable using heredoc format for multiline values
+        echo "TEMPLATE<<EOF" >> $GITHUB_ENV
+        echo "${TEMPLATE}" >> $GITHUB_ENV
+        echo "EOF" >> $GITHUB_ENV
+
+    - if: steps.triggers.outputs.triggered == 'true'
+      shell: bash
+      run: |
+        # Expand for deployment steps
+        if [ "${{ inputs.overwrite }}" != "false" ]; then
+          echo "Overwrite=true; using oc apply"
+          oc apply --timeout=${{ inputs.timeout || '15m' }} -f - <<< "${TEMPLATE}"
+        else
+          # Allow AlreadyExists errors and expected failures
+          echo "Overwrite=false; using oc create"
+          (set +o pipefail; oc create -f - 2>&1 <<< "${TEMPLATE}" | sed 's/.*: //')
+        fi
+
+        # Follow any active deployments
+        DEPLOYMENT=$(echo "${TEMPLATE}" | jq -r '.items[] | select(.kind=="Deployment").metadata.name //empty')
+        if [ ! -z "${DEPLOYMENT}" ]&&[ ! -z $(oc get deployment ${DEPLOYMENT} -o name --ignore-not-found) ]; then
+          oc rollout status deployment/${DEPLOYMENT} -w
+        fi
+
+    # Action repo needs to be present for cleanup/tests
+    - name: Checkout local repo to make sure action.yml is present
+      if: github.repository != inputs.repository
+      uses: actions/checkout@v7
+      with:
+        token: ${{ inputs.github_token }}
