@@ -74,7 +74,7 @@ inputs:
     default: ""
   timeout:
     description: |
-      Timeout for commands or cronjob
+      Timeout for the commands block and the cronjob wait
       Example: 10m, 30s, 1h
     default: 10m
     pattern: "^[0-9]+[mhs]$"
@@ -258,12 +258,16 @@ runs:
     - if: steps.diff.outputs.triggered == 'true' && inputs.commands
       id: commands
       shell: bash
+      env:
+        COMMANDS: ${{ inputs.commands }}
+        COMMANDS_TIMEOUT: ${{ inputs.timeout }}
+        ENABLE_VERBOSE: ${{ inputs.verbose }}
       run: |
         set -eEuo pipefail
         ACTION_SOURCE="bcgov/actions-openshift/oc-runner"
 
         on_commands_error() {
-          exit_code=$?
+          exit_code="${1:-$?}"
           set +x
           echo "::error title=${ACTION_SOURCE}: commands input failed::[${ACTION_SOURCE}] commands block failed with exit code ${exit_code}."
           echo "::error::[${ACTION_SOURCE}] If optional grep/pipeline failures are expected, guard them with '|| true' or explicit condition checks."
@@ -281,22 +285,34 @@ runs:
 
         REAL_GITHUB_OUTPUT="$GITHUB_OUTPUT"
         ACTION_OUTPUT_FILE="$(mktemp)"
+        COMMANDS_FILE="$(mktemp)"
         export GITHUB_OUTPUT="$ACTION_OUTPUT_FILE"
-        trap 'rm -f "$ACTION_OUTPUT_FILE"' EXIT
+        trap 'rm -f "$ACTION_OUTPUT_FILE" "$COMMANDS_FILE"' EXIT
 
-        ENABLE_VERBOSE="${{ inputs.verbose }}"
+        if ! [[ "$COMMANDS_TIMEOUT" =~ ^[0-9]+[mhs]$ ]]; then
+          echo "::error::Invalid timeout: '${COMMANDS_TIMEOUT}'. Use e.g. 10m, 30s, 1h."
+          exit 1
+        fi
 
+        printf '%s\n' "$COMMANDS" > "$COMMANDS_FILE"
+
+        VERBOSE_ARGS=()
         if [ "$ENABLE_VERBOSE" = "true" ]; then
           echo "::notice::[${ACTION_SOURCE}] Verbose mode enabled for commands step (includes internal output processing)."
           set -x
+          VERBOSE_ARGS=(-x)
         fi
 
-        trap on_commands_error ERR
-
-        # Run command(s)
-        ${{ inputs.commands }}
-
-        trap - ERR
+        if timeout --foreground "$COMMANDS_TIMEOUT" bash -euo pipefail "${VERBOSE_ARGS[@]}" "$COMMANDS_FILE"; then
+          :
+        else
+          cmd_rc=$?
+          if [ "$cmd_rc" -eq 124 ]; then
+            echo "::error title=${ACTION_SOURCE}: commands timed out::[${ACTION_SOURCE}] commands exceeded timeout ${COMMANDS_TIMEOUT}."
+            exit 124
+          fi
+          on_commands_error "$cmd_rc"
+        fi
 
         # Map user-written output lines to the action's generic commands output.
         # Allows plain `echo "value" >> "$GITHUB_OUTPUT"` without requiring `commands=`.
