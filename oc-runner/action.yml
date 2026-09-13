@@ -74,7 +74,7 @@ inputs:
     default: ""
   timeout:
     description: |
-      Timeout for commands or cronjob
+      Timeout for the commands block and the cronjob wait
       Example: 10m, 30s, 1h
     default: 10m
     pattern: "^[0-9]+[mhs]$"
@@ -281,20 +281,41 @@ runs:
 
         REAL_GITHUB_OUTPUT="$GITHUB_OUTPUT"
         ACTION_OUTPUT_FILE="$(mktemp)"
+        COMMANDS_FILE="$(mktemp)"
         export GITHUB_OUTPUT="$ACTION_OUTPUT_FILE"
-        trap 'rm -f "$ACTION_OUTPUT_FILE"' EXIT
+        trap 'rm -f "$ACTION_OUTPUT_FILE" "$COMMANDS_FILE"' EXIT
 
         ENABLE_VERBOSE="${{ inputs.verbose }}"
+        COMMANDS_TIMEOUT="${{ inputs.timeout }}"
+
+        if ! [[ "$COMMANDS_TIMEOUT" =~ ^[0-9]+[mhs]$ ]]; then
+          echo "::error::Invalid timeout: '${COMMANDS_TIMEOUT}'. Use e.g. 10m, 30s, 1h."
+          exit 1
+        fi
 
         if [ "$ENABLE_VERBOSE" = "true" ]; then
           echo "::notice::[${ACTION_SOURCE}] Verbose mode enabled for commands step (includes internal output processing)."
           set -x
         fi
 
+        cat > "$COMMANDS_FILE" <<'OC_RUNNER_COMMANDS'
+${{ inputs.commands }}
+OC_RUNNER_COMMANDS
+
         trap on_commands_error ERR
 
-        # Run command(s)
-        ${{ inputs.commands }}
+        set +e
+        timeout --foreground "$COMMANDS_TIMEOUT" bash -euo pipefail ${ENABLE_VERBOSE:+-x} "$COMMANDS_FILE"
+        cmd_rc=$?
+        set -e
+
+        if [ "$cmd_rc" -eq 124 ]; then
+          echo "::error title=${ACTION_SOURCE}: commands timed out::[${ACTION_SOURCE}] commands exceeded timeout ${COMMANDS_TIMEOUT}."
+          exit 124
+        fi
+        if [ "$cmd_rc" -ne 0 ]; then
+          exit "$cmd_rc"
+        fi
 
         trap - ERR
 
