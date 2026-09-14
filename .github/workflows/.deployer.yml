@@ -104,16 +104,18 @@ jobs:
           INPUT_ENVIRONMENT: ${{ inputs.environment }}
           PR_NUM: ${{ steps.pr.outputs.pr }}
           PROMOTE_IMAGES: ${{ inputs.promote_images }}
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
           # Tag defaults to PR number, but can be overridden by inputs.tag
-          tag=${INPUT_TAG:-$PR_NUM}
+          tag="${INPUT_TAG:-$PR_NUM}"
 
           # Release name includes run numbers to ensure uniqueness
-          target_env=${INPUT_ENVIRONMENT:-$tag}
-          release="${{ github.event.repository.name }}-${target_env}"
+          target_env="${INPUT_ENVIRONMENT:-$tag}"
+          release="${REPOSITORY_NAME}-${target_env}"
           
           # Version, used for non-PR releases
-          version=1.0.0-${{ github.run_number }}
+          version="1.0.0-${RUN_NUMBER}"
           
           # Summary
           echo "tag=${tag}"
@@ -121,18 +123,23 @@ jobs:
           echo "version=${version}"
 
           # Output
-          echo "tag=${tag}" >> $GITHUB_OUTPUT
-          echo "release=${release}" >> $GITHUB_OUTPUT
-          echo "version=${version}" >> $GITHUB_OUTPUT
+          {
+            echo "tag=${tag}"
+            echo "release=${release}"
+            echo "version=${version}"
+          } >> "$GITHUB_OUTPUT"
 
           # Convert packages to JSON array for job matrix
           read -r -a pkgs <<< "$PROMOTE_IMAGES"
-          echo "packages=$(jq -cn '$ARGS.positional' --args "${pkgs[@]}")" >> $GITHUB_OUTPUT
+          echo "packages=$(jq -cn '$ARGS.positional' --args "${pkgs[@]}")" >> "$GITHUB_OUTPUT"
 
       ### Deploy
       - name: Interrupt deployments (PR only)
+        id: deploy
         if: github.event_name == 'pull_request'
         uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
+        env:
+          RELEASE: ${{ steps.vars.outputs.release }}
         with:
           oc_namespace: ${{ secrets.oc_namespace }}
           oc_token: ${{ secrets.oc_token }}
@@ -141,11 +148,11 @@ jobs:
           triggers: ${{ inputs.triggers }}
           commands: |
             # Interrupt any previous deployments (PR only)
-            PREVIOUS=$(helm status ${{ steps.vars.outputs.release }} -o json | jq .info.status || true)
+            PREVIOUS=$(helm status "$RELEASE" -o json | jq .info.status || true)
             if [[ ${PREVIOUS} =~ pending ]]; then
               echo "Rollback triggered"
-              helm rollback ${{ steps.vars.outputs.release }} || \
-                helm uninstall ${{ steps.vars.outputs.release }}
+              helm rollback "$RELEASE" || \
+                helm uninstall "$RELEASE"
             fi
 
   promote:

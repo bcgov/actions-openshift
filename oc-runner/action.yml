@@ -129,15 +129,14 @@ runs:
     - if: steps.diff.outputs.triggered == 'true'
       env:
         OC: ${{ format('stable-{0}', inputs.oc_version) }}
+        SERVER_URL: ${{ inputs.oc_server }}
+        NAMESPACE: ${{ inputs.oc_namespace }}
+        TOKEN_INPUT: ${{ inputs.oc_token }}
+        ATTEMPTS: ${{ inputs.login_attempts }}
       shell: bash
       working-directory: /usr/local/bin
       run: |
         # Input validation gate
-        SERVER_URL="${{ inputs.oc_server }}"
-        NAMESPACE="${{ inputs.oc_namespace }}"
-        TOKEN_INPUT="${{ inputs.oc_token }}"
-        ATTEMPTS="${{ inputs.login_attempts }}"
-
         if [ -z "${SERVER_URL}" ] || [[ ! "${SERVER_URL}" =~ ^https:// ]]; then
           echo "::error::Invalid or missing oc_server. Must be https://"
           exit 1
@@ -238,13 +237,13 @@ runs:
         done
 
         # Verify namespace
-        if [ "$( oc project -q )" != "${{ inputs.oc_namespace }}" ]; then
+        if [ "$( oc project -q )" != "${NAMESPACE}" ]; then
           echo "Project and token do not match!"
           exit 1
         fi
 
         # Version for client, kustomize, server and Kubernetes
-        echo -e "\nInput Version: ${{ env.OC }}"
+        echo -e "\nInput Version: ${OC}"
         oc version
         echo
 
@@ -363,6 +362,11 @@ runs:
     - if: steps.diff.outputs.triggered == 'true' && inputs.cronjob
       id: cronjob
       shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        CRONJOB: ${{ inputs.cronjob }}
+        TIMEOUT: ${{ inputs.timeout }}
+        CRONJOB_TAIL: ${{ inputs.cronjob_tail }}
       run: |
         # Run the cronjob script
-        "${{ github.action_path }}/scripts/run_cronjob.sh" "${{ inputs.cronjob }}" "${{ inputs.timeout }}" "${{ inputs.cronjob_tail }}"
+        "${ACTION_PATH}/scripts/run_cronjob.sh" "${CRONJOB}" "${TIMEOUT}" "${CRONJOB_TAIL}"

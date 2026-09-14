@@ -38,35 +38,41 @@ runs:
   steps:
     - name: Run Cleanup Commands
       uses: $/oc-runner
+      env:
+        CLEANUP: ${{ inputs.cleanup }}
+        CLEANUP_NAME: ${{ inputs.cleanup_name }}
+        REPOSITORY: ${{ inputs.repository }}
+        TARGET: ${{ inputs.target }}
+        REMOVE_PVC: ${{ inputs.remove_pvc }}
       with:
         oc_namespace: ${{ inputs.oc_namespace }}
         oc_token: ${{ inputs.oc_token }}
         oc_server: ${{ inputs.oc_server }}
         commands: |
           # 1. Helm Cleanup
-          if [ "${{ inputs.cleanup }}" = "helm" ]; then
-            release="${{ inputs.repository }}-${{ inputs.target }}"
+          if [ "$CLEANUP" = "helm" ]; then
+            release="${REPOSITORY}-${TARGET}"
             echo "Attempting Helm uninstall for release: ${release}"
             helm status "$release" >/dev/null 2>&1 && helm uninstall --no-hooks "$release" || echo "Not found: $release"
           fi
 
           # 2. Label Cleanup
-          if [ "${{ inputs.cleanup }}" = "label" ]; then
-            if [ -n "${{ inputs.cleanup_name }}" ]; then
-              for name in ${{ inputs.cleanup_name }}; do
+          if [ "$CLEANUP" = "label" ]; then
+            if [ -n "$CLEANUP_NAME" ]; then
+              for name in $CLEANUP_NAME; do
                 echo "Deleting resources for label: app=${name}"
                 oc delete deployments,statefulsets,daemonsets,replicasets,jobs,cronjobs,services,routes,cm,pvc,secret,networkpolicy,hpa,pods -l app="${name}" || echo "Not found: ${name}"
               done
             else
-              target_label="${{ inputs.repository }}-${{ inputs.target }}"
+              target_label="${REPOSITORY}-${TARGET}"
               echo "Deleting resources for label: app=${target_label}"
               oc delete deployments,statefulsets,daemonsets,replicasets,jobs,cronjobs,services,routes,cm,pvc,secret,networkpolicy,hpa,pods -l app="${target_label}" || echo "Not found: ${target_label}"
             fi
           fi
 
           # 3. Remove PVCs
-          if [ -n "${{ inputs.remove_pvc }}" ]; then
-            for pvc in $(echo "${{ inputs.remove_pvc }}" | tr ',' ' '); do
+          if [ -n "$REMOVE_PVC" ]; then
+            for pvc in $(echo "$REMOVE_PVC" | tr ',' ' '); do
               echo "Deleting PVC: ${pvc}"
               oc delete pvc "$pvc" || echo "Not found: $pvc"
             done

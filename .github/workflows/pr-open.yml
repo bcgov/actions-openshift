@@ -13,6 +13,21 @@ concurrency:
 permissions: {}
 
 jobs:
+  actionlint:
+    name: Actionlint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run actionlint
+        run: docker run --rm -v "$(pwd)":/repo -w /repo rhysd/actionlint:latest
+
+      - name: Audit composite actions for script injection
+        run: python3 scripts/audit_composite_actions.py
+
   test-route-tls:
     name: Test Route TLS
     permissions: {}
