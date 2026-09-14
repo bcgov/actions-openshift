@@ -52,6 +52,7 @@ runs:
     - name: Apply route TLS
       shell: bash
       env:
+        ACTION_PATH: ${{ github.action_path }}
         ROUTE_HOST: ${{ inputs.hostname }}
         ROUTE_NAME: ${{ inputs.route_name }}
         TARGET_SERVICE: ${{ inputs.target_service }}
@@ -62,4 +63,4 @@ runs:
         OC_SERVER: ${{ inputs.oc_server }}
         OC_TOKEN: ${{ inputs.oc_token }}
         DRY_RUN: ${{ inputs.dry_run }}
-      run: bash "${{ github.action_path }}/provision.sh"
+      run: bash "${ACTION_PATH}/provision.sh"

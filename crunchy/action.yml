@@ -87,17 +87,20 @@ runs:
   steps:
     - shell: bash
       id: vars
+      env:
+        INPUT_RELEASE_NAME: ${{ inputs.release_name }}
+        REPO_NAME: ${{ github.event.repository.name }}
       run: |
         # Variables and Inputs
 
         # Release and cluster name; based on a hash of the repository name
         RELEASE_NAME=''
-        if [ -n "${{ inputs.release_name }}" ]; then
-          RELEASE_NAME="${{ inputs.release_name }}"
+        if [ -n "${INPUT_RELEASE_NAME}" ]; then
+          RELEASE_NAME="${INPUT_RELEASE_NAME}"
         else
-          RELEASE_NAME=pg-$(echo -n "${{ github.event.repository.name }}" | md5sum | cut -c 1-8)
+          RELEASE_NAME="pg-$(echo -n "${REPO_NAME}" | md5sum | cut -c 1-8)"
         fi
-        CLUSTER_NAME=${RELEASE_NAME}-crunchy
+        CLUSTER_NAME="${RELEASE_NAME}-crunchy"
 
         # Process vars and send to GITHUB_ENV (local vars) and GITHUB_OUTPUT (outputs)
         for var in RELEASE_NAME CLUSTER_NAME; do
@@ -115,15 +118,28 @@ runs:
       if: github.event.action != 'closed'
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
+        S3_ACCESS_KEY: ${{ inputs.s3_access_key }}
+        S3_SECRET_KEY: ${{ inputs.s3_secret_key }}
+        S3_BUCKET: ${{ inputs.s3_bucket }}
+        S3_ENDPOINT: ${{ inputs.s3_endpoint }}
+        BRANCH_OR_REF: ${{ github.head_ref || github.ref_name || github.event.repository.default_branch }}
+        REPO: ${{ github.repository }}
+        VALUES_FILE: ${{ inputs.values_file }}
       run: |
         # Variables and Inputs (!= closed)
 
         # Enable S3 backups if all required vars are set
-        s3_vars=("${{ inputs.s3_access_key }}" "${{ inputs.s3_secret_key }}" "${{ inputs.s3_bucket }}" "${{ inputs.s3_endpoint }}")
+        S3_ENABLED=false
+        s3_vars=()
+        for v in "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" "${S3_BUCKET}" "${S3_ENDPOINT}"; do
+          if [ -n "$v" ]; then
+            s3_vars+=("$v")
+          fi
+        done
         if [ "${#s3_vars[@]}" -eq 4 ]; then
           echo "All S3 configuration variables are present. Enabling S3 backups."
           S3_ENABLED=true
-        elif [ "$s3_vars_count" -gt 0 ]; then
+        elif [ "${#s3_vars[@]}" -gt 0 ]; then
           echo "Warning: Some S3 configuration variables are set, but not all. Please ensure all S3 variables are configured."
           exit 1
         else
@@ -131,8 +147,7 @@ runs:
         fi
 
         # Construct values.yml URL (ref_name = PR, ref_name = merge, default_branch = default)
-        BRANCH_OR_REF="${{ github.head_ref || github.ref_name || github.event.repository.default_branch }}"
-        VALUES_URL="https://raw.githubusercontent.com/${{ github.repository }}/${BRANCH_OR_REF}/${{ inputs.values_file }}"
+        VALUES_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH_OR_REF}/${VALUES_FILE}"
 
         # Build curl auth options if a token is provided (required for private repositories)
         CURL_AUTH_OPTS=()
@@ -183,27 +198,38 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
+        DIRECTORY: ${{ inputs.directory }}
+        REPO_NAME: ${{ github.event.repository.name }}
+        TRIGGERED: ${{ steps.triggers.outputs.triggered }}
+        S3_ACCESS_KEY: ${{ inputs.s3_access_key }}
+        S3_SECRET_KEY: ${{ inputs.s3_secret_key }}
+        S3_BUCKET: ${{ inputs.s3_bucket }}
+        S3_ENDPOINT: ${{ inputs.s3_endpoint }}
       run: |
         # Deploy the database
 
         # Check if S3 inputs are provided and construct the deploy_db.sh command accordingly
-        PARAMS="${{ inputs.directory }} ${VALUES_URL} ${{ github.event.repository.name }} ${RELEASE_NAME} ${{ steps.triggers.outputs.triggered}}"
-        if [ -n "${{ inputs.s3_access_key }}" ] && [ -n "${{ inputs.s3_secret_key }}" ] && [ -n "${{ inputs.s3_bucket }}" ] && [ -n "${{ inputs.s3_endpoint }}" ]; then
-          PARAMS+=" ${{ inputs.s3_access_key }} ${{ inputs.s3_secret_key }} ${{ inputs.s3_bucket }} ${{ inputs.s3_endpoint }}"
+        PARAMS="${DIRECTORY} ${VALUES_URL} ${REPO_NAME} ${RELEASE_NAME} ${TRIGGERED}"
+        if [ -n "${S3_ACCESS_KEY}" ] && [ -n "${S3_SECRET_KEY}" ] && [ -n "${S3_BUCKET}" ] && [ -n "${S3_ENDPOINT}" ]; then
+          PARAMS+=" ${S3_ACCESS_KEY} ${S3_SECRET_KEY} ${S3_BUCKET} ${S3_ENDPOINT}"
         fi
 
         # Execute the deploy command
-        echo $GITHUB_ACTION_PATH/scripts/deploy_db.sh $PARAMS
-        $GITHUB_ACTION_PATH/scripts/deploy_db.sh $PARAMS
+        echo "$GITHUB_ACTION_PATH/scripts/deploy_db.sh [arguments redacted]"
+        "$GITHUB_ACTION_PATH/scripts/deploy_db.sh" $PARAMS
 
     - if: github.event_name == 'pull_request' && github.event.action != 'closed'
       shell: bash
+      env:
+        EVENT_NUMBER: ${{ github.event.number }}
       run: |
         # Add user to Crunchy DB
-        $GITHUB_ACTION_PATH/scripts/user_change.sh add "${{ github.event.number }}" "${CLUSTER_NAME}"
+        "$GITHUB_ACTION_PATH/scripts/user_change.sh" add "${EVENT_NUMBER}" "${CLUSTER_NAME}"
 
     - if: github.event.action == 'closed' || inputs.force_cleanup == 'true'
       shell: bash
+      env:
+        EVENT_NUMBER: ${{ github.event.number }}
       run: |
         # Remove PR specific user from Crunchy DB
-        $GITHUB_ACTION_PATH/scripts/user_change.sh remove "${{ github.event.number }}" "${CLUSTER_NAME}"
+        "$GITHUB_ACTION_PATH/scripts/user_change.sh" remove "${EVENT_NUMBER}" "${CLUSTER_NAME}"
