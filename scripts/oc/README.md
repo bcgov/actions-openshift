@@ -5,7 +5,7 @@ Standalone CLI scripts for OpenShift operations and PostgreSQL database manageme
 ## Scripts
 
 ### 1. `rename_deployment.sh`
-Renames an OpenShift deployment by exporting its manifest, updating metadata and label selectors (`app=...`), deleting the old deployment, and applying the new one.
+Renames an OpenShift deployment by exporting its manifest, updating metadata and label selectors (`deployment=...`), deleting the old deployment, and applying the new one.
 
 ```bash
 # Rename to <source>-prev by default:
@@ -16,7 +16,7 @@ Renames an OpenShift deployment by exporting its manifest, updating metadata and
 ```
 
 ### 2. `db_transfer.sh`
-Streams a binary `pg_dump` from one container/pod directly to `pg_restore` in another container/pod without writing intermediate dump files to disk. Automatically filters conflicting PostGIS extension objects and applies `--no-owner --no-privileges`.
+Stages a binary `pg_dump` in `/tmp` in the target container so its TOC can be filtered before `pg_restore`. Automatically filters conflicting PostGIS extension objects and applies `--no-owner --no-privileges`; ensure the target has enough ephemeral storage for the dump.
 
 ```bash
 ./scripts/oc/db_transfer.sh <source-deployment> <target-deployment>
@@ -45,8 +45,8 @@ Audits and reports OpenShift user roles and RBAC bindings across all projects ac
 # Specific roles:
 ./scripts/oc/rights_reporter.sh "admin edit view basic-user"
 
-# Remote execution:
-curl -fsSL https://raw.githubusercontent.com/bcgov/actions-openshift/main/scripts/oc/rights_reporter.sh | bash
+# Remote execution (pin to a release tag):
+curl -fsSL https://raw.githubusercontent.com/bcgov/actions-openshift/v1/scripts/oc/rights_reporter.sh | bash
 ```
 
 ### Prerequisites

@@ -97,8 +97,8 @@ Standalone CLI utilities for developer environments and operational maintenance:
 * **[`install_cert.sh`](./scripts/cert/install_cert.sh)**: Helper script to apply an edge Route with a custom TLS certificate, key, and issuing CA.
 
 ### OpenShift & Database Operations ([`scripts/oc/`](./scripts/oc))
-* **[`rename_deployment.sh`](./scripts/oc/rename_deployment.sh)**: Safely rename an OpenShift deployment and its `app=` label selectors.
-* **[`db_transfer.sh`](./scripts/oc/db_transfer.sh)**: Stream a binary `pg_dump` directly to `pg_restore` between OpenShift containers without intermediate files.
+* **[`rename_deployment.sh`](./scripts/oc/rename_deployment.sh)**: Safely rename an OpenShift deployment and its `deployment=` label selectors.
+* **[`db_transfer.sh`](./scripts/oc/db_transfer.sh)**: Stream a binary `pg_dump` to a temporary file in the target container, filter its TOC, and restore it with `pg_restore`.
 * **[`db_compare.sh`](./scripts/oc/db_compare.sh)**: Compare PostgreSQL table row counts across deployments to verify data migrations.
 * **[`rights_reporter.sh`](./scripts/oc/rights_reporter.sh)**: Audit and report OpenShift user RBAC rights and risk indicators across accessible namespaces.
 
