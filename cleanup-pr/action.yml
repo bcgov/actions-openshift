@@ -53,7 +53,11 @@ runs:
           if [ "$CLEANUP" = "helm" ]; then
             release="${REPOSITORY}-${TARGET}"
             echo "Attempting Helm uninstall for release: ${release}"
-            helm status "$release" >/dev/null 2>&1 && helm uninstall --no-hooks "$release" || echo "Not found: $release"
+            if helm status "${release}" >/dev/null 2>&1; then
+              helm uninstall --no-hooks "${release}"
+            else
+              echo "Not found: ${release}"
+            fi
           fi
 
           # 2. Label Cleanup
@@ -61,12 +65,12 @@ runs:
             if [ -n "$CLEANUP_NAME" ]; then
               for name in $CLEANUP_NAME; do
                 echo "Deleting resources for label: app=${name}"
-                oc delete deployments,statefulsets,daemonsets,replicasets,jobs,cronjobs,services,routes,cm,pvc,secret,networkpolicy,hpa,pods -l app="${name}" || echo "Not found: ${name}"
+                oc delete all,jobs,cronjobs,cm,pvc,secret,networkpolicy,routes,hpa -l "app=${name}" || echo "Not found: ${name}"
               done
             else
               target_label="${REPOSITORY}-${TARGET}"
               echo "Deleting resources for label: app=${target_label}"
-              oc delete deployments,statefulsets,daemonsets,replicasets,jobs,cronjobs,services,routes,cm,pvc,secret,networkpolicy,hpa,pods -l app="${target_label}" || echo "Not found: ${target_label}"
+              oc delete all,jobs,cronjobs,cm,pvc,secret,networkpolicy,routes,hpa -l "app=${target_label}" || echo "Not found: ${target_label}"
             fi
           fi
 

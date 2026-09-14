@@ -122,61 +122,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Helm Cleanup
-        env:
-          release: ${{ inputs.repository }}-${{ inputs.target }}
-        if: inputs.cleanup == 'helm'
-        uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
+      - name: Cleanup OpenShift
+        uses: $/cleanup-pr
         with:
+          cleanup: ${{ inputs.cleanup }}
+          cleanup_name: ${{ inputs.cleanup_name }}
+          repository: ${{ inputs.repository }}
+          target: ${{ inputs.target }}
+          remove_pvc: ${{ inputs.remove_pvc }}
+          oc_server: ${{ secrets.oc_server || env.DEFAULT_OC_SERVER }}
           oc_namespace: ${{ secrets.oc_namespace }}
           oc_token: ${{ secrets.oc_token }}
-          oc_server: ${{ secrets.oc_server || env.DEFAULT_OC_SERVER }}
-          commands: |
-            # Cleanup for Helm deployments
-            if helm status "$release" >/dev/null 2>&1; then
-              helm uninstall --no-hooks "$release"
-            else
-              echo "Not found: $release"
-            fi
 
-      - name: OC Template (label) Cleanup
-        if: inputs.cleanup == 'label'
-        uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
-        env:
-          CLEANUP_NAME: ${{ inputs.cleanup_name }}
-          REPOSITORY: ${{ inputs.repository }}
-          TARGET: ${{ inputs.target }}
-        with:
-          oc_namespace: ${{ secrets.oc_namespace }}
-          oc_token: ${{ secrets.oc_token }}
-          oc_server: ${{ secrets.oc_server || env.DEFAULT_OC_SERVER }}
-          commands: |
-            set -x
-            # Cleanup for OpenShift template deployments, uses labels
 
-            # Remove old build runs, build pods and deployment pods
-            if [ -n "$CLEANUP_NAME" ]; then
-              for name in $CLEANUP_NAME; do
-                oc delete all,cm,pvc,secret,networkpolicy,routes,hpa -l "app=${name}" || \
-                  echo "Not found: ${name}"
-              done
-            else
-              target_app="${REPOSITORY}-${TARGET}"
-              oc delete all,cm,pvc,secret,networkpolicy,routes,hpa -l "app=${target_app}" || \
-                echo "Not found: ${target_app}"
-            fi
-
-      - name: Remove PVCs
-        if: inputs.remove_pvc != ''
-        uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
-        env:
-          REMOVE_PVC: ${{ inputs.remove_pvc }}
-        with:
-          oc_namespace: ${{ secrets.oc_namespace }}
-          oc_token: ${{ secrets.oc_token }}
-          oc_server: ${{ secrets.oc_server || env.DEFAULT_OC_SERVER }}
-          commands: |
-            # Remove PVCs from OpenShift when PR closed
-            for pvc in $(echo "$REMOVE_PVC" | tr ',' ' '); do
-              oc delete pvc "$pvc" || echo "Not found: $pvc"
-            done
