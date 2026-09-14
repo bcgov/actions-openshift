@@ -70,3 +70,17 @@ jobs:
       db_name: app_database
       deploy_dir: docs/schema
 ```
+
+### 8. PR Close (`.github/workflows/.pr-close.yml`)
+A reusable workflow that cleans up OpenShift resources and retags images on pull request close or merge.
+
+#### Example Usage:
+```yaml
+jobs:
+  cleanup:
+    uses: bcgov/actions-openshift/.github/workflows/.pr-close.yml@v1
+    secrets: inherit
+    with:
+      cleanup: helm
+```
+
