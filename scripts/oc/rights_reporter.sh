@@ -12,6 +12,17 @@ PROJECTS=$(oc projects | sed "s/\*/ /g" | grep -E "^ +.*-.*(.*)$")
 # Roles to report on, can be overridden with a quoted parameter
 ROLES=${1:-"admin edit view"}
 
+# Helper to check if a role is requested
+has_role() {
+  local target="$1"
+  for r in ${ROLES}; do
+    if [[ "$r" == "$target" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Initialize counters
 PROJECT_COUNT=0
 declare -A ROLE_COUNTS
@@ -25,6 +36,9 @@ declare -A PROJECT_DETAILS
 # Initialize role counts to 0
 for role in ${ROLES}; do
   ROLE_COUNTS[$role]=0
+done
+for default_role in admin edit view; do
+  ROLE_COUNTS[$default_role]=${ROLE_COUNTS[$default_role]:-0}
 done
 
 # Initialize environment counts
@@ -98,14 +112,14 @@ for p in $(echo "${PROJECTS}" | awk '{print $1}'); do
       fi
     done
     
-    # Risk analysis
-    if [ $PROJECT_EDIT_COUNT -eq 0 ]; then
+    # Risk analysis (only when respective roles are tracked)
+    if has_role "edit" && [ $PROJECT_EDIT_COUNT -eq 0 ]; then
       PROJECTS_NO_EDIT=$((PROJECTS_NO_EDIT + 1))
     fi
-    if [ $PROJECT_VIEW_COUNT -eq 0 ]; then
+    if has_role "view" && [ $PROJECT_VIEW_COUNT -eq 0 ]; then
       PROJECTS_NO_VIEW=$((PROJECTS_NO_VIEW + 1))
     fi
-    if [ $PROJECT_ADMIN_COUNT -gt 5 ]; then
+    if has_role "admin" && [ $PROJECT_ADMIN_COUNT -gt 5 ]; then
       PROJECTS_MANY_ADMIN=$((PROJECTS_MANY_ADMIN + 1))
     fi
     
@@ -120,16 +134,22 @@ done
 TEAM_COUNT=${#TEAM_COUNTS[@]}
 
 # Calculate ratios
-if [ ${ROLE_COUNTS["edit"]} -gt 0 ]; then
-  ADMIN_EDIT_RATIO=$(echo "scale=1; ${ROLE_COUNTS["admin"]} / ${ROLE_COUNTS["edit"]}" | bc 2>/dev/null || echo "N/A")
-else
-  ADMIN_EDIT_RATIO="∞"
+ADMIN_EDIT_RATIO="N/A"
+if has_role "admin" && has_role "edit"; then
+  if [ ${ROLE_COUNTS["edit"]} -gt 0 ]; then
+    ADMIN_EDIT_RATIO=$(echo "scale=1; ${ROLE_COUNTS["admin"]} / ${ROLE_COUNTS["edit"]}" | bc 2>/dev/null || echo "N/A")
+  else
+    ADMIN_EDIT_RATIO="∞"
+  fi
 fi
 
-if [ ${ROLE_COUNTS["view"]} -gt 0 ]; then
-  ADMIN_VIEW_RATIO=$(echo "scale=1; ${ROLE_COUNTS["admin"]} / ${ROLE_COUNTS["view"]}" | bc 2>/dev/null || echo "N/A")
-else
-  ADMIN_VIEW_RATIO="∞"
+ADMIN_VIEW_RATIO="N/A"
+if has_role "admin" && has_role "view"; then
+  if [ ${ROLE_COUNTS["view"]} -gt 0 ]; then
+    ADMIN_VIEW_RATIO=$(echo "scale=1; ${ROLE_COUNTS["admin"]} / ${ROLE_COUNTS["view"]}" | bc 2>/dev/null || echo "N/A")
+  else
+    ADMIN_VIEW_RATIO="∞"
+  fi
 fi
 
 # Summary stats
@@ -137,9 +157,9 @@ echo -e "\n---\n"
 echo -e "Summary:"
 echo -e "  Projects analyzed: $PROJECT_COUNT"
 echo -e "  Teams analyzed: $TEAM_COUNT"
-echo -e "  Total users with 'admin' role: ${ROLE_COUNTS["admin"]}"
-echo -e "  Total users with 'edit' role: ${ROLE_COUNTS["edit"]}"
-echo -e "  Total users with 'view' role: ${ROLE_COUNTS["view"]}"
+for role in ${ROLES}; do
+  echo -e "  Total users with '${role}' role: ${ROLE_COUNTS[$role]}"
+done
 
 echo -e "\nEnvironment Breakdown:"
 echo -e "  Development projects: ${ENV_COUNTS["dev"]}"
@@ -147,15 +167,27 @@ echo -e "  Testing projects: ${ENV_COUNTS["test"]}"
 echo -e "  Production projects: ${ENV_COUNTS["prod"]}"
 echo -e "  Tools projects: ${ENV_COUNTS["tools"]}"
 
-echo -e "\nRisk Indicators:"
-echo -e "  Projects with 0 edit users: $PROJECTS_NO_EDIT"
-echo -e "  Projects with 0 view users: $PROJECTS_NO_VIEW"
-echo -e "  Projects with >5 admin users: $PROJECTS_MANY_ADMIN"
-echo -e "  Admin-to-edit ratio: $ADMIN_EDIT_RATIO"
-echo -e "  Admin-to-view ratio: $ADMIN_VIEW_RATIO"
+if has_role "admin" || has_role "edit" || has_role "view"; then
+  echo -e "\nRisk Indicators:"
+  if has_role "edit"; then
+    echo -e "  Projects with 0 edit users: $PROJECTS_NO_EDIT"
+  fi
+  if has_role "view"; then
+    echo -e "  Projects with 0 view users: $PROJECTS_NO_VIEW"
+  fi
+  if has_role "admin"; then
+    echo -e "  Projects with >5 admin users: $PROJECTS_MANY_ADMIN"
+  fi
+  if has_role "admin" && has_role "edit"; then
+    echo -e "  Admin-to-edit ratio: $ADMIN_EDIT_RATIO"
+  fi
+  if has_role "admin" && has_role "view"; then
+    echo -e "  Admin-to-view ratio: $ADMIN_VIEW_RATIO"
+  fi
+fi
 
 # Team comparison table
-if [ $TEAM_COUNT -gt 1 ]; then
+if [ $TEAM_COUNT -gt 1 ] && has_role "admin" && has_role "edit" && has_role "view"; then
   echo -e "\nTeam Comparison:"
   echo -e "Team     | Admin | Edit | View | Risk Level"
   echo -e "---------|-------|------|------|-----------"

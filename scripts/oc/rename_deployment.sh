@@ -19,8 +19,35 @@ fi
 
 SOURCE_DEPLOYMENT="${1}"
 TARGET_DEPLOYMENT="${2:-${SOURCE_DEPLOYMENT}-prev}"
+ORIGINAL_MANIFEST=$(mktemp "/tmp/${SOURCE_DEPLOYMENT}_orig_$(date +%Y%m%d)_XXXXXX.json")
 MANIFEST=$(mktemp "/tmp/${SOURCE_DEPLOYMENT}_$(date +%Y%m%d)_XXXXXX.json")
-trap 'rm -f "${MANIFEST}"' EXIT
+SUCCESS=false
+DELETED_SOURCE=false
+
+cleanup() {
+  local exit_code=$?
+  set +e
+  rm -f "${MANIFEST}"
+  if [[ "${SUCCESS}" == "true" ]]; then
+    rm -f "${ORIGINAL_MANIFEST}"
+  else
+    if [[ -f "${ORIGINAL_MANIFEST}" && -s "${ORIGINAL_MANIFEST}" ]]; then
+      echo "Original deployment manifest preserved at: ${ORIGINAL_MANIFEST}" >&2
+      if [[ "${DELETED_SOURCE}" == "true" ]] && ! oc get deployment "${SOURCE_DEPLOYMENT}" &>/dev/null; then
+        echo "Attempting to restore original deployment '${SOURCE_DEPLOYMENT}'..." >&2
+        if oc apply -f "${ORIGINAL_MANIFEST}" &>/dev/null; then
+          echo "Successfully restored original deployment '${SOURCE_DEPLOYMENT}'." >&2
+        else
+          echo "Failed to restore original deployment. Restore manually using: oc apply -f '${ORIGINAL_MANIFEST}'" >&2
+        fi
+      fi
+    else
+      rm -f "${ORIGINAL_MANIFEST}"
+    fi
+  fi
+  exit "${exit_code}"
+}
+trap cleanup EXIT
 
 # Fail fast if the new deployment already exists
 if oc get deployment "${TARGET_DEPLOYMENT}" &>/dev/null; then
@@ -34,27 +61,35 @@ if ! oc get deployment "${SOURCE_DEPLOYMENT}" &>/dev/null; then
   exit 0
 fi
 
-# Export, clean, and update deployment manifest
-oc get deployment "${SOURCE_DEPLOYMENT}" -o json \
-  | jq 'del(
-      .metadata.uid,
-      .metadata.resourceVersion,
-      .metadata.selfLink,
-      .metadata.creationTimestamp,
-      .metadata.generation,
-      .metadata.managedFields,
-      .status
-    )
-    | .metadata.name = "'"${TARGET_DEPLOYMENT}"'"
-    | .spec.selector.matchLabels.deployment = "'"${TARGET_DEPLOYMENT}"'"
-    | .spec.template.metadata.labels.deployment = "'"${TARGET_DEPLOYMENT}"'"' \
-  > "${MANIFEST}"
+# Export original deployment manifest as backup
+oc get deployment "${SOURCE_DEPLOYMENT}" -o json > "${ORIGINAL_MANIFEST}"
+
+# Clean and update deployment manifest for target
+jq 'del(
+    .metadata.uid,
+    .metadata.resourceVersion,
+    .metadata.selfLink,
+    .metadata.creationTimestamp,
+    .metadata.generation,
+    .metadata.managedFields,
+    .status
+  )
+  | .metadata.name = "'"${TARGET_DEPLOYMENT}"'"
+  | .spec.selector.matchLabels.deployment = "'"${TARGET_DEPLOYMENT}"'"
+  | .spec.template.metadata.labels.deployment = "'"${TARGET_DEPLOYMENT}"'"' \
+  "${ORIGINAL_MANIFEST}" > "${MANIFEST}"
+
+# Validate target deployment manifest before deleting source
+echo "Validating target deployment manifest..."
+if ! oc apply --dry-run=server -f "${MANIFEST}"; then
+  echo "Error: Target deployment manifest validation failed." >&2
+  exit 4
+fi
 
 # Delete the old deployment and apply the new one
+DELETED_SOURCE=true
 oc delete deployment "${SOURCE_DEPLOYMENT}"
 oc apply -f "${MANIFEST}"
-
-# Clean up
 
 # Wait for the new deployment to become available
 echo "Waiting for deployment '${TARGET_DEPLOYMENT}' to become available..."
@@ -62,6 +97,8 @@ if ! oc rollout status deployment/"${TARGET_DEPLOYMENT}" --timeout=120s; then
   echo "Error: Deployment '${TARGET_DEPLOYMENT}' did not become available in time."
   exit 3
 fi
+
+SUCCESS=true
 
 # Show matching deployments for confirmation
 echo -e "\nMatching deployments after renaming:"

@@ -75,11 +75,12 @@ oc exec -i deployment/"${SOURCE_DEPLOYMENT}" -- env DUMP_PARAMETERS="${DUMP_PARA
   pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -Fc ${DUMP_PARAMETERS}
 ' | oc exec -i deployment/"${TARGET_DEPLOYMENT}" -- env RESTORE_TOC_EXCLUDE="${RESTORE_TOC_EXCLUDE}" bash -c '
   set -euo pipefail
-  trap "rm -f /tmp/transfer.dump /tmp/transfer.list" EXIT
-  cat > /tmp/transfer.dump
+  TRANSFER_DIR=$(mktemp -d /tmp/transfer_XXXXXX)
+  trap "rm -rf \"${TRANSFER_DIR}\"" EXIT
+  cat > "${TRANSFER_DIR}/transfer.dump"
   if [[ -n "${RESTORE_TOC_EXCLUDE:-}" ]]; then
     set +e
-    pg_restore -l /tmp/transfer.dump | grep -v -iE "${RESTORE_TOC_EXCLUDE}" > /tmp/transfer.list
+    pg_restore -l "${TRANSFER_DIR}/transfer.dump" | grep -v -iE "${RESTORE_TOC_EXCLUDE}" > "${TRANSFER_DIR}/transfer.list"
     pipe_status=("${PIPESTATUS[@]}")
     set -e
 
@@ -93,14 +94,14 @@ oc exec -i deployment/"${SOURCE_DEPLOYMENT}" -- env DUMP_PARAMETERS="${DUMP_PARA
       exit "${pipe_status[1]}"
     fi
 
-    if [[ ! -s /tmp/transfer.list ]]; then
+    if [[ ! -s "${TRANSFER_DIR}/transfer.list" ]]; then
       echo "Error: TOC list is empty after filtering with pattern \"${RESTORE_TOC_EXCLUDE}\"." >&2
       exit 1
     fi
 
-    pg_restore -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" --no-owner --no-privileges -L /tmp/transfer.list /tmp/transfer.dump
+    pg_restore -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" --no-owner --no-privileges -L "${TRANSFER_DIR}/transfer.list" "${TRANSFER_DIR}/transfer.dump"
   else
-    pg_restore -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" --no-owner --no-privileges /tmp/transfer.dump
+    pg_restore -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" --no-owner --no-privileges "${TRANSFER_DIR}/transfer.dump"
   fi
 '
 

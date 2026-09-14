@@ -13,7 +13,8 @@
 # - Environment variables POSTGRES_USER and POSTGRES_DB must be set in the pods
 #
 # Notes:
-# - Uses pg_stat_user_tables to get live row counts
+# - Uses pg_stat_user_tables (n_live_tup) to get estimated row counts based on PostgreSQL statistics
+# - Note: n_live_tup is a statistics estimate, not an exact count; table statistics may be stale immediately after a restore until ANALYZE runs
 # - Reports differences in table names or row counts between environments
 # - Reports differences but always exits successfully (informational only)
 #
@@ -42,7 +43,7 @@ if ! oc get po -l deployment="${TARGET_DEPLOYMENT}" --no-headers -o name | grep 
 fi
 
 # Query to get table names and row counts
-# Note: n_live_tup is an estimate, not exact count (based on statistics)
+# Note: n_live_tup is a PostgreSQL statistics estimate, not an exact count (run ANALYZE if counts appear stale)
 COUNT_QUERY="
 SELECT schemaname || '.' || relname AS table_name, n_live_tup AS row_count
 FROM pg_stat_user_tables
@@ -69,17 +70,17 @@ fi
 
 # Show table counts from each database
 echo
-echo "Comparing source and target table counts..."
+echo "Comparing source and target table counts (PostgreSQL statistics estimate via n_live_tup)..."
 echo
 echo "Source (${SOURCE_DEPLOYMENT}):"
 echo "$SOURCE_COUNTS" | head -20
-SOURCE_TOTAL=$(echo "$SOURCE_COUNTS" | grep -c .)
+SOURCE_TOTAL=$(awk 'NF { count++ } END { print count + 0 }' <<< "${SOURCE_COUNTS}")
 echo "... ($SOURCE_TOTAL tables total)"
 
 echo
 echo "Target (${TARGET_DEPLOYMENT}):"
 echo "$TARGET_COUNTS" | head -20
-TARGET_TOTAL=$(echo "$TARGET_COUNTS" | grep -c .)
+TARGET_TOTAL=$(awk 'NF { count++ } END { print count + 0 }' <<< "${TARGET_COUNTS}")
 echo "... ($TARGET_TOTAL tables total)"
 
 # Diff and summarize
@@ -88,6 +89,7 @@ DIFF_OUTPUT=$(diff -u --label "Source (${SOURCE_DEPLOYMENT})" <(echo "$SOURCE_CO
 
 echo
 echo "--- Comparison Result ---"
+echo "Note: Row counts are PostgreSQL statistics estimates (n_live_tup), not exact row counts."
 
 if [ -z "$DIFF_OUTPUT" ]; then
   echo "✅ $SOURCE_TOTAL tables match $TARGET_TOTAL tables"
