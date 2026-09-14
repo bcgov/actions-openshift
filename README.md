@@ -42,21 +42,7 @@ Deploy to OpenShift using templates. Verification or penetration tests.
 - uses: bcgov/actions-openshift/deployer@v0.1.0
 ```
 
-### 6. Deployer (`.github/workflows/.deployer.yml`)
-A reusable workflow that manages Helm and Template-based application deployments to OpenShift. It configures variables, handles release/tag naming conventions, and automates target environment promotions.
-
-#### Example Usage:
-```yaml
-jobs:
-  deploy:
-    uses: bcgov/actions-openshift/.github/workflows/.deployer.yml@v1
-    secrets: inherit
-    with:
-      cleanup: helm
-      packages: backend frontend migrations
-```
-
-### 7. SchemaSpy (`.github/workflows/.schema-spy.yml`)
+### 6. SchemaSpy (`.github/workflows/.schema-spy.yml`)
 A reusable workflow that spins up a Postgres/PostGIS service, runs migrations using Flyway, generates interactive database documentation with SchemaSpy, and automatically publishes the results to GitHub Pages.
 
 #### Example Usage:
@@ -71,26 +57,9 @@ jobs:
       deploy_dir: docs/schema
 ```
 
-### 8. PR Close (`.github/workflows/.pr-close.yml`)
-A reusable workflow that cleans up OpenShift resources on pull request close or merge, and optionally retags images when merged.
-
-#### Example Usage:
-```yaml
-jobs:
-  cleanup:
-    uses: bcgov/actions-openshift/.github/workflows/.pr-close.yml@v1
-    permissions:
-      contents: read
-      packages: write # required when passing packages for retagging
-    secrets: inherit
-    with:
-      cleanup: helm
-      packages: backend frontend
-```
-
 ## Operational Scripts
 
-Standalone CLI utilities for developer environments and operational maintenance:
+Standalone CLI utilities for developer environments and operational maintenance. Usage, curl examples, and the Postgres migration walkthrough live in the script READMEs, not here.
 
 ### Certificate Management ([`scripts/cert/`](./scripts/cert))
 * **[`csr_generator.sh`](./scripts/cert/csr_generator.sh)**: Interactive/automated script to generate a private key and Certificate Signing Request (CSR) for OpenShift Route TLS.
@@ -101,6 +70,7 @@ Standalone CLI utilities for developer environments and operational maintenance:
 * **[`db_transfer.sh`](./scripts/oc/db_transfer.sh)**: Stream a binary `pg_dump` to a temporary file in the target container, filter its TOC, and restore it with `pg_restore`.
 * **[`db_compare.sh`](./scripts/oc/db_compare.sh)**: Compare PostgreSQL table row counts across deployments to verify data migrations.
 * **[`rights_reporter.sh`](./scripts/oc/rights_reporter.sh)**: Audit and report OpenShift user RBAC rights and risk indicators across accessible namespaces.
+* Postgres migration walkthrough: [`scripts/oc/README.md`](./scripts/oc/README.md)
 
 
 
