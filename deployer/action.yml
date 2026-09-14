@@ -102,13 +102,19 @@ runs:
     - name: Context Diagnostics
       if: inputs.debug
       shell: bash
+      env:
+        DIAG_EVENT_NAME: ${{ github.event_name }}
+        DIAG_PULL_REQUEST: ${{ github.event.pull_request != '' }}
+        DIAG_BASE_REF: ${{ github.base_ref }}
+        DIAG_LITE_MODE: ${{ inputs.lite_mode }}
+        DIAG_DEBUG_MODE: ${{ inputs.debug }}
       run: |
         echo "---- CONTEXT DIAGNOSTICS ----"
-        echo "Event Name:   ${{ github.event_name }}"
-        echo "Pull Request: ${{ github.event.pull_request != '' }}"
-        echo "Base Ref:     ${{ github.base_ref }}"
-        echo "Lite Mode:    ${{ inputs.lite_mode }}"
-        echo "Debug Mode:   ${{ inputs.debug }}"
+        echo "Event Name:   ${DIAG_EVENT_NAME}"
+        echo "Pull Request: ${DIAG_PULL_REQUEST}"
+        echo "Base Ref:     ${DIAG_BASE_REF}"
+        echo "Lite Mode:    ${DIAG_LITE_MODE}"
+        echo "Debug Mode:   ${DIAG_DEBUG_MODE}"
         echo "---------------------------"
 
     # Send triggers to diff action
@@ -122,8 +128,10 @@ runs:
     - name: Validate oc login retry inputs
       if: steps.triggers.outputs.triggered == 'true'
       shell: bash
+      env:
+        OC_LOGIN_ATTEMPTS: ${{ inputs.oc_login_attempts }}
       run: |
-        if ! [[ "${{ inputs.oc_login_attempts }}" =~ ^[1-9][0-9]*$ ]]; then
+        if ! [[ "${OC_LOGIN_ATTEMPTS}" =~ ^[1-9][0-9]*$ ]]; then
           echo "::error::oc_login_attempts must be a positive integer"
           exit 1
         fi
@@ -153,9 +161,14 @@ runs:
 
     - if: steps.triggers.outputs.triggered == 'true'
       shell: bash
+      env:
+        FILE: ${{ inputs.file }}
+        PARAMETERS: ${{ inputs.parameters }}
+        LITE_MODE: ${{ inputs.lite_mode }}
+        DEBUG: ${{ inputs.debug }}
       run: |
         # Process template and variables
-        TEMPLATE="$(oc process -f ${{ inputs.file }} ${{ inputs.parameters }} --local)"
+        TEMPLATE="$(oc process -f "${FILE}" ${PARAMETERS} --local)"
 
         # Check for deprecated DeploymentConfig objects
         DC_COUNT=$(echo "${TEMPLATE}" | jq '[.items[] | select(.kind=="DeploymentConfig")] | length')
@@ -170,8 +183,8 @@ runs:
         done
 
         # Apply lite mode modifications for pull requests if triggered
-        if [[ "${{ inputs.lite_mode }}" == "true" ]]; then
-          if [[ "${{ inputs.debug }}" == "true" ]]; then
+        if [[ "${LITE_MODE}" == "true" ]]; then
+          if [[ "${DEBUG}" == "true" ]]; then
             echo "DEBUG: Template BEFORE lite mode modifications:"
             echo "${TEMPLATE}"
           fi
@@ -196,7 +209,7 @@ runs:
           fi
           rm .template.json .template_lite.json
 
-          if [[ "${{ inputs.debug }}" == "true" ]]; then
+          if [[ "${DEBUG}" == "true" ]]; then
             echo "DEBUG: Template AFTER lite mode modifications:"
             echo "${TEMPLATE}"
           fi
@@ -209,11 +222,14 @@ runs:
 
     - if: steps.triggers.outputs.triggered == 'true'
       shell: bash
+      env:
+        OVERWRITE: ${{ inputs.overwrite }}
+        TIMEOUT: ${{ inputs.timeout || '15m' }}
       run: |
         # Expand for deployment steps
-        if [ "${{ inputs.overwrite }}" != "false" ]; then
+        if [ "${OVERWRITE}" != "false" ]; then
           echo "Overwrite=true; using oc apply"
-          oc apply --timeout=${{ inputs.timeout || '15m' }} -f - <<< "${TEMPLATE}"
+          oc apply --timeout="${TIMEOUT}" -f - <<< "${TEMPLATE}"
         else
           # Allow AlreadyExists errors and expected failures
           echo "Overwrite=false; using oc create"

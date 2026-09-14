@@ -133,10 +133,10 @@ jobs:
           oc_server: ${{ secrets.oc_server || env.DEFAULT_OC_SERVER }}
           commands: |
             # Cleanup for Helm deployments
-            if helm status "${{ env.release }}" >/dev/null 2>&1; then
-              helm uninstall --no-hooks "${{ env.release }}"
+            if helm status "$release" >/dev/null 2>&1; then
+              helm uninstall --no-hooks "$release"
             else
-              echo "Not found: ${{ env.release }}"
+              echo "Not found: $release"
             fi
 
       - name: OC Template (label) Cleanup
