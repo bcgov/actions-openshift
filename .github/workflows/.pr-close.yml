@@ -75,16 +75,25 @@ jobs:
       packages: ${{ steps.packages.outputs.packages }}
     steps:
       - id: packages
+        env:
+          INPUT_PACKAGES: ${{ inputs.packages }}
         run: |
           # Convert packages to JSON array for job matrix
-          echo "packages=$(jq -cn '$ARGS.positional' --args ${{ inputs.packages }})" >> $GITHUB_OUTPUT
+          read -r -a pkgs <<< "$INPUT_PACKAGES"
+          echo "packages=$(jq -cn '$ARGS.positional' --args "${pkgs[@]}")" >> "$GITHUB_OUTPUT"
 
-      - run: |
+      - env:
+          INPUT_PACKAGES: ${{ inputs.packages }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          MERGE_BRANCH: ${{ inputs.merge_branch }}
+        run: |
           # Diagnostic vars
-          echo "packages=$(jq -cn '$ARGS.positional' --args ${{ inputs.packages }})"
-          echo "github.event.pull_request.merged=${{ github.event.pull_request.merged }}"
-          echo "github.event.pull_request.base.ref=${{ github.event.pull_request.base.ref }}"
-          echo "inputs.merge_branch=${{ inputs.merge_branch }}"
+          read -r -a pkgs <<< "$INPUT_PACKAGES"
+          echo "packages=$(jq -cn '$ARGS.positional' --args "${pkgs[@]}")"
+          echo "github.event.pull_request.merged=$PR_MERGED"
+          echo "github.event.pull_request.base.ref=$PR_BASE_REF"
+          echo "inputs.merge_branch=$MERGE_BRANCH"
 
   retags:
     name: Retags
@@ -108,7 +117,7 @@ jobs:
   # Clean up OpenShift when PR closed
   cleanup:
     name: OpenShift
-    if: inputs.cleanup == 'helm' || inputs.cleanup == 'label'
+    if: (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && github.event.action == 'closed' && (inputs.cleanup == 'helm' || inputs.cleanup == 'label')
     environment: ${{ inputs.environment }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -124,14 +133,19 @@ jobs:
           oc_server: ${{ secrets.oc_server || env.DEFAULT_OC_SERVER }}
           commands: |
             # Cleanup for Helm deployments
-
-            # If found, then remove
-            helm status ${{ env.release }} && helm uninstall --no-hooks ${{ env.release }} || \
+            if helm status "${{ env.release }}" >/dev/null 2>&1; then
+              helm uninstall --no-hooks "${{ env.release }}"
+            else
               echo "Not found: ${{ env.release }}"
+            fi
 
       - name: OC Template (label) Cleanup
         if: inputs.cleanup == 'label'
         uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
+        env:
+          CLEANUP_NAME: ${{ inputs.cleanup_name }}
+          REPOSITORY: ${{ inputs.repository }}
+          TARGET: ${{ inputs.target }}
         with:
           oc_namespace: ${{ secrets.oc_namespace }}
           oc_token: ${{ secrets.oc_token }}
@@ -141,25 +155,28 @@ jobs:
             # Cleanup for OpenShift template deployments, uses labels
 
             # Remove old build runs, build pods and deployment pods
-            if [ -n "${{ inputs.cleanup_name }}" ]; then
-              for name in ${{ inputs.cleanup_name }}; do
-                oc delete all,cm,pvc,secret,networkpolicy -l app=${name} || \
+            if [ -n "$CLEANUP_NAME" ]; then
+              for name in $CLEANUP_NAME; do
+                oc delete all,cm,pvc,secret,networkpolicy,routes,hpa -l "app=${name}" || \
                   echo "Not found: ${name}"
               done
             else
-              oc delete all,cm,pvc,secret,networkpolicy -l app=${{ github.event.repository.name }}-${{ inputs.target }} || \
-                echo "Not found: ${{ github.event.repository.name }}-${{ inputs.target }}"
+              target_app="${REPOSITORY}-${TARGET}"
+              oc delete all,cm,pvc,secret,networkpolicy,routes,hpa -l "app=${target_app}" || \
+                echo "Not found: ${target_app}"
             fi
 
       - name: Remove PVCs
-        if: inputs.remove_pvc
+        if: inputs.remove_pvc != ''
         uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
+        env:
+          REMOVE_PVC: ${{ inputs.remove_pvc }}
         with:
           oc_namespace: ${{ secrets.oc_namespace }}
           oc_token: ${{ secrets.oc_token }}
           oc_server: ${{ secrets.oc_server || env.DEFAULT_OC_SERVER }}
           commands: |
             # Remove PVCs from OpenShift when PR closed
-            echo "${{ inputs.remove_pvc }}" | while IFS= read -r pvc; do
-                oc delete pvc ${pvc//,/} || echo "Not found: ${pvc//,/}"
+            for pvc in $(echo "$REMOVE_PVC" | tr ',' ' '); do
+              oc delete pvc "$pvc" || echo "Not found: $pvc"
             done
