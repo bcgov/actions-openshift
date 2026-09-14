@@ -6,6 +6,7 @@ set -euo nounset
 # Usage: ./csr_generator.sh [options] [DOMAIN] [PRIVATE_KEY]
 #
 # Options:
+#   -f, --force          Overwrite existing key and CSR files
 #   -h, --help           Display help message and exit
 #
 # If DOMAIN is not provided, the script runs interactively.
@@ -18,6 +19,7 @@ display_help() {
   echo "Usage: $0 [options] [DOMAIN] [PRIVATE_KEY]"
   echo ""
   echo "Options:"
+  echo "  -f, --force          Overwrite existing key and CSR files"
   echo "  -h, --help           Display this help message and exit"
   echo ""
   echo "Examples:"
@@ -30,12 +32,16 @@ display_help() {
 # Parse options
 DOMAIN=""
 PRIVATE_KEY=""
+FORCE=false
 
 # Process options
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
       display_help
+      ;;
+    -f|--force)
+      FORCE=true
       ;;
     *)
       # First non-option arg is DOMAIN
@@ -45,12 +51,12 @@ while [[ $# -gt 0 ]]; do
       elif [[ -z "$PRIVATE_KEY" ]]; then
         PRIVATE_KEY="$1"
       else
-        echo "Error: Too many arguments"
-        display_help
+        echo "Error: Too many arguments" >&2
+        exit 1
       fi
-      shift
       ;;
   esac
+  shift
 done
 
 # Interactivity is determined by whether DOMAIN was provided
@@ -72,7 +78,7 @@ echo -e "\nDomain: ${DOMAIN}"
 # Check if private key is provided
 if [[ -n "${PRIVATE_KEY}" ]]; then
   if [[ ! -f "${PRIVATE_KEY}" ]]; then
-    echo "Error: Private key file ${PRIVATE_KEY} not found"
+    echo "Error: Private key file ${PRIVATE_KEY} not found" >&2
     exit 1
   fi
 # Only ask about private key in interactive mode
@@ -84,9 +90,38 @@ elif [[ "$INTERACTIVE" = true ]]; then
     read PRIVATE_KEY
     
     if [[ ! -f "${PRIVATE_KEY}" ]]; then
-      echo "Error: Private key file ${PRIVATE_KEY} not found"
+      echo "Error: Private key file ${PRIVATE_KEY} not found" >&2
       exit 1
     fi
+  fi
+fi
+
+# Prevent silent overwrite of key and CSR files
+if [[ -z "${PRIVATE_KEY}" && -f "${DOMAIN}.key" && "$FORCE" != true ]]; then
+  if [[ "$INTERACTIVE" = true ]]; then
+    echo "Warning: ${DOMAIN}.key already exists. Overwrite? [y/n]"
+    read -r OVERWRITE_KEY
+    if [[ ! "${OVERWRITE_KEY}" =~ ^[Yy] ]]; then
+      echo "Error: ${DOMAIN}.key already exists" >&2
+      exit 1
+    fi
+  else
+    echo "Error: ${DOMAIN}.key already exists. Use --force to overwrite." >&2
+    exit 1
+  fi
+fi
+
+if [[ -f "${DOMAIN}.csr" && "$FORCE" != true ]]; then
+  if [[ "$INTERACTIVE" = true ]]; then
+    echo "Warning: ${DOMAIN}.csr already exists. Overwrite? [y/n]"
+    read -r OVERWRITE_CSR
+    if [[ ! "${OVERWRITE_CSR}" =~ ^[Yy] ]]; then
+      echo "Error: ${DOMAIN}.csr already exists" >&2
+      exit 1
+    fi
+  else
+    echo "Error: ${DOMAIN}.csr already exists. Use --force to overwrite." >&2
+    exit 1
   fi
 fi
 

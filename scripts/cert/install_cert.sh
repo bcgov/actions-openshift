@@ -1,5 +1,5 @@
-#!/bin/sh
-set -euo nounset
+#!/bin/bash
+set -euo pipefail
 
 # Custom Domain Helper
 #
@@ -24,6 +24,9 @@ fi
 [[ ${DOMAIN_WITH_PATH} =~ .*/$ ]] || DOMAIN_WITH_PATH="${DOMAIN_WITH_PATH}/"
 DOMAIN=${DOMAIN_WITH_PATH%%/*}
 SUBDIR=${DOMAIN_WITH_PATH#*/}
+if [[ -n "${SUBDIR}" && "${SUBDIR}" != /* ]]; then
+  SUBDIR="/${SUBDIR}"
+fi
 
 echo -e "\nDomain: ${DOMAIN}"
 echo -e "Subdir: ${SUBDIR}\n"
@@ -59,9 +62,9 @@ fi
 echo "Installing route"
 # https://docs.openshift.com/container-platform/4.15/networking/routes/secured-routes.html#nw-ingress-creating-an-edge-route-with-a-custom-certificate_secured-routes
 if [ -z "${SUBDIR}" ]; then
-  oc create route edge --service=${SERVICE} --cert=${DOMAIN}.pem --key=${DOMAIN}.key --ca-cert=${DOMAIN}.ca-cert --hostname=${DOMAIN} ${SERVICE}-vanity
+  oc create route edge --service="${SERVICE}" --cert="${DOMAIN}.pem" --key="${DOMAIN}.key" --ca-cert="${DOMAIN}.ca-cert" --hostname="${DOMAIN}" "${SERVICE}-vanity" --dry-run=client -o yaml | oc apply -f -
 else
-  oc create route edge --service=${SERVICE} --cert=${DOMAIN}.pem --key=${DOMAIN}.key --ca-cert=${DOMAIN}.ca-cert --hostname=${DOMAIN} --path=${SUBDIR} ${SERVICE}-vanity
+  oc create route edge --service="${SERVICE}" --cert="${DOMAIN}.pem" --key="${DOMAIN}.key" --ca-cert="${DOMAIN}.ca-cert" --hostname="${DOMAIN}" --path="${SUBDIR}" "${SERVICE}-vanity" --dry-run=client -o yaml | oc apply -f -
 fi
 
 # Visit and confirm the new route
