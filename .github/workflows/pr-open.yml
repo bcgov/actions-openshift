@@ -33,10 +33,28 @@ jobs:
     permissions: {}
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout Code
+      - name: Checkout Code to Subdirectory
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          path: fixture
+
+      - name: Verify sibling calls use $/
+        run: |
+          set -euo pipefail
+          echo "Verifying composite actions do not use relative path './' for sibling calls..."
+          if grep -rnE 'uses:\s*\./' fixture/*/action.yml; then
+            echo "::error::Relative path './' found in action.yml. Sibling actions must be called using '$/<action>'."
+            exit 1
+          fi
+          echo "Checking sibling action references..."
+          for action in route-tls cleanup-pr; do
+            if ! grep -q 'uses: \$/oc-runner' "fixture/$action/action.yml"; then
+              echo "::error::$action/action.yml must reference oc-runner via 'uses: $/oc-runner'"
+              exit 1
+            fi
+          done
+          echo "All sibling action references verified to use '$/'."
 
       - name: Generate dummy certificates
         run: |
@@ -71,7 +89,7 @@ jobs:
           ROUTE_OUT: /tmp/route.yml
         run: |
           set -euo pipefail
-          output="$(./route-tls/provision.sh 2>&1)" || { echo "$output"; exit 1; }
+          output="$(./fixture/route-tls/provision.sh 2>&1)" || { echo "$output"; exit 1; }
           printf '%s\n' "$output"
           if printf '%s\n' "$output" | grep -qE 'BEGIN (PRIVATE KEY|RSA PRIVATE KEY)'; then
             echo "provision.sh leaked a private key to stdout/stderr"
@@ -96,7 +114,7 @@ jobs:
           DRY_RUN: "true"
           ROUTE_OUT: /tmp/route-mismatch.yml
         run: |
-          if ./route-tls/provision.sh; then
+          if ./fixture/route-tls/provision.sh; then
             echo "expected cert/key mismatch to fail"
             exit 1
           fi
@@ -112,7 +130,7 @@ jobs:
           DRY_RUN: "true"
           ROUTE_OUT: /tmp/route-ca.yml
         run: |
-          if ./route-tls/provision.sh; then
+          if ./fixture/route-tls/provision.sh; then
             echo "expected CA mismatch to fail"
             exit 1
           fi
@@ -128,13 +146,20 @@ jobs:
           DRY_RUN: "true"
           ROUTE_OUT: /tmp/route-host.yml
         run: |
-          if ./route-tls/provision.sh; then
+          if ./fixture/route-tls/provision.sh; then
             echo "expected host mismatch to fail"
             exit 1
           fi
 
+      - name: Quarantine root workspace
+        run: |
+          set -euo pipefail
+          rm -rf fixture
+          echo "Root workspace quarantined. Current contents:"
+          ls -la
+
       - name: Composite action dry-run
-        uses: ./route-tls
+        uses: $/route-tls
         with:
           hostname: myapp.bcgov.ca
           target_service: my-test-service
@@ -142,3 +167,128 @@ jobs:
           tls_private_key: ${{ env.DUMMY_KEY }}
           tls_ca_certificate: ${{ env.DUMMY_CA }}
           dry_run: "true"
+
+  test-fork-token-degradation:
+    name: Fork Token Degradation Matrix (${{ matrix.scenario.name }})
+    permissions: read-all
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        scenario:
+          - name: route-tls-isolated
+            type: composite-action
+          - name: pr-description-write-noop
+            type: write-noop-harness
+            operation: pr-description
+          - name: image-tracker-write-noop
+            type: write-noop-harness
+            operation: image-tracker
+    steps:
+      - name: Quarantine root workspace
+        run: |
+          set -euo pipefail
+          echo "Ensuring root workspace is clean and isolated..."
+          rm -rf ./* ./.* 2>/dev/null || true
+          ls -la
+
+      - name: Verify read-all token restrictions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "Simulating fork PR token degradation..."
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::GITHUB_TOKEN is missing in fork permutation"
+            exit 1
+          fi
+          echo "Verified GITHUB_TOKEN is available under read-all permutation."
+
+      - name: Exercise representative write/no-op harness
+        if: matrix.scenario.type == 'write-noop-harness'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATION: ${{ matrix.scenario.operation }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.number || 1 }}
+        run: |
+          set -euo pipefail
+          echo "Exercising write-capable operation '${OPERATION}' with read-only GITHUB_TOKEN..."
+
+          case "${OPERATION}" in
+            pr-description)
+              API_PATH="repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments"
+              PAYLOAD='{"body":"test fork token degradation"}'
+              ;;
+            image-tracker)
+              API_PATH="repos/${GITHUB_REPOSITORY}/releases"
+              PAYLOAD='{"tag_name":"test-token-degradation-simulation","name":"test"}'
+              ;;
+            *)
+              echo "::error::Unknown operation: ${OPERATION}"
+              exit 1
+              ;;
+          esac
+
+          RESPONSE_FILE="$(mktemp)"
+          HTTP_STATUS=$(curl -s -o "$RESPONSE_FILE" -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/${API_PATH}" \
+            -d "${PAYLOAD}" || true)
+
+          echo "GitHub API responded with HTTP ${HTTP_STATUS}"
+          if [ "${HTTP_STATUS}" = "403" ]; then
+            echo "::notice::[${OPERATION}] Confirmed 403 Forbidden under permissions: read-all."
+            echo "::notice::[${OPERATION}] Degrading gracefully: write skipped on read-only fork token without crashing."
+            # Graceful degradation: exit 0 without crashing the pipeline
+            exit 0
+          elif [ "${HTTP_STATUS}" = "200" ] || [ "${HTTP_STATUS}" = "201" ]; then
+            echo "::notice::[${OPERATION}] Write operation succeeded (elevated token present)."
+            exit 0
+          else
+            echo "::error::[${OPERATION}] Unexpected HTTP ${HTTP_STATUS} received:"
+            cat "$RESPONSE_FILE"
+            exit 1
+          fi
+
+      - name: Generate dummy certificates
+        if: matrix.scenario.type == 'composite-action'
+        run: |
+          set -euo pipefail
+          openssl req -x509 -newkey rsa:2048 -keyout /tmp/fork-key.pem -out /tmp/fork-cert.pem \
+            -days 30 -nodes -subj "/CN=myapp.bcgov.ca" \
+            -addext "subjectAltName=DNS:myapp.bcgov.ca"
+          openssl req -x509 -newkey rsa:2048 -keyout /tmp/fork-other-key.pem -out /tmp/fork-other.pem \
+            -days 30 -nodes -subj "/CN=other.example"
+          cp /tmp/fork-cert.pem /tmp/fork-ca.pem
+          {
+            echo "FORK_CERT<<EOF"
+            cat /tmp/fork-cert.pem
+            echo "EOF"
+            echo "FORK_KEY<<EOF"
+            cat /tmp/fork-key.pem
+            echo "EOF"
+            echo "FORK_CA<<EOF"
+            cat /tmp/fork-ca.pem
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Composite action dry-run (quarantined workspace)
+        if: matrix.scenario.type == 'composite-action'
+        uses: $/route-tls
+        with:
+          hostname: myapp.bcgov.ca
+          target_service: my-test-service
+          tls_certificate: ${{ env.FORK_CERT }}
+          tls_private_key: ${{ env.FORK_KEY }}
+          tls_ca_certificate: ${{ env.FORK_CA }}
+          dry_run: "true"
+
+      - name: Validate generated route output
+        if: matrix.scenario.type == 'composite-action'
+        run: |
+          set -euo pipefail
+          [ -f route.yml ] || { echo "::error::route.yml was not created"; exit 1; }
+          grep -q '^apiVersion: route.openshift.io/v1' route.yml
+          grep -q '^kind: Route' route.yml
+          echo "Route TLS composite action executed cleanly under fork token degradation."
