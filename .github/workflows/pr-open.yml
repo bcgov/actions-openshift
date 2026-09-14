@@ -25,6 +25,9 @@ jobs:
       - name: Run actionlint
         run: docker run --rm -v "$(pwd)":/repo -w /repo rhysd/actionlint:latest
 
+      - name: Audit composite actions for script injection
+        run: python3 scripts/audit_composite_actions.py
+
   test-route-tls:
     name: Test Route TLS
     permissions: {}

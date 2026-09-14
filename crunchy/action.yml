@@ -129,6 +129,7 @@ runs:
         # Variables and Inputs (!= closed)
 
         # Enable S3 backups if all required vars are set
+        S3_ENABLED=false
         s3_vars=()
         for v in "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" "${S3_BUCKET}" "${S3_ENDPOINT}"; do
           if [ -n "$v" ]; then
@@ -214,7 +215,7 @@ runs:
         fi
 
         # Execute the deploy command
-        echo "$GITHUB_ACTION_PATH/scripts/deploy_db.sh $PARAMS"
+        echo "$GITHUB_ACTION_PATH/scripts/deploy_db.sh [arguments redacted]"
         "$GITHUB_ACTION_PATH/scripts/deploy_db.sh" $PARAMS
 
     - if: github.event_name == 'pull_request' && github.event.action != 'closed'
