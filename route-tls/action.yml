@@ -43,7 +43,7 @@ runs:
   steps:
     - name: OpenShift CLI
       if: ${{ inputs.dry_run != 'true' }}
-      uses: bcgov/action-oc-runner@111868d1fc50db0a40417ba321d865ef5c931bbd # v1.7.0
+      uses: $/oc-runner
       with:
         oc_namespace: ${{ inputs.oc_namespace }}
         oc_server: ${{ inputs.oc_server }}
