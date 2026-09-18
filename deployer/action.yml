@@ -168,7 +168,12 @@ runs:
         DEBUG: ${{ inputs.debug }}
       run: |
         # Process template and variables
-        TEMPLATE="$(oc process -f "${FILE}" ${PARAMETERS} --local)"
+        if [ -n "${PARAMETERS}" ]; then
+          readarray -d '' ARGS < <(xargs printf '%s\0' <<< "${PARAMETERS}")
+        else
+          ARGS=()
+        fi
+        TEMPLATE="$(oc process -f "${FILE}" "${ARGS[@]}" --local)"
 
         # Check for deprecated DeploymentConfig objects
         DC_COUNT=$(echo "${TEMPLATE}" | jq '[.items[] | select(.kind=="DeploymentConfig")] | length')
