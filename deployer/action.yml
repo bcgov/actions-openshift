@@ -168,7 +168,19 @@ runs:
         DEBUG: ${{ inputs.debug }}
       run: |
         # Process template and variables
-        TEMPLATE="$(oc process -f "${FILE}" ${PARAMETERS} --local)"
+        if [ -n "${PARAMETERS}" ]; then
+          ARGS_FILE="$(mktemp)"
+          if ! xargs printf '%s\0' <<< "${PARAMETERS}" > "${ARGS_FILE}"; then
+            rm -f "${ARGS_FILE}"
+            echo "::error::parameters contains invalid quoting"
+            exit 1
+          fi
+          readarray -d '' ARGS < "${ARGS_FILE}"
+          rm -f "${ARGS_FILE}"
+        else
+          ARGS=()
+        fi
+        TEMPLATE="$(oc process -f "${FILE}" "${ARGS[@]}" --local)"
 
         # Check for deprecated DeploymentConfig objects
         DC_COUNT=$(echo "${TEMPLATE}" | jq '[.items[] | select(.kind=="DeploymentConfig")] | length')
