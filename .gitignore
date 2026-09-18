@@ -1,3 +1,12 @@
+# macOS
+.DS_Store
+
+# IDEs
+.idea
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
 # Logs
 logs
 *.log
@@ -72,6 +81,42 @@ web_modules/
 
 # Local route-tls dry-run output (contains the private key)
 route-tls/route.yml
+route.yml
+**/route.yml
+route-*.yml
+**/route-*.yml
+
+# Certificates, private keys, CSRs, and CA bundles
+*.key
+*.pem
+*.pub
+*.crt
+*.cer
+*.der
+*.csr
+*.ca-cert
+*.ca-bundle
+*.p7b
+*.p7c
+*.crl
+**/*.p12
+**/*.pfx
+
+# Keystores and truststores
+**/*.jks
+**/*.jceks
+**/keystore.*
+**/truststore.*
+
+# Credentials and secrets
+**/credentials.json
+**/secrets.json
+**/secrets.yml
+**/secrets.yaml
+
+# Downloaded certificate bundles
+*.zip
+*.tar.gz
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
