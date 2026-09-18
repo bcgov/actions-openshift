@@ -169,7 +169,14 @@ runs:
       run: |
         # Process template and variables
         if [ -n "${PARAMETERS}" ]; then
-          readarray -d '' ARGS < <(xargs printf '%s\0' <<< "${PARAMETERS}")
+          ARGS_FILE="$(mktemp)"
+          if ! xargs printf '%s\0' <<< "${PARAMETERS}" > "${ARGS_FILE}"; then
+            rm -f "${ARGS_FILE}"
+            echo "::error::parameters contains invalid quoting"
+            exit 1
+          fi
+          readarray -d '' ARGS < "${ARGS_FILE}"
+          rm -f "${ARGS_FILE}"
         else
           ARGS=()
         fi
