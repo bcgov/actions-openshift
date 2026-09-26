@@ -178,7 +178,7 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Deploy Crunchy
-        uses: bcgov/actions-openshift/crunchy@v0.1.0
+        uses: bcgov/actions-openshift/crunchy@vX.Y.Z
         id: deploy_crunchy
         with:
           oc_namespace: ${{ secrets.OC_NAMESPACE }}
@@ -213,7 +213,7 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Deploy Crunchy
-        uses: bcgov/actions-openshift/crunchy@v0.1.0
+        uses: bcgov/actions-openshift/crunchy@vX.Y.Z
         id: deploy_crunchy
         with:
           oc_namespace: ${{ secrets.OC_NAMESPACE }}
@@ -294,7 +294,7 @@ restore:
 
 ## Best Practices
 
-- Replace `bcgov/actions-openshift/crunchy@v0.1.0` with a specific commit SHA for better reproducibility
+- Replace `bcgov/actions-openshift/crunchy@vX.Y.Z` with a specific commit SHA for better reproducibility
 - Ensure all required secrets are properly configured in your repository's settings
 - Customize the values.yml file based on your application's needs
 - For production deployments, adjust the resource requests and limits accordingly

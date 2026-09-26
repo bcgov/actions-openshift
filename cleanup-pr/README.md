@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: PR Cleanup
-        uses: bcgov/actions-openshift/cleanup-pr@v1
+        uses: bcgov/actions-openshift/cleanup-pr@vX.Y.Z
         with:
           target: ${{ github.event.number }}
           oc_namespace: ${{ secrets.OC_NAMESPACE }}

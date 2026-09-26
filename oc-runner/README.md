@@ -17,7 +17,7 @@ Provide as few as zero commands to login only.  There is a separate parameter fo
 # Usage
 
 ```yaml
-- uses: bcgov/actions-openshift/oc-runner@v0.1.0
+- uses: bcgov/actions-openshift/oc-runner@vX.Y.Z
   with:
     ### Required
     
@@ -80,7 +80,7 @@ login:
   name: Login Only
   runs-on: ubuntu-24.04
   steps:
-    - uses: bcgov/actions-openshift/oc-runner@v0.1.0
+    - uses: bcgov/actions-openshift/oc-runner@vX.Y.Z
       with:
         oc_namespace: ${{ vars.oc_namespace }}
         oc_server: ${{ vars.oc_server }}
@@ -96,7 +96,7 @@ whoareyou:
   name: Who Are You?
   runs-on: ubuntu-24.04
   steps:
-    - uses: bcgov/actions-openshift/oc-runner@v0.1.0
+    - uses: bcgov/actions-openshift/oc-runner@vX.Y.Z
       with:
         oc_namespace: ${{ vars.oc_namespace }}
         oc_server: ${{ vars.oc_server }}
@@ -116,7 +116,7 @@ cronjob:
   name: Run and Report on Cronjob
   runs-on: ubuntu-24.04
   steps:
-    - uses: bcgov/actions-openshift/oc-runner@v0.1.0
+    - uses: bcgov/actions-openshift/oc-runner@vX.Y.Z
       with:
         oc_namespace: ${{ vars.oc_namespace }}
         oc_server: ${{ vars.oc_server }}
@@ -143,7 +143,7 @@ jobs:
       commands: ${{ steps.oc.outputs.commands }}
     steps:
       - id: oc
-        uses: bcgov/actions-openshift/oc-runner@v0.1.0
+        uses: bcgov/actions-openshift/oc-runner@vX.Y.Z
         with:
           oc_namespace: ${{ vars.oc_namespace }}
           oc_server: ${{ vars.oc_server }}

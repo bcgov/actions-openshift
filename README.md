@@ -17,7 +17,7 @@ Login and run `oc` commands (and optional cronjobs) on OpenShift.
 * See [oc-runner/README.md](./oc-runner/README.md) for inputs and usage.
 
 ```yaml
-- uses: bcgov/actions-openshift/oc-runner@v0.1.0
+- uses: bcgov/actions-openshift/oc-runner@vX.Y.Z
   with:
     oc_namespace: ${{ vars.oc_namespace }}
     oc_server: ${{ vars.oc_server }}
@@ -31,7 +31,7 @@ Deploy Crunchy Postgres on OpenShift (PR pipelines and cleanup).
 * See [crunchy/README.md](./crunchy/README.md).
 
 ```yaml
-- uses: bcgov/actions-openshift/crunchy@v0.1.0
+- uses: bcgov/actions-openshift/crunchy@vX.Y.Z
 ```
 
 ### 5. [deployer](./deployer) (Composite Action)
@@ -39,7 +39,7 @@ Deploy to OpenShift using templates. Verification or penetration tests.
 * See [deployer/README.md](./deployer/README.md).
 
 ```yaml
-- uses: bcgov/actions-openshift/deployer@v0.1.0
+- uses: bcgov/actions-openshift/deployer@vX.Y.Z
 ```
 
 ### 6. SchemaSpy (`.github/workflows/.schema-spy.yml`)
@@ -49,7 +49,7 @@ A reusable workflow that spins up a Postgres/PostGIS service, runs migrations us
 ```yaml
 jobs:
   document-db:
-    uses: bcgov/actions-openshift/.github/workflows/.schema-spy.yml@v1
+    uses: bcgov/actions-openshift/.github/workflows/.schema-spy.yml@vX.Y.Z
     permissions:
       contents: write
     with:

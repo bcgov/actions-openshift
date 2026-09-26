@@ -17,7 +17,7 @@ Testing has only been done with public images (ghcr.io, hub.docker.com) so far.
 # Usage
 
 ```yaml
-- uses: bcgov/actions-openshift/deployer@v0.1.0
+- uses: bcgov/actions-openshift/deployer@vX.Y.Z
   with:
     ### Required
 
@@ -77,7 +77,7 @@ deploys:
   runs-on: ubuntu-24.04
   steps:
     - name: Deploys
-      uses: bcgov/actions-openshift/deployer@v0.1.0
+      uses: bcgov/actions-openshift/deployer@vX.Y.Z
       with:
         file: frontend/openshift.deploy.yml
         oc_namespace: ${{ vars.OC_NAMESPACE }}
@@ -120,7 +120,7 @@ runs-on: ubuntu-24.04
         file: common/openshift.init.yml
 steps:
   - name: Deploys
-    uses: bcgov/actions-openshift/deployer@v0.1.0
+    uses: bcgov/actions-openshift/deployer@vX.Y.Z
     with:
       name: ${{ matrix.name }}
       file: ${{ matrix.file }}
@@ -155,7 +155,7 @@ runs-on: ubuntu-24.04
         triggers: ('backend/', 'frontend/')
 steps:
   - name: Deploys
-    uses: bcgov/actions-openshift/deployer@v0.1.0
+    uses: bcgov/actions-openshift/deployer@vX.Y.Z
     with:
       name: ${{ matrix.name }}
       file: ${{ matrix.file }}
@@ -177,7 +177,7 @@ deploys:
   runs-on: ubuntu-24.04
   steps:
     - name: Deploys
-      uses: bcgov/actions-openshift/deployer@v0.1.0
+      uses: bcgov/actions-openshift/deployer@vX.Y.Z
       with:
         file: backend/openshift.deploy.yml
         oc_namespace: ${{ vars.OC_NAMESPACE }}
@@ -208,7 +208,7 @@ The action will return a boolean (true|false) of whether a deployment has been t
 
 ```yaml
 - id: meaningful_id_name
-  uses: bcgov/actions-openshift/deployer@v0.1.0
+  uses: bcgov/actions-openshift/deployer@vX.Y.Z
   ...
 
 - needs: [id]
