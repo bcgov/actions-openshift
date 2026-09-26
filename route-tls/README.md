@@ -23,7 +23,7 @@ Leave out **Sectigo Public Server Authentication Root R46.pem** and **USERTrust 
 ## Usage
 
 ```yaml
-- uses: bcgov/actions-openshift/route-tls@v1
+- uses: bcgov/actions-openshift/route-tls@vX.Y.Z
   with:
     hostname: app.example.gov.bc.ca
     target_service: myapp-prod
