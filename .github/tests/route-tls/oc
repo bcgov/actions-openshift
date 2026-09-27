@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Minimal oc stand-in for route-tls/provision.sh tests (no cluster).
+# Reads the live Route from $MOCK_DIR/route.json, records calls in $MOCK_DIR/calls,
+# and copies the backup Secret's route.json to $MOCK_DIR/secret-route.json.
+set -euo pipefail
+: "${MOCK_DIR:?MOCK_DIR is required}"
+printf '%s\n' "$*" >> "$MOCK_DIR/calls"
+
+case "$1" in
+  whoami | project | label | apply) exit 0 ;;
+  get)
+    case "$2" in
+      secret) exit 1 ;;
+      route)
+        case "${4:-}" in
+          "") exit 0 ;;
+          -o)
+            case "$5" in
+              json)
+                [ -z "${MOCK_ROUTE_JSON_FAIL:-}" ] || exit 1
+                cat "$MOCK_DIR/route.json"
+                ;;
+              jsonpath=*)
+                path="${5#jsonpath=\{}"
+                jq -j "${path%\}} // empty" "$MOCK_DIR/route.json"
+                ;;
+              *) echo "mock oc: unexpected output format: $5" >&2; exit 2 ;;
+            esac
+            ;;
+          *) echo "mock oc: unexpected get route args: $*" >&2; exit 2 ;;
+        esac
+        ;;
+      *) echo "mock oc: unexpected get: $*" >&2; exit 2 ;;
+    esac
+    ;;
+  create)
+    for arg in "$@"; do
+      case "$arg" in
+        --from-file=route.json=*) cp "${arg#--from-file=route.json=}" "$MOCK_DIR/secret-route.json" ;;
+      esac
+    done
+    ;;
+  *) echo "mock oc: unexpected command: $*" >&2; exit 2 ;;
+esac

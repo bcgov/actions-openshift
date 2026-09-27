@@ -151,6 +151,76 @@ jobs:
             exit 1
           fi
 
+      - name: Script backs up full Route (mock oc)
+        env:
+          ROUTE_HOST: myapp.bcgov.ca
+          ROUTE_NAME: my-test-route
+          TARGET_SERVICE: my-test-service
+          TLS_CERTIFICATE_FILE: /tmp/cert.pem
+          TLS_PRIVATE_KEY_FILE: /tmp/key.pem
+          TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
+          OC_NAMESPACE: abc123-dev
+          OC_SERVER: https://api.example:6443
+          OC_TOKEN: mock-token
+          MOCK_DIR: /tmp/mock-oc
+        run: |
+          set -euo pipefail
+          mkdir -p "$MOCK_DIR"
+          jq -n --rawfile c /tmp/cert.pem --rawfile k /tmp/key.pem --rawfile ca /tmp/ca.pem '{
+            apiVersion: "route.openshift.io/v1", kind: "Route",
+            metadata: {
+              name: "my-test-route", namespace: "abc123-dev", labels: {keep: "yes"},
+              uid: "u", resourceVersion: "1", creationTimestamp: "2026-01-01T00:00:00Z",
+              generation: 2, selfLink: "/x", managedFields: [{}],
+              annotations: {"kubectl.kubernetes.io/last-applied-configuration": "{}", keep: "yes"}
+            },
+            spec: {
+              host: "myapp.bcgov.ca", to: {kind: "Service", name: "old-service"},
+              tls: {termination: "edge", certificate: $c, key: $k, caCertificate: $ca}
+            },
+            status: {ingress: []}
+          }' > "$MOCK_DIR/route.json"
+          output="$(PATH="$PWD/fixture/.github/tests/route-tls:$PATH" ./fixture/route-tls/provision.sh 2>&1)" || { echo "$output"; exit 1; }
+          printf '%s\n' "$output"
+          if printf '%s\n' "$output" | grep -qE 'BEGIN (PRIVATE KEY|RSA PRIVATE KEY)'; then
+            echo "provision.sh leaked a private key to stdout/stderr"
+            exit 1
+          fi
+          jq -e '
+            .status == null and .metadata.uid == null and .metadata.resourceVersion == null
+            and .metadata.creationTimestamp == null and .metadata.generation == null
+            and .metadata.selfLink == null and .metadata.managedFields == null
+            and (.metadata.annotations | has("kubectl.kubernetes.io/last-applied-configuration") | not)
+            and .metadata.annotations.keep == "yes" and .metadata.labels.keep == "yes"
+            and .spec.to.name == "old-service" and (.spec.tls.key | length > 0)
+          ' "$MOCK_DIR/secret-route.json" >/dev/null || { echo "backup route.json is not the stripped live Route"; exit 1; }
+          grep -q '^apply -f ' "$MOCK_DIR/calls" || { echo "route was not applied"; exit 1; }
+
+      - name: Script refuses to apply when the Route snapshot fails (mock oc)
+        env:
+          ROUTE_HOST: myapp.bcgov.ca
+          ROUTE_NAME: my-test-route
+          TARGET_SERVICE: my-test-service
+          TLS_CERTIFICATE_FILE: /tmp/cert.pem
+          TLS_PRIVATE_KEY_FILE: /tmp/key.pem
+          TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
+          OC_NAMESPACE: abc123-dev
+          OC_SERVER: https://api.example:6443
+          OC_TOKEN: mock-token
+          MOCK_DIR: /tmp/mock-oc
+          MOCK_ROUTE_JSON_FAIL: "1"
+        run: |
+          set -euo pipefail
+          rm -f "$MOCK_DIR/calls" "$MOCK_DIR/secret-route.json"
+          if PATH="$PWD/fixture/.github/tests/route-tls:$PATH" ./fixture/route-tls/provision.sh; then
+            echo "expected snapshot failure to stop provision.sh"
+            exit 1
+          fi
+          if grep -qE '^(create|apply) ' "$MOCK_DIR/calls"; then
+            echo "provision.sh created a Secret or applied the Route after a failed snapshot"
+            exit 1
+          fi
+
       - name: Quarantine root workspace
         run: |
           set -euo pipefail
