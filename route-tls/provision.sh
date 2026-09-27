@@ -174,32 +174,35 @@ else
 fi
 
 if oc get route "$ROUTE_NAME" >/dev/null 2>&1; then
-  echo "Existing route found. Archiving working certificates..."
+  echo "Existing route found. Archiving it..."
   OLD_CERT="$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.certificate}')"
   OLD_KEY="$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.key}')"
   OLD_CA="$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.caCertificate}')"
-  if [ -n "$OLD_KEY" ]; then
-    CERT_HASH="$(printf '%s' "$OLD_CERT" | sha256sum | cut -d' ' -f1)"
-    BACKUP_NAME="${ROUTE_NAME}-backup-${CERT_HASH:0:8}"
-    if oc get secret "$BACKUP_NAME" >/dev/null 2>&1; then
-      echo "Backup already exists: $BACKUP_NAME"
-    else
-      # Full Route minus status and cluster-set metadata, restorable with `oc apply -f`.
-      # Contains the private key: stays in WORKDIR, never printed.
-      ROUTE_BACKUP="$WORKDIR/route-backup.json"
-      if ! oc get route "$ROUTE_NAME" -o json \
-        | jq 'del(.status, .metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.generation, .metadata.managedFields, .metadata.selfLink, .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"])' \
-        > "$ROUTE_BACKUP" || [ ! -s "$ROUTE_BACKUP" ]; then
-        die "Could not snapshot Route $ROUTE_NAME for backup; not applying."
-      fi
-      oc create secret generic "$BACKUP_NAME" \
-        --from-literal=tls.crt="$OLD_CERT" \
-        --from-literal=tls.key="$OLD_KEY" \
-        --from-literal=ca.crt="$OLD_CA" \
-        --from-file=route.json="$ROUTE_BACKUP"
-      oc label secret "$BACKUP_NAME" backup-type=route-tls
-      echo "Certificates archived to secret: $BACKUP_NAME"
+  CERT_HASH="$(printf '%s' "$OLD_CERT" | sha256sum | cut -d' ' -f1)"
+  BACKUP_NAME="${ROUTE_NAME}-backup-${CERT_HASH:0:8}"
+  if oc get secret "$BACKUP_NAME" >/dev/null 2>&1; then
+    echo "Backup already exists: $BACKUP_NAME"
+  else
+    # Full Route minus status and cluster-set metadata, restorable with `oc apply -f`.
+    # May contain the private key: stays in WORKDIR, never printed.
+    ROUTE_BACKUP="$WORKDIR/route-backup.json"
+    if ! oc get route "$ROUTE_NAME" -o json \
+      | jq 'del(.status, .metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.generation, .metadata.managedFields, .metadata.selfLink, .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"])' \
+      > "$ROUTE_BACKUP" || [ ! -s "$ROUTE_BACKUP" ]; then
+      die "Could not snapshot Route $ROUTE_NAME for backup; not applying."
     fi
+    SECRET_ARGS=(--from-file=route.json="$ROUTE_BACKUP")
+    # Routes on the router default cert or passthrough have no inline key; back up the Route only.
+    if [ -n "$OLD_KEY" ]; then
+      SECRET_ARGS+=(
+        --from-literal=tls.crt="$OLD_CERT"
+        --from-literal=tls.key="$OLD_KEY"
+        --from-literal=ca.crt="$OLD_CA"
+      )
+    fi
+    oc create secret generic "$BACKUP_NAME" "${SECRET_ARGS[@]}"
+    oc label secret "$BACKUP_NAME" backup-type=route-tls
+    echo "Route archived to secret: $BACKUP_NAME"
   fi
 else
   echo "No existing route found. Skipping archival backup."

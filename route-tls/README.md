@@ -57,7 +57,7 @@ First prod run: add `dry_run: "true"` until the job is green, then drop it.
 ## What it does
 
 1. Fail if the cert and key do not match, the issuing CA did not sign the leaf, the cert is expired, or the cert does not cover `hostname` (CN or SAN, including wildcards).
-2. Unless `dry_run`, snapshot the live Route into a Secret named `<route>-backup-<sha256-prefix>`, labeled `backup-type=route-tls` (no `app` label): its TLS (`tls.crt`, `tls.key`, `ca.crt`) and the whole Route as JSON under `route.json` (status and cluster-set metadata removed; labels, annotations and spec kept). Re-applying the same cert is a no-op on that Secret. If the snapshot fails, nothing is applied. To restore after a bad apply:
+2. Unless `dry_run`, snapshot the live Route into a Secret named `<route>-backup-<sha256-prefix>`, labeled `backup-type=route-tls` (no `app` label): its inline TLS (`tls.crt`, `tls.key`, `ca.crt`, when the Route has a key) and the whole Route as JSON under `route.json` (status and cluster-set metadata removed; labels, annotations and spec kept). Re-applying the same cert is a no-op on that Secret. If the snapshot fails, nothing is applied. To restore after a bad apply:
 
    ```bash
    oc extract secret/<route>-backup-<sha256-prefix> --keys=route.json

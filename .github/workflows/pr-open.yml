@@ -221,6 +221,36 @@ jobs:
             exit 1
           fi
 
+      - name: Script backs up a Route without inline TLS (mock oc)
+        env:
+          ROUTE_HOST: myapp.bcgov.ca
+          ROUTE_NAME: my-test-route
+          TARGET_SERVICE: my-test-service
+          TLS_CERTIFICATE_FILE: /tmp/cert.pem
+          TLS_PRIVATE_KEY_FILE: /tmp/key.pem
+          TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
+          OC_NAMESPACE: abc123-dev
+          OC_SERVER: https://api.example:6443
+          OC_TOKEN: mock-token
+          MOCK_DIR: /tmp/mock-oc-nokey
+        run: |
+          set -euo pipefail
+          mkdir -p "$MOCK_DIR"
+          jq -n '{
+            apiVersion: "route.openshift.io/v1", kind: "Route",
+            metadata: {name: "my-test-route", uid: "u", resourceVersion: "1"},
+            spec: {host: "myapp.bcgov.ca", to: {kind: "Service", name: "old-service"}, tls: {termination: "edge"}},
+            status: {ingress: []}
+          }' > "$MOCK_DIR/route.json"
+          PATH="$PWD/fixture/.github/tests/route-tls:$PATH" ./fixture/route-tls/provision.sh
+          jq -e '.status == null and .metadata.uid == null and .spec.to.name == "old-service"' \
+            "$MOCK_DIR/secret-route.json" >/dev/null || { echo "keyless Route was not backed up"; exit 1; }
+          if grep -q -- '--from-literal=tls.key=' "$MOCK_DIR/calls"; then
+            echo "empty TLS literals were stored for a keyless Route"
+            exit 1
+          fi
+          grep -q '^apply -f ' "$MOCK_DIR/calls" || { echo "route was not applied"; exit 1; }
+
       - name: Quarantine root workspace
         run: |
           set -euo pipefail
