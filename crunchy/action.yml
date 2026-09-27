@@ -213,6 +213,7 @@ runs:
         # Bundled chart unless a chart repository was given; copied so the action directory stays untouched
         if [ -z "${CHART_REPOSITORY}" ]; then
           DIRECTORY="$(mktemp -d)"
+          trap 'rm -rf "${DIRECTORY}"' EXIT
           cp -r "${GITHUB_ACTION_PATH}/charts/crunchy/." "${DIRECTORY}"
         fi
 
