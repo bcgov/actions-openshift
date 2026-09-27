@@ -50,7 +50,8 @@ jobs:
             API_BLOCKED=true
           fi
           ROUTER_OK_WHILE_API_BLOCKED=false
-          if [ "${API_BLOCKED}" = true ] && answered "${SILVER_ROUTER}"; then
+          # Router is on silver, so compare it with the silver API only
+          if ! answered "${SILVER_API}" && answered "${SILVER_ROUTER}"; then
             ROUTER_OK_WHILE_API_BLOCKED=true
           fi
 
