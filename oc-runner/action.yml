@@ -78,6 +78,9 @@ inputs:
       Example: 10m, 30s, 1h
     default: 10m
     pattern: "^[0-9]+[mhs]$"
+  github_token:
+    description: Specify token (GH or PAT), instead of inheriting one from the calling workflow
+    default: ${{ github.token }}
   verbose:
     description: |
       Enable bash xtrace (`set -x`) for commands input debugging
@@ -247,6 +250,7 @@ runs:
     - if: steps.diff.outputs.triggered == 'true'
       uses: actions/checkout@v7
       with:
+        token: ${{ inputs.github_token }}
         repository: ${{ inputs.repository }}
         ref: ${{ inputs.ref }}
 
@@ -352,6 +356,8 @@ runs:
     - if: steps.diff.outputs.triggered == 'true' && inputs.repository != ''
       name: Restore caller checkout
       uses: actions/checkout@v7
+      with:
+        token: ${{ inputs.github_token }}
 
     - if: steps.diff.outputs.triggered == 'true' && inputs.cronjob
       id: cronjob
