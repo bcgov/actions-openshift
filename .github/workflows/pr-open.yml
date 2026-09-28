@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -28,13 +28,80 @@ jobs:
       - name: Audit composite actions for script injection
         run: python3 scripts/audit_composite_actions.py
 
+  test-deployer:
+    name: Test Deployer (${{ matrix.name }})
+    # Needs OpenShift credentials: same-repo PRs only (fork and push events get none)
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [backend, database, frontend]
+        include:
+          - name: backend
+            file: deployer/templates/backend.yml
+            overwrite: true
+            # Fake secret for the leak check; & < $ get JSON-escaped, defeating log masking
+            parameters: -p RANDOM_EXPRESSION='LeakCanary7f3a&x<y$z'
+          - name: database
+            file: deployer/templates/database.yml
+            overwrite: false
+          - name: frontend
+            file: deployer/templates/frontend.yml
+            oc_version: "4.13"
+            overwrite: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Deploy
+        uses: $/deployer
+        with:
+          file: ${{ matrix.file }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          oc_version: ${{ matrix.oc_version }}
+          overwrite: ${{ matrix.overwrite }}
+          triggers: ('deployer/', '.github/workflows/pr-open.yml')
+          debug: true
+          parameters: -p NAME=${{ github.event.repository.name }} -p ZONE=${{ github.event.number }} ${{ matrix.parameters }}
+
+      - name: Check rendered template did not leak
+        env:
+          CANARY: LeakCanary7f3a
+        run: |
+          set -euo pipefail
+          if [ -n "${TEMPLATE+x}" ]; then
+            echo "::error::TEMPLATE env var is visible to later steps"
+            exit 1
+          fi
+          if env | grep -v '^CANARY=' | grep -qF "${CANARY}"; then
+            echo "::error::Template content found in the job environment"
+            exit 1
+          fi
+          # GITHUB_ENV/GITHUB_OUTPUT files of earlier steps sit next to this step's
+          if grep -rqF "${CANARY}" "$(dirname "${GITHUB_ENV}")"; then
+            echo "::error::Template content was written to a GITHUB_ENV/GITHUB_OUTPUT file"
+            exit 1
+          fi
+          if compgen -G "${RUNNER_TEMP}/deployer-template*" > /dev/null; then
+            echo "::error::Rendered template file was not removed"
+            exit 1
+          fi
+          echo "No template leak found"
+
   test-route-tls:
     name: Test Route TLS
     permissions: {}
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout Code to Subdirectory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
           path: fixture
