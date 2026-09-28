@@ -123,6 +123,7 @@ runs:
       with:
         triggers: ${{ inputs.triggers }}
         ref: ${{ inputs.ref }}
+        token: ${{ inputs.github_token }}
 
     - name: Validate oc login retry inputs
       if: steps.triggers.outputs.triggered == 'true'
