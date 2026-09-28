@@ -74,7 +74,17 @@ jobs:
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
     steps:
+      # workflow-notifier reads CODEOWNERS from the workspace
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          sparse-checkout: .github/CODEOWNERS
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - uses: actions/download-artifact@v4
         with:
           pattern: probe-*
@@ -82,6 +92,8 @@ jobs:
           path: probes
 
       - name: Summarize
+        env:
+          PROBE_RESULT: ${{ needs.probe.result }}
         run: |
           set -euo pipefail
           jq -rs '
@@ -92,3 +104,24 @@ jobs:
             "",
             "Samples: \(length), unique IPs: \(map(.ip) | unique | length), API blocked: \(map(select(.api_blocked)) | length), router OK while API blocked: \(map(select(.router_ok_while_api_blocked)) | length)"
           ' probes/*.json | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${PROBE_RESULT}" != success ]; then
+            echo "::error::Probe jobs did not all succeed (result: ${PROBE_RESULT}); samples may be missing"
+            exit 1
+          fi
+          BLOCKED="$(jq -s 'map(select(.api_blocked)) | length' probes/*.json)"
+          if [ "${BLOCKED}" -gt 0 ]; then
+            echo "::error::OpenShift API unreachable from ${BLOCKED} runner sample(s); see the table above"
+            exit 1
+          fi
+
+      - if: failure() && github.event_name != 'pull_request'
+        uses: bcgov/actions/workflow-notifier@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
+        with:
+          title: "Runner reachability probe: OpenShift API blocked"
+          body: |
+            The runner reachability probe failed: a GitHub-hosted runner could not reach an OpenShift API, or a probe job failed.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Background: #49
+          # This repo has no "failure" label, and gh issue create fails on unknown labels
+          labels: bug
