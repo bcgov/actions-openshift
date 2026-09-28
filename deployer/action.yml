@@ -80,10 +80,6 @@ inputs:
       Example: bcgov/quickstart-openshift
     default: ${{ github.repository }}
     pattern: "^[a-zA-Z0-9-_]+/[a-zA-Z0-9-_]+$"
-  github_token:
-    description: |
-      Specify token (GH or PAT), instead of inheriting one from the calling workflow
-    default: ${{ github.token }}
   oc_login_attempts:
     description: |
       Maximum number of connection retry attempts for logging into OpenShift
@@ -144,7 +140,6 @@ runs:
         oc_version: ${{ inputs.oc_version }}
         repository: ${{ inputs.repository }}
         triggers: ${{ inputs.triggers }}
-        github_token: ${{ inputs.github_token }}
         login_attempts: ${{ inputs.oc_login_attempts }}
 
     - if: inputs.oc_version == '' && steps.triggers.outputs.triggered == 'true'
@@ -155,7 +150,6 @@ runs:
         oc_server: ${{ inputs.oc_server }}
         repository: ${{ inputs.repository }}
         triggers: ${{ inputs.triggers }}
-        github_token: ${{ inputs.github_token }}
         login_attempts: ${{ inputs.oc_login_attempts }}
 
     - if: steps.triggers.outputs.triggered == 'true'
@@ -257,5 +251,3 @@ runs:
     - name: Checkout local repo to make sure action.yml is present
       if: github.repository != inputs.repository
       uses: actions/checkout@v7
-      with:
-        token: ${{ inputs.github_token }}
