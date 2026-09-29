@@ -56,25 +56,26 @@ CHART_VERSION=$(yq -r .version Chart.yaml)
 # Package, update and deploy the chart
 helm package -u .
 
-# if it is not triggered TRIGGERED value is false, check if the chart is already deployed, if not deployed, deploy it else exit 0.
+# Current release status; empty when no release exists
+HELM_RELEASE_STATUS=""
+if STATUS_JSON="$(helm status "$RELEASE_NAME" -o json 2> /dev/null)"; then
+  HELM_RELEASE_STATUS="$(jq -r '.info.status' <<< "$STATUS_JSON")"
+fi
+echo "Helm release '${RELEASE_NAME}' status: '${HELM_RELEASE_STATUS:-<none>}'"
+
+# Triggers did not fire: skip only a healthy (deployed) release; otherwise deploy
 if [ "${TRIGGERED:-false}" != "true" ]; then
-  if ! helm status "$RELEASE_NAME" > /dev/null 2>&1; then
-    echo "Chart DB $RELEASE_NAME not deployed, deploying now, ignoring triggers."
-  else
+  if [ "$HELM_RELEASE_STATUS" = "deployed" ]; then
     echo "Crunchy DB $RELEASE_NAME is already deployed, triggers did not fire, so not upgrading."
     exit 0
   fi
+  echo "Chart DB $RELEASE_NAME is not in a deployed state, deploying now, ignoring triggers."
 fi
 
 # Self-heal a release left in a non-deployed state (pending-*, failed, uninstalling),
 # which blocks helm upgrade --install. Opt-in: deleting the PostgresCluster also
 # deletes the operator-owned PVCs, so the database starts empty.
 if [ "${SELF_HEAL_STUCK_RELEASES:-false}" = "true" ]; then
-  HELM_RELEASE_STATUS=""
-  if STATUS_JSON="$(helm status "$RELEASE_NAME" -o json 2> /dev/null)"; then
-    HELM_RELEASE_STATUS="$(jq -r '.info.status' <<< "$STATUS_JSON")"
-  fi
-  echo "Helm release '${RELEASE_NAME}' status: '${HELM_RELEASE_STATUS:-<none>}'"
   if [ -n "$HELM_RELEASE_STATUS" ] && [ "$HELM_RELEASE_STATUS" != "deployed" ]; then
     echo "Purging release '${RELEASE_NAME}' before reinstall."
     if ! helm uninstall "$RELEASE_NAME" --wait --timeout 2m; then
