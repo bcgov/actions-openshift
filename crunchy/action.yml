@@ -27,9 +27,37 @@ inputs:
     required: false
     validation: "^https?://.+:6443$"
   values_file:
-    description: 'Path to the values.yml file to use for the deployment'
-    required: true
+    description: 'Path to a values.yml file in the calling repository; omit to use the bundled values.yml. Cannot be combined with the override inputs below'
+    required: false
     validation: "^.+\\.(yml|yaml)$"
+
+  # Overrides for the bundled values.yml; unset inputs keep the bundled values
+  pvc_size:
+    description: 'Data volume size; e.g. 1Gi'
+    required: false
+  storage_class:
+    description: 'Data volume storage class; e.g. netapp-block-standard'
+    required: false
+  postgres_version:
+    description: 'PostgreSQL major version: 15, 16, 17 or 18; selects a matching PostGIS image'
+    required: false
+  replicas:
+    description: 'Number of PostgreSQL instance replicas'
+    required: false
+  cpu_request:
+    description: 'CPU request for PostgreSQL instances; e.g. 50m'
+    required: false
+  memory_request:
+    description: 'Memory request for PostgreSQL instances; e.g. 128Mi'
+    required: false
+  route_enabled:
+    description: 'Create a TLS passthrough Route to the primary database service'
+    default: 'false'
+    required: false
+  route_host:
+    description: 'Route host name; requires route_enabled, OpenShift generates one if omitted'
+    required: false
+
   s3_access_key:
     description: 'S3 access key'
     required: false
@@ -41,6 +69,12 @@ inputs:
     required: false
   s3_endpoint:
     description: 'S3 endpoint'
+
+  self_heal_stuck_releases:
+    description: 'Purge a Helm release stuck in a non-deployed state (pending-*, failed, uninstalling) before reinstalling. Deletes the PostgresCluster and its data volumes'
+    default: false
+    required: false
+    type: boolean
 
   # Usually a bad idea / not recommended
   force_cleanup:
@@ -128,8 +162,7 @@ runs:
       run: |
         # Variables and Inputs (!= closed)
 
-        # Enable S3 backups if all required vars are set
-        S3_ENABLED=false
+        # S3 backups need all four S3 inputs or none
         s3_vars=()
         for v in "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" "${S3_BUCKET}" "${S3_ENDPOINT}"; do
           if [ -n "$v" ]; then
@@ -138,7 +171,6 @@ runs:
         done
         if [ "${#s3_vars[@]}" -eq 4 ]; then
           echo "All S3 configuration variables are present. Enabling S3 backups."
-          S3_ENABLED=true
         elif [ "${#s3_vars[@]}" -gt 0 ]; then
           echo "Warning: Some S3 configuration variables are set, but not all. Please ensure all S3 variables are configured."
           exit 1
@@ -146,34 +178,29 @@ runs:
           echo "S3 configuration not set. Disabling S3 backups."
         fi
 
-        # Construct values.yml URL (ref_name = PR, ref_name = merge, default_branch = default)
-        VALUES_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH_OR_REF}/${VALUES_FILE}"
+        # No values_file: deploy_db.sh uses the bundled values.yml
+        VALUES_URL=""
+        if [ -n "${VALUES_FILE}" ]; then
+          # Construct values.yml URL (ref_name = PR, ref_name = merge, default_branch = default)
+          VALUES_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH_OR_REF}/${VALUES_FILE}"
 
-        # Build curl auth options if a token is provided (required for private repositories)
-        CURL_AUTH_OPTS=()
-        if [ -n "${GITHUB_TOKEN}" ]; then
-          CURL_AUTH_OPTS=(-H "Authorization: token ${GITHUB_TOKEN}")
-        fi
+          # Build curl auth options if a token is provided (required for private repositories)
+          CURL_AUTH_OPTS=()
+          if [ -n "${GITHUB_TOKEN}" ]; then
+            CURL_AUTH_OPTS=(-H "Authorization: token ${GITHUB_TOKEN}")
+          fi
 
-        # Validate values.yml URL
-        if ! curl "${CURL_AUTH_OPTS[@]}" --output /dev/null --silent --head --fail "${VALUES_URL}"; then
-          echo "Error: The constructed values.yml URL is invalid or inaccessible: ${VALUES_URL}"
-          echo "Hint: If this is a private repository, please ensure that:"
-          echo "  1. The workflow permissions are set to 'contents: read'."
-          echo "  2. A valid 'github_token' is supplied if accessing a private file."
-          exit 1
-        fi
-
-        # Process vars and send to GITHUB_ENV
-        for var in S3_ENABLED VALUES_URL; do
-          if [ -n "${!var}" ]; then
-            echo "${var}=${!var}"
-            echo "${var}=${!var}" >> $GITHUB_ENV
-          else
-            echo "Warning: ${var} is not set."
+          # Validate values.yml URL
+          if ! curl "${CURL_AUTH_OPTS[@]}" --output /dev/null --silent --head --fail "${VALUES_URL}"; then
+            echo "Error: The constructed values.yml URL is invalid or inaccessible: ${VALUES_URL}"
+            echo "Hint: If this is a private repository, please ensure that:"
+            echo "  1. The workflow permissions are set to 'contents: read'."
+            echo "  2. A valid 'github_token' is supplied if accessing a private file."
             exit 1
           fi
-        done
+        fi
+        echo "VALUES_URL=${VALUES_URL}"
+        echo "VALUES_URL=${VALUES_URL}" >> $GITHUB_ENV
 
     - id: triggers
       uses: bcgov/action-diff-triggers@a80e4b3cf77b7e05f84e74030e3bfa08b717a574 # v1.2.1
@@ -205,18 +232,28 @@ runs:
         S3_SECRET_KEY: ${{ inputs.s3_secret_key }}
         S3_BUCKET: ${{ inputs.s3_bucket }}
         S3_ENDPOINT: ${{ inputs.s3_endpoint }}
+        PVC_SIZE: ${{ inputs.pvc_size }}
+        STORAGE_CLASS: ${{ inputs.storage_class }}
+        POSTGRES_VERSION: ${{ inputs.postgres_version }}
+        REPLICAS: ${{ inputs.replicas }}
+        CPU_REQUEST: ${{ inputs.cpu_request }}
+        MEMORY_REQUEST: ${{ inputs.memory_request }}
+        ROUTE_ENABLED: ${{ inputs.route_enabled }}
+        ROUTE_HOST: ${{ inputs.route_host }}
+        SELF_HEAL_STUCK_RELEASES: ${{ inputs.self_heal_stuck_releases }}
       run: |
         # Deploy the database
 
         # Check if S3 inputs are provided and construct the deploy_db.sh command accordingly
-        PARAMS="${DIRECTORY} ${VALUES_URL} ${REPO_NAME} ${RELEASE_NAME} ${TRIGGERED}"
+        # Array, so an empty VALUES_URL (bundled values) keeps its position
+        PARAMS=("${DIRECTORY}" "${VALUES_URL}" "${REPO_NAME}" "${RELEASE_NAME}" "${TRIGGERED}")
         if [ -n "${S3_ACCESS_KEY}" ] && [ -n "${S3_SECRET_KEY}" ] && [ -n "${S3_BUCKET}" ] && [ -n "${S3_ENDPOINT}" ]; then
-          PARAMS+=" ${S3_ACCESS_KEY} ${S3_SECRET_KEY} ${S3_BUCKET} ${S3_ENDPOINT}"
+          PARAMS+=("${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" "${S3_BUCKET}" "${S3_ENDPOINT}")
         fi
 
         # Execute the deploy command
         echo "$GITHUB_ACTION_PATH/scripts/deploy_db.sh [arguments redacted]"
-        "$GITHUB_ACTION_PATH/scripts/deploy_db.sh" $PARAMS
+        "$GITHUB_ACTION_PATH/scripts/deploy_db.sh" "${PARAMS[@]}"
 
     - if: github.event_name == 'pull_request' && github.event.action != 'closed'
       shell: bash

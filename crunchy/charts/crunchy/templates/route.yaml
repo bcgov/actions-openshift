@@ -1,0 +1,26 @@
+{{/*
+Optional TLS passthrough Route to the primary PostgreSQL service for external clients.
+The router does not terminate TLS; clients must connect with SSL (e.g. sslmode=require).
+Values files without a route block render no Route.
+*/}}
+{{- $route := .Values.route | default dict }}
+{{- if $route.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ template "crunchy-postgres.fullname" . }}
+  labels: {{ include "crunchy-postgres.labels" . | nindent 4 }}
+spec:
+  {{- if $route.host }}
+  host: {{ $route.host }}
+  {{- end }}
+  port:
+    targetPort: postgres
+  tls:
+    termination: passthrough
+    insecureEdgeTerminationPolicy: None
+  to:
+    kind: Service
+    name: {{ template "crunchy-postgres.fullname" . }}-primary
+    weight: 100
+{{- end }}
