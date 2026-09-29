@@ -185,7 +185,7 @@ runs:
           
           # Fetch token response with HTTP code directly to memory
           ERR_FILE=$(mktemp)
-          RESPONSE=$(curl -ksS -4 --connect-timeout 10 --max-time 30 -w "%{http_code}" -X POST "${SA_TOKEN_URL}" \
+          RESPONSE=$(curl -sS -4 --connect-timeout 10 --max-time 30 -w "%{http_code}" -X POST "${SA_TOKEN_URL}" \
             --header "Authorization: Bearer ${TOKEN_INPUT}" \
             --header "Content-Type: application/json; charset=utf-8" \
             --data '{"spec": {"expirationSeconds": 1500 }}' 2>"$ERR_FILE") || true
@@ -227,6 +227,9 @@ runs:
 
           if [ $attempt -eq $ATTEMPTS ]; then
             echo "::error::Failed to log in to OpenShift after $ATTEMPTS attempts."
+            # Runner IP helps diagnose GitHub runner IPs blocked from the API (bcgov/actions-openshift#49)
+            RUNNER_IP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null) || RUNNER_IP="unknown (lookup failed)"
+            echo "::error::Runner public IP: ${RUNNER_IP}"
             exit 1
           fi
 
