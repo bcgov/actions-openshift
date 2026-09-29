@@ -1,0 +1,127 @@
+name: Probe Runner Reachability
+
+# Samples many GitHub-hosted runner egress IPs and records whether the OpenShift
+# API (:6443) answers, and whether the router (:443) still answers when it does not.
+# Background: #49 (cluster admins blocking GitHub runner IPs from the API).
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/probe-runner-reachability.yml
+
+permissions: {}
+
+jobs:
+  probe:
+    name: Probe (${{ matrix.sample }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    steps:
+      - name: Probe API :6443 and router :443
+        env:
+          SAMPLE: ${{ matrix.sample }}
+        run: |
+          set -uo pipefail
+
+          # Three attempts per target; prints the HTTP codes, e.g. "000 000 200" (000 = no answer)
+          probe() {
+            local codes=()
+            for _ in 1 2 3; do
+              codes+=("$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$1" 2>/dev/null)")
+            done
+            echo "${codes[*]}"
+          }
+          answered() { [[ " $1 " =~ \ [1-9][0-9][0-9]\  ]]; }
+
+          IP="$(curl -sS --max-time 20 https://api.ipify.org 2>/dev/null)"
+          GOLD_API="$(probe https://api.gold.devops.gov.bc.ca:6443/version)"
+          SILVER_API="$(probe https://api.silver.devops.gov.bc.ca:6443/version)"
+          SILVER_ROUTER="$(probe https://console.apps.silver.devops.gov.bc.ca/)"
+
+          API_BLOCKED=false
+          if ! answered "${GOLD_API}" || ! answered "${SILVER_API}"; then
+            API_BLOCKED=true
+          fi
+          ROUTER_OK_WHILE_API_BLOCKED=false
+          # Router is on silver, so compare it with the silver API only
+          if ! answered "${SILVER_API}" && answered "${SILVER_ROUTER}"; then
+            ROUTER_OK_WHILE_API_BLOCKED=true
+          fi
+
+          jq -cn \
+            --arg sample "${SAMPLE}" --arg ip "${IP}" \
+            --arg gold_api "${GOLD_API}" --arg silver_api "${SILVER_API}" --arg silver_router "${SILVER_ROUTER}" \
+            --argjson api_blocked "${API_BLOCKED}" \
+            --argjson router_ok_while_api_blocked "${ROUTER_OK_WHILE_API_BLOCKED}" \
+            '$ARGS.named' | tee "${RUNNER_TEMP}/probe-${SAMPLE}.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-${{ matrix.sample }}
+          path: ${{ runner.temp }}/probe-${{ matrix.sample }}.json
+          retention-days: 30
+
+  summary:
+    name: Summary
+    needs: probe
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # workflow-notifier reads CODEOWNERS from the workspace
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          sparse-checkout: .github/CODEOWNERS
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: probe-*
+          merge-multiple: true
+          path: probes
+
+      - name: Summarize
+        env:
+          PROBE_RESULT: ${{ needs.probe.result }}
+        run: |
+          set -euo pipefail
+          jq -rs '
+            "| Sample | Runner IP | gold :6443 | silver :6443 | silver router :443 | API blocked | Router OK while API blocked |",
+            "|---|---|---|---|---|---|---|",
+            (sort_by(.sample | tonumber)[] |
+              "| \(.sample) | \(.ip) | \(.gold_api) | \(.silver_api) | \(.silver_router) | \(.api_blocked) | \(.router_ok_while_api_blocked) |"),
+            "",
+            "Samples: \(length), unique IPs: \(map(.ip) | unique | length), API blocked: \(map(select(.api_blocked)) | length), router OK while API blocked: \(map(select(.router_ok_while_api_blocked)) | length)"
+          ' probes/*.json | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${PROBE_RESULT}" != success ]; then
+            echo "::error::Probe jobs did not all succeed (result: ${PROBE_RESULT}); samples may be missing"
+            exit 1
+          fi
+          BLOCKED="$(jq -s 'map(select(.api_blocked)) | length' probes/*.json)"
+          if [ "${BLOCKED}" -gt 0 ]; then
+            echo "::error::OpenShift API unreachable from ${BLOCKED} runner sample(s); see the table above"
+            exit 1
+          fi
+
+      - if: failure() && github.event_name != 'pull_request'
+        uses: bcgov/actions/workflow-notifier@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
+        with:
+          title: "Runner reachability probe: OpenShift API blocked"
+          body: |
+            The runner reachability probe failed: a GitHub-hosted runner could not reach an OpenShift API, or a probe job failed.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Background: #49
+          # This repo has no "failure" label, and gh issue create fails on unknown labels
+          labels: bug
