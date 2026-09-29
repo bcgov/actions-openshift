@@ -124,12 +124,20 @@ The action accepts the following inputs:
 |-------|-------------|
 | `oc_namespace` | OpenShift namespace where the database will be deployed |
 | `oc_token` | OpenShift token for authentication |
-| `values_file` | Path to the values.yml file to use for the deployment |
 
 ### Optional Inputs
 
 | Input | Description | Default |
 |-------|-------------|---------|
+| `values_file` | Path to a values.yml file in the calling repository; omit to use the bundled [values.yml](values.yml). Cannot be combined with the override inputs | |
+| `pvc_size` | Override: data volume size, e.g. `1Gi` | |
+| `storage_class` | Override: data volume storage class | |
+| `postgres_version` | Override: PostgreSQL major version, see [Supported PostgreSQL Versions](#supported-postgresql-versions) | |
+| `replicas` | Override: number of PostgreSQL instance replicas | |
+| `cpu_request` | Override: CPU request for PostgreSQL instances, e.g. `50m` | |
+| `memory_request` | Override: memory request for PostgreSQL instances, e.g. `128Mi` | |
+| `route_enabled` | Override: create a TLS passthrough Route to the primary database service, see [External Access](#external-access) | false |
+| `route_host` | Override: Route host name; requires `route_enabled`, OpenShift generates one if omitted | |
 | `environment` | Environment name (omit for PRs) | |
 | `triggers` | Paths used to trigger a deployment (e.g., ./backend/ ./frontend/) | |
 | `oc_server` | OpenShift server URL | https://api.silver.devops.gov.bc.ca:6443 |
@@ -138,6 +146,7 @@ The action accepts the following inputs:
 | `s3_bucket` | S3 bucket for backups | |
 | `s3_endpoint` | S3 endpoint for backups | |
 | `force_cleanup` | Force cleanup of the database | false |
+| `self_heal_stuck_releases` | Purge a Helm release stuck in a non-deployed state (`pending-*`, `failed`, `uninstalling`) before reinstalling. **Deletes the PostgresCluster and its data volumes** | false |
 | `directory` | Directory containing the Crunchy chart | charts/crunchy |
 | `repository` | GitHub repository (e.g., org/repo) | bcgov/action-crunchy |
 | `ref` | Git ref to use (e.g., branch, tag, SHA) | main |
@@ -152,7 +161,40 @@ The action accepts the following inputs:
 | `release` | The provided or generated release name |
 | `cluster` | The name of the deployed cluster |
 
+### Overrides
+
+Override inputs adjust the bundled values.yml; unset inputs keep the bundled values. They are mutually exclusive with `values_file`: combining them fails the run and names the conflicting inputs. Put those settings in the values file instead.
+
+### Supported PostgreSQL Versions
+
+`postgres_version` selects a known-good PostGIS image from the [bcgov/crunchy-postgres compatibility table](https://github.com/bcgov/crunchy-postgres#current-compatible-images) for Crunchy Operator 5.8.5. Other values fail. For other images, use `values_file` and set `crunchy.image` and `crunchy.postGISVersion`.
+
+| `postgres_version` | Image (`crunchy-postgres-gis`) | `postGISVersion` |
+|---|---|---|
+| `15` | `ubi9-15.15-3.3-2547` | `3.3` |
+| `16` | `ubi9-16.11-3.4-2547` | `3.4` |
+| `17` | `ubi9-17.7-3.6-2547` | `3.6` |
+| `18` | `ubi9-18.1-3.6-2547` | `3.6` |
+
+### External Access
+
+`route_enabled: true` renders `templates/route.yaml`, a TLS passthrough Route to the `<cluster>-primary` service. The router does not terminate TLS, so clients must connect with SSL (e.g. `sslmode=require`). The run fails if the deployed chart (`repository`/`directory`) has no `templates/route.yaml`; the default, `bcgov/action-crunchy@main`, does not have one yet, so `route_enabled` currently needs `repository`/`ref`/`directory` pointing at a chart that does.
+
 ## Sample Usage in GitHub Actions
+
+### Zero-Config Deployment
+
+Omit `values_file` to deploy the bundled values.yml, optionally with overrides:
+
+```yaml
+      - name: Deploy Crunchy
+        uses: bcgov/actions-openshift/crunchy@vX.Y.Z
+        with:
+          oc_namespace: ${{ secrets.OC_NAMESPACE }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          postgres_version: 17
+          pvc_size: 1Gi
+```
 
 ### Basic Deployment with PVC Backup
 

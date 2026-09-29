@@ -95,6 +95,83 @@ jobs:
           fi
           echo "No template leak found"
 
+  test-crunchy:
+    name: Test Crunchy
+    permissions: {}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Unit tests (bats)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats
+          bats .github/tests/crunchy
+
+      - name: Helm lint
+        run: helm lint crunchy/charts/crunchy --values crunchy/values.yml
+
+      - name: Render with bundled values
+        run: |
+          set -euo pipefail
+          helm template smoke crunchy/charts/crunchy --values crunchy/values.yml > /tmp/render-default.yaml
+          grep -q '^kind: PostgresCluster' /tmp/render-default.yaml
+          if grep -q '^kind: Route' /tmp/render-default.yaml; then
+            echo "::error::Route rendered without route.enabled"
+            exit 1
+          fi
+
+      - name: Render a values file without a route block
+        run: |
+          set -euo pipefail
+          yq 'del(.route)' crunchy/values.yml > /tmp/values-noroute.yml
+          helm template smoke crunchy/charts/crunchy --values /tmp/values-noroute.yml > /tmp/render-noroute.yaml
+          grep -q '^kind: PostgresCluster' /tmp/render-noroute.yaml
+          if grep -q '^kind: Route' /tmp/render-noroute.yaml; then
+            echo "::error::Route rendered without a route block"
+            exit 1
+          fi
+
+      - name: Render with overrides (PG17, PVC size, route)
+        env:
+          POSTGRES_VERSION: "17"
+          PVC_SIZE: 500Mi
+          ROUTE_ENABLED: "true"
+          ROUTE_HOST: pg.example.com
+        run: |
+          set -euo pipefail
+          ARGS="$(./crunchy/scripts/resolve_helm_args.sh)"
+          # shellcheck disable=SC2086 # validated args contain no whitespace
+          helm template smoke crunchy/charts/crunchy --values crunchy/values.yml $ARGS > /tmp/render-overrides.yaml
+          grep -q '^kind: PostgresCluster' /tmp/render-overrides.yaml
+          grep -q 'crunchy-postgres-gis:ubi9-17.7-3.6-2547' /tmp/render-overrides.yaml
+          grep -q 'postgresVersion: 17' /tmp/render-overrides.yaml
+          grep -q 'postGISVersion: "3.6"' /tmp/render-overrides.yaml
+          grep -q 'storage: 500Mi' /tmp/render-overrides.yaml
+          grep -q '^kind: Route' /tmp/render-overrides.yaml
+          grep -q 'host: pg.example.com' /tmp/render-overrides.yaml
+          grep -q 'termination: passthrough' /tmp/render-overrides.yaml
+
+      - name: deploy_db.sh fails fast before side effects
+        run: |
+          set -euo pipefail
+          if output="$(PVC_SIZE=1Gi ./crunchy/scripts/deploy_db.sh crunchy/charts/crunchy https://example.com/values.yml app smoke true 2>&1)"; then
+            echo "::error::values_file with pvc_size did not fail"
+            exit 1
+          fi
+          grep -q 'values_file cannot be combined with override inputs (pvc_size)' <<< "$output"
+          mkdir -p /tmp/chart-noroute
+          cp -r crunchy/charts/crunchy/. /tmp/chart-noroute
+          rm /tmp/chart-noroute/templates/route.yaml
+          if output="$(ROUTE_ENABLED=true ./crunchy/scripts/deploy_db.sh /tmp/chart-noroute '' app smoke true 2>&1)"; then
+            echo "::error::route_enabled with a chart lacking route.yaml did not fail"
+            exit 1
+          fi
+          grep -q 'has no templates/route.yaml' <<< "$output"
+
   test-route-tls:
     name: Test Route TLS
     permissions: {}

@@ -144,4 +144,8 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
       databases:
         - '{{ .Values.global.config.dbName }}'
         - 'postgres'
-        
+
+# TLS passthrough Route to the primary service for external clients
+route:
+  enabled: false
+  host: ~
