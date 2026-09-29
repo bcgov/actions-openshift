@@ -171,10 +171,17 @@ runs:
           # Connection refused or timed out: tell a blocked runner IP apart from an outage via the router
           RUNNER_IP=$(runner_ip)
           echo "Pre-flight: ${PREFLIGHT_ERR}"
-          if curl -sS -4 -o /dev/null --connect-timeout 10 --max-time 10 https://console.apps.silver.devops.gov.bc.ca/ 2>/dev/null; then
-            echo "::error::Cluster is up, but this runner's IP (${RUNNER_IP}) is blocked from the OpenShift API (${SERVER_URL}). Re-run the job to get a different runner."
+          # Router for the same cluster: api.<cluster>.devops.gov.bc.ca -> console.apps.<cluster>.devops.gov.bc.ca
+          if [[ "${SERVER_URL}" =~ ^https://api\.([a-z0-9-]+)\.devops\.gov\.bc\.ca(:[0-9]+)?/?$ ]]; then
+            CLUSTER="${BASH_REMATCH[1]}"
           else
-            echo "::error::OpenShift is unreachable from this runner (IP ${RUNNER_IP}): neither the API (${SERVER_URL}) nor the silver router answered. The cluster or network may be down; re-run the job later."
+            CLUSTER=silver
+            echo "::notice::Could not derive the cluster from ${SERVER_URL}; using the silver router for the reachability check"
+          fi
+          if curl -sS -4 -o /dev/null --connect-timeout 10 --max-time 10 "https://console.apps.${CLUSTER}.devops.gov.bc.ca/" 2>/dev/null; then
+            echo "::error::Cluster is up (the ${CLUSTER} router answered), but this runner's IP (${RUNNER_IP}) is blocked from the OpenShift API (${SERVER_URL}). Re-run the job to get a different runner."
+          else
+            echo "::error::OpenShift is unreachable from this runner (IP ${RUNNER_IP}): neither the API (${SERVER_URL}) nor the ${CLUSTER} router answered. The cluster or network may be down; re-run the job later."
           fi
           exit 1
         elif [ "${PREFLIGHT_RC}" -ne 0 ]; then
