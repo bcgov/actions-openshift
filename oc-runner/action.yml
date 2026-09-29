@@ -89,9 +89,9 @@ inputs:
     pattern: "^(true|false)$"
   login_attempts:
     description: |
-      Maximum number of connection retry attempts for logging into OpenShift
-      Example: 5, 10
-    default: "5"
+      Maximum number of login attempts; values above 2 are capped at 2 (one retry)
+      Example: 1, 2
+    default: "2"
     pattern: "^[1-9][0-9]*$"
 
 outputs:
@@ -151,6 +151,41 @@ runs:
         fi
         if ! [[ "${ATTEMPTS}" =~ ^[1-9][0-9]*$ ]]; then
           echo "::error::Invalid login_attempts: '${ATTEMPTS}'. Must be a positive integer."
+          exit 1
+        fi
+        # At most one retry: a blocked runner IP stays blocked, so more attempts only burn minutes
+        if [ "${ATTEMPTS}" -gt 2 ]; then
+          echo "::notice::login_attempts=${ATTEMPTS} capped at 2 (one retry)"
+          ATTEMPTS=2
+        fi
+
+        runner_ip() {
+          curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo "unknown (lookup failed)"
+        }
+
+        # Pre-flight: unauthenticated request to /version, before oc login or any commands.
+        # Any HTTP status (even 401/403) means the API is reachable; only no-connection results stop here.
+        PREFLIGHT_RC=0
+        PREFLIGHT_ERR=$(curl -sS -4 -o /dev/null --connect-timeout 10 --max-time 10 "${SERVER_URL}/version" 2>&1) || PREFLIGHT_RC=$?
+        if [ "${PREFLIGHT_RC}" -eq 7 ] || [ "${PREFLIGHT_RC}" -eq 28 ]; then
+          # Connection refused or timed out: tell a blocked runner IP apart from an outage via the router
+          RUNNER_IP=$(runner_ip)
+          echo "Pre-flight: ${PREFLIGHT_ERR}"
+          # Router for the same cluster: api.<cluster>.devops.gov.bc.ca -> console.apps.<cluster>.devops.gov.bc.ca
+          if [[ "${SERVER_URL}" =~ ^https://api\.([a-z0-9-]+)\.devops\.gov\.bc\.ca(:[0-9]+)?/?$ ]]; then
+            CLUSTER="${BASH_REMATCH[1]}"
+          else
+            CLUSTER=silver
+            echo "::notice::Could not derive the cluster from ${SERVER_URL}; using the silver router for the reachability check"
+          fi
+          if curl -sS -4 -o /dev/null --connect-timeout 10 --max-time 10 "https://console.apps.${CLUSTER}.devops.gov.bc.ca/" 2>/dev/null; then
+            echo "::error::Cluster is up (the ${CLUSTER} router answered), but this runner's IP (${RUNNER_IP}) is blocked from the OpenShift API (${SERVER_URL}). Re-run the job to get a different runner."
+          else
+            echo "::error::OpenShift is unreachable from this runner (IP ${RUNNER_IP}): neither the API (${SERVER_URL}) nor the ${CLUSTER} router answered. The cluster or network may be down; re-run the job later."
+          fi
+          exit 1
+        elif [ "${PREFLIGHT_RC}" -ne 0 ]; then
+          echo "::error::Pre-flight request to ${SERVER_URL}/version failed (curl exit ${PREFLIGHT_RC}): ${PREFLIGHT_ERR}"
           exit 1
         fi
 
@@ -228,8 +263,7 @@ runs:
           if [ $attempt -eq $ATTEMPTS ]; then
             echo "::error::Failed to log in to OpenShift after $ATTEMPTS attempts."
             # Runner IP helps diagnose GitHub runner IPs blocked from the API (bcgov/actions-openshift#49)
-            RUNNER_IP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null) || RUNNER_IP="unknown (lookup failed)"
-            echo "::error::Runner public IP: ${RUNNER_IP}"
+            echo "::error::Runner public IP: $(runner_ip)"
             exit 1
           fi
 

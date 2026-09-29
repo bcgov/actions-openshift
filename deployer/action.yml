@@ -86,9 +86,9 @@ inputs:
     default: ${{ github.token }}
   oc_login_attempts:
     description: |
-      Maximum number of connection retry attempts for logging into OpenShift
-      Example: 5, 10
-    default: "5"
+      Maximum number of login attempts; values above 2 are capped at 2 (one retry)
+      Example: 1, 2
+    default: "2"
     pattern: "^[1-9][0-9]*$"
 
 outputs:
