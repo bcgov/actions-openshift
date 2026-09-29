@@ -59,18 +59,10 @@ jobs:
 
 ## Operational Scripts
 
-Standalone CLI utilities for developer environments and operational maintenance. Usage, curl examples, and the Postgres migration walkthrough live in the script READMEs, not here.
+Standalone CLI utilities that a person runs with their own login (certificate management, deployment renames, Postgres transfers and comparisons, rights reports) now live in [bcgov/devops-scripts](https://github.com/bcgov/devops-scripts):
 
-### Certificate Management ([`scripts/cert/`](./scripts/cert))
-* **[`csr_generator.sh`](./scripts/cert/csr_generator.sh)**: Interactive/automated script to generate a private key and Certificate Signing Request (CSR) for OpenShift Route TLS.
-* **[`install_cert.sh`](./scripts/cert/install_cert.sh)**: Helper script to apply an edge Route with a custom TLS certificate, key, and issuing CA.
-
-### OpenShift & Database Operations ([`scripts/oc/`](./scripts/oc))
-* **[`rename_deployment.sh`](./scripts/oc/rename_deployment.sh)**: Safely rename an OpenShift deployment and its `deployment=` label selectors.
-* **[`db_transfer.sh`](./scripts/oc/db_transfer.sh)**: Stream a binary `pg_dump` to a temporary file in the target container, filter its TOC, and restore it with `pg_restore`.
-* **[`db_compare.sh`](./scripts/oc/db_compare.sh)**: Compare PostgreSQL table row counts across deployments to verify data migrations.
-* **[`rights_reporter.sh`](./scripts/oc/rights_reporter.sh)**: Audit and report OpenShift user RBAC rights and risk indicators across accessible namespaces.
-* Postgres migration walkthrough: [`scripts/oc/README.md`](./scripts/oc/README.md)
+* Certificate management: [`cert/`](https://github.com/bcgov/devops-scripts/tree/main/cert)
+* OpenShift & database operations, including the Postgres migration walkthrough: [`oc/`](https://github.com/bcgov/devops-scripts/tree/main/oc)
 
 
 
