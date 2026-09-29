@@ -53,11 +53,13 @@ fi
 
 # Wait for status=ready|completed - oc wait fails for overly quick jobs
 log_info "Waiting for job ${JOB_NAME} to start"
-timeout "${TIMEOUT}" bash -c "
+# JOB_NAME comes from input; pass it via env, not by splicing into the script
+export JOB_NAME
+timeout "${TIMEOUT}" bash -c '
 while true; do
-  oc get pods -l job-name=${JOB_NAME} --no-headers | awk '{print \$3}' | grep -qi 'running\|completed' && break
+  oc get pods -l "job-name=${JOB_NAME}" --no-headers | awk "{print \$3}" | grep -qi "running\|completed" && break
   sleep 5
-done" || log_error "Timeout waiting for job to start"
+done' || log_error "Timeout waiting for job to start"
 
 # Follow logs
 log_info "Starting log stream for job ${JOB_NAME}"
