@@ -37,7 +37,52 @@ Leave out **Sectigo Public Server Authentication Root R46.pem** and **USERTrust 
 
 `route_name` defaults to `<repository>-vanity-url` (e.g. `myapp-vanity-url`) so PR-close `app=` sweeps do not delete it. Override `route_name` if you already have a name.
 
-First prod run: add `dry_run: "true"` until the job is green, then drop it.
+The action `dry_run` input defaults to `false`. For a manual **Run workflow** form, keep `dry_run` as a choice that defaults to `true`. GitHub shows one `description` string for that input; the dropdown options are still `true` and `false`. Copy this workflow into the app repo (hostname, route, and service are per app). `run-name` and the extra `description` input are workflow UI. They are not action inputs.
+
+```yaml
+name: Route TLS
+run-name: "Route TLS dry_run=${{ inputs.dry_run }} — ${{ inputs.description }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run. True = validate only, false = apply."
+        required: true
+        type: choice
+        default: "true"
+        options:
+          - "true"
+          - "false"
+      description:
+        description: "Shown on this workflow run."
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  route-tls:
+    name: Route TLS (dry_run=${{ inputs.dry_run }})
+    environment: prod
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    steps:
+      - uses: bcgov/actions-openshift/route-tls@vX.Y.Z
+        with:
+          hostname: app.example.gov.bc.ca
+          route_name: myapp-prod-vanity-url
+          target_service: myapp-prod
+          tls_certificate: ${{ secrets.TLS_CERTIFICATE }}
+          tls_private_key: ${{ secrets.TLS_PRIVATE_KEY }}
+          tls_ca_certificate: ${{ secrets.TLS_CA_CERTIFICATE }}
+          oc_namespace: ${{ secrets.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          dry_run: ${{ inputs.dry_run }}
+```
 
 ## Inputs
 
