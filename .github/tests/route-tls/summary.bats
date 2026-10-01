@@ -23,7 +23,10 @@ setup() {
 echo "$*" >> "$OC_LOG"
 case "$1" in
   whoami) exit 1 ;;
-  get) exit 0 ;;
+  get)
+    printf 'route.route.openshift.io/%s\n' "$3"
+    exit 0
+    ;;
   create|apply) exit 99 ;;
   *) exit 0 ;;
 esac
@@ -52,6 +55,7 @@ STUB
   grep -F 'not changed' "$GITHUB_STEP_SUMMARY"
   grep -F 'login' "$OC_LOG"
   grep -F 'get route app-vanity' "$OC_LOG"
+  grep -F 'Route app-vanity exists.' "$GITHUB_STEP_SUMMARY"
   ! grep -E '^(create|apply) ' "$OC_LOG"
   ! grep -F 'token-should-not-leak' "$GITHUB_STEP_SUMMARY"
   ! grep -F 'BEGIN PRIVATE KEY' "$GITHUB_STEP_SUMMARY"
@@ -63,7 +67,7 @@ STUB
   cat > "${bin}/oc" << 'STUB'
 #!/bin/bash
 case "$1" in
-  get) exit 1 ;;
+  get) printf 'route.route.openshift.io/%s\n' "$3"; exit 0 ;;
   apply) exit 3 ;;
   *) exit 0 ;;
 esac
@@ -90,6 +94,40 @@ STUB
   grep -F "dry_run=false. Failed: Command failed at line ${apply_line} (exit status 3)." "$GITHUB_STEP_SUMMARY"
   ! grep -F 'token-should-not-leak' "$GITHUB_STEP_SUMMARY"
   ! grep -F 'BEGIN PRIVATE KEY' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "oc get failure is not reported as a missing route" {
+  bin="${BATS_TEST_TMPDIR}/bin"
+  mkdir -p "$bin"
+  cat > "${bin}/oc" << 'STUB'
+#!/bin/bash
+case "$1" in
+  whoami) exit 1 ;;
+  get) exit 2 ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x "${bin}/oc"
+  cd "$WORK"
+  run env \
+    PATH="${bin}:${PATH}" \
+    ROUTE_HOST=app.example.gov.bc.ca \
+    ROUTE_NAME=app-vanity \
+    TARGET_SERVICE=app \
+    TLS_CERTIFICATE_FILE="${BATS_TEST_TMPDIR}/leaf.pem" \
+    TLS_PRIVATE_KEY_FILE="${BATS_TEST_TMPDIR}/leaf.key" \
+    TLS_CA_CERTIFICATE_FILE="${BATS_TEST_TMPDIR}/ca.pem" \
+    OC_NAMESPACE=abc123-prod \
+    OC_SERVER=https://api.example.test:6443 \
+    OC_TOKEN=token-should-not-leak \
+    DRY_RUN=true \
+    ROUTE_OUT="${WORK}/route.yml" \
+    GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" \
+    "$SCRIPT"
+  [ "$status" -eq 1 ]
+  grep -F 'Could not read Route app-vanity.' "$GITHUB_STEP_SUMMARY"
+  ! grep -F 'does not exist' "$GITHUB_STEP_SUMMARY"
+  ! grep -F 'token-should-not-leak' "$GITHUB_STEP_SUMMARY"
 }
 
 @test "failure records dry_run on the summary" {

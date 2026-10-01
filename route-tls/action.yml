@@ -23,16 +23,13 @@ inputs:
     required: true
   oc_namespace:
     description: "OpenShift namespace."
-    required: false
-    default: ""
+    required: true
   oc_server:
     description: "OpenShift API URL."
-    required: false
-    default: ""
+    required: true
   oc_token:
     description: "OpenShift token."
-    required: false
-    default: ""
+    required: true
   dry_run:
     description: "If true, log in and read the route. Do not create the backup Secret or apply. The workflow summary records dry_run=true or dry_run=false."
     required: false

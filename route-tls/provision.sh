@@ -180,8 +180,13 @@ else
   oc project "$OC_NAMESPACE" >/dev/null
 fi
 
+# --ignore-not-found: absence is empty output. Any other failure is an error.
+if ! route_ref="$(oc get route "$ROUTE_NAME" --ignore-not-found -o name)"; then
+  die "Could not read Route ${ROUTE_NAME}."
+fi
+
 if [ "$DRY_RUN" = "true" ]; then
-  if oc get route "$ROUTE_NAME" >/dev/null 2>&1; then
+  if [ -n "$route_ref" ]; then
     route_state="Route ${ROUTE_NAME} exists."
   else
     route_state="Route ${ROUTE_NAME} does not exist."
@@ -191,7 +196,7 @@ if [ "$DRY_RUN" = "true" ]; then
   exit 0
 fi
 
-if oc get route "$ROUTE_NAME" >/dev/null 2>&1; then
+if [ -n "$route_ref" ]; then
   echo "Existing route found. Archiving working certificates..."
   OLD_CERT="$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.certificate}')"
   OLD_KEY="$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.key}')"
