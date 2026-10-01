@@ -108,8 +108,8 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq bats
-          bats .github/tests/crunchy
+          sudo apt-get install -y -qq bats openssl
+          bats .github/tests/crunchy .github/tests/route-tls
 
       - name: Helm lint
         run: helm lint crunchy/charts/crunchy --values crunchy/values.yml

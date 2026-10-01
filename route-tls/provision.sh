@@ -17,7 +17,24 @@ err() {
   fi
 }
 
-die() { err "$1"; exit 1; }
+summarize() {
+  echo "::notice title=Route TLS::$1"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    printf '%s\n' "### Route TLS" "" "- $1" >> "$GITHUB_STEP_SUMMARY"
+  fi
+}
+
+die() {
+  err "$1"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    printf '%s\n' "### Route TLS" "" "- dry_run=${DRY_RUN}. Failed: $1" >> "$GITHUB_STEP_SUMMARY"
+  fi
+  exit 1
+}
+
+# set -e exits before die on oc login, backup, and oc apply. Report the line and
+# status only. BASH_COMMAND can contain the token or the private key.
+trap 'rc=$?; line=${LINENO}; trap - ERR; die "Command failed at line ${line} (exit status ${rc}). See the step log for details."' ERR
 
 load_file() {
   # $1 = destination var, $2 = optional *_FILE path. File wins when set.
@@ -162,6 +179,7 @@ grep -q '^  caCertificate:' "$ROUTE_OUT" && die "caCertificate was written as a 
 
 if [ "$DRY_RUN" = "true" ]; then
   echo "DRY RUN: cert/key match, host covered, YAML written to $ROUTE_OUT (contains the private key; not printed)."
+  summarize "dry_run=true. Validated ${ROUTE_HOST}. The route was not changed."
   exit 0
 fi
 
@@ -197,3 +215,4 @@ fi
 
 oc apply -f "$ROUTE_OUT"
 echo "Applied route $ROUTE_NAME -> $TARGET_SERVICE (host $ROUTE_HOST)"
+summarize "dry_run=false. Applied route ${ROUTE_NAME} to ${TARGET_SERVICE} for ${ROUTE_HOST}."
