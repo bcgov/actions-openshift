@@ -13,15 +13,35 @@ setup() {
   openssl x509 -req -in "${BATS_TEST_TMPDIR}/leaf.csr" -CA "${BATS_TEST_TMPDIR}/ca.pem" -CAkey "${BATS_TEST_TMPDIR}/ca.key" -CAcreateserial -out "${BATS_TEST_TMPDIR}/leaf.pem" -days 30 -extfile "${BATS_TEST_TMPDIR}/ext.cnf"
 }
 
-@test "dry run records dry_run=true on the summary and does not print the key" {
+@test "dry run logs in, reads the route, and does not write" {
+  bin="${BATS_TEST_TMPDIR}/bin"
+  mkdir -p "$bin"
+  export OC_LOG="${BATS_TEST_TMPDIR}/oc.log"
+  : > "$OC_LOG"
+  cat > "${bin}/oc" << 'STUB'
+#!/bin/bash
+echo "$*" >> "$OC_LOG"
+case "$1" in
+  whoami) exit 1 ;;
+  get) exit 0 ;;
+  create|apply) exit 99 ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x "${bin}/oc"
   cd "$WORK"
   run env \
+    PATH="${bin}:${PATH}" \
+    OC_LOG="$OC_LOG" \
     ROUTE_HOST=app.example.gov.bc.ca \
     ROUTE_NAME=app-vanity \
     TARGET_SERVICE=app \
     TLS_CERTIFICATE_FILE="${BATS_TEST_TMPDIR}/leaf.pem" \
     TLS_PRIVATE_KEY_FILE="${BATS_TEST_TMPDIR}/leaf.key" \
     TLS_CA_CERTIFICATE_FILE="${BATS_TEST_TMPDIR}/ca.pem" \
+    OC_NAMESPACE=abc123-prod \
+    OC_SERVER=https://api.example.test:6443 \
+    OC_TOKEN=token-should-not-leak \
     DRY_RUN=true \
     ROUTE_OUT="${WORK}/route.yml" \
     GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" \
@@ -30,6 +50,10 @@ setup() {
   [[ "$output" == *"::notice title=Route TLS::dry_run=true"* ]]
   grep -F 'dry_run=true' "$GITHUB_STEP_SUMMARY"
   grep -F 'not changed' "$GITHUB_STEP_SUMMARY"
+  grep -F 'login' "$OC_LOG"
+  grep -F 'get route app-vanity' "$OC_LOG"
+  ! grep -E '^(create|apply) ' "$OC_LOG"
+  ! grep -F 'token-should-not-leak' "$GITHUB_STEP_SUMMARY"
   ! grep -F 'BEGIN PRIVATE KEY' "$GITHUB_STEP_SUMMARY"
 }
 

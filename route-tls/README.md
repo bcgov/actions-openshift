@@ -94,22 +94,23 @@ jobs:
 | `tls_certificate` | Leaf PEM | Yes | |
 | `tls_private_key` | Private key PEM | Yes | |
 | `tls_ca_certificate` | Issuing CA PEM | Yes | |
-| `oc_namespace` | Namespace | unless `dry_run` | |
-| `oc_server` | API URL | unless `dry_run` | |
-| `oc_token` | Token | unless `dry_run` | |
-| `dry_run` | Validate and write YAML only | No | `false` |
+| `oc_namespace` | Namespace | Yes | |
+| `oc_server` | API URL | Yes | |
+| `oc_token` | Token | Yes | |
+| `dry_run` | Log in and read the route. Do not create the backup Secret or apply | No | `false` |
 
 A finished run records `dry_run=true` or `dry_run=false` on the workflow summary and raises a notice. A failure records `dry_run` and the error. The summary does not include the key.
 
 ## What it does
 
 1. Fail if the cert and key do not match, the issuing CA did not sign the leaf, the cert is expired, or the cert does not cover `hostname` (CN or SAN, including wildcards).
-2. Unless `dry_run`, snapshot the live Route's TLS (cert, key, CA) into a Secret named `<route>-backup-<sha256-prefix>`, labeled `backup-type=route-tls` (no `app` label). Re-applying the same cert is a no-op on that Secret. Restore from that Secret if an apply goes wrong.
-3. `oc apply` the Route (GitHub installs `oc` via `bcgov/action-oc-runner`). Private keys are never printed.
+2. Log in and read the route. `dry_run=true` stops here. It does not create a Secret and does not apply.
+3. Unless `dry_run`, snapshot the live Route's TLS (cert, key, CA) into a Secret named `<route>-backup-<sha256-prefix>`, labeled `backup-type=route-tls` (no `app` label). Re-applying the same cert is a no-op on that Secret. Restore from that Secret if an apply goes wrong.
+4. Unless `dry_run`, `oc apply` the Route (GitHub installs `oc` via `bcgov/action-oc-runner`). Private keys are never printed.
 
 ## Local CLI (optional)
 
-`provision.sh` is the same code the Action runs. Use it to dry-run PEMs on disk without GitHub or a cluster.
+`provision.sh` is the same code the Action runs. A dry run still logs in and reads the route. It needs `oc` and the three `OC_*` values.
 
 ```bash
 cd route-tls
@@ -119,8 +120,11 @@ export TARGET_SERVICE=myapp-prod
 export TLS_CERTIFICATE_FILE=/path/to/cert.pem
 export TLS_PRIVATE_KEY_FILE=/path/to/key.pem
 export TLS_CA_CERTIFICATE_FILE=/path/to/ca.pem
+export OC_NAMESPACE=abc123-prod
+export OC_SERVER=https://api.silver.devops.gov.bc.ca:6443
+export OC_TOKEN
 export DRY_RUN=true
 ./provision.sh
 ```
 
-Writes `route.yml` (contains the private key; gitignored; not printed). To apply from a laptop, unset `DRY_RUN` and set `OC_NAMESPACE`, `OC_SERVER`, and `OC_TOKEN`.
+Writes `route.yml` (contains the private key; gitignored; not printed). To apply from a laptop, unset `DRY_RUN`.

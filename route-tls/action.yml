@@ -22,19 +22,19 @@ inputs:
     description: "Issuing CA PEM (Entrust OV TLS Issuing RSA CA 2)"
     required: true
   oc_namespace:
-    description: "OpenShift namespace. Required unless dry_run is true."
+    description: "OpenShift namespace."
     required: false
     default: ""
   oc_server:
-    description: "OpenShift API URL. Required unless dry_run is true."
+    description: "OpenShift API URL."
     required: false
     default: ""
   oc_token:
-    description: "OpenShift token. Required unless dry_run is true."
+    description: "OpenShift token."
     required: false
     default: ""
   dry_run:
-    description: "If true, skip the cluster: validate cert/key/host and write YAML only. The workflow summary records dry_run=true or dry_run=false."
+    description: "If true, log in and read the route. Do not create the backup Secret or apply. The workflow summary records dry_run=true or dry_run=false."
     required: false
     default: "false"
 
@@ -42,7 +42,6 @@ runs:
   using: "composite"
   steps:
     - name: OpenShift CLI
-      if: ${{ inputs.dry_run != 'true' }}
       uses: $/oc-runner
       with:
         oc_namespace: ${{ inputs.oc_namespace }}
