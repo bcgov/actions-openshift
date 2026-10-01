@@ -33,6 +33,41 @@ setup() {
   ! grep -F 'BEGIN PRIVATE KEY' "$GITHUB_STEP_SUMMARY"
 }
 
+@test "failed oc apply records the line and exit status, not the token" {
+  bin="${BATS_TEST_TMPDIR}/bin"
+  mkdir -p "$bin"
+  cat > "${bin}/oc" << 'STUB'
+#!/bin/bash
+case "$1" in
+  get) exit 1 ;;
+  apply) exit 3 ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x "${bin}/oc"
+  apply_line="$(grep -n '^oc apply -f ' "$SCRIPT" | cut -d: -f1)"
+  cd "$WORK"
+  run env \
+    PATH="${bin}:${PATH}" \
+    ROUTE_HOST=app.example.gov.bc.ca \
+    ROUTE_NAME=app-vanity \
+    TARGET_SERVICE=app \
+    TLS_CERTIFICATE_FILE="${BATS_TEST_TMPDIR}/leaf.pem" \
+    TLS_PRIVATE_KEY_FILE="${BATS_TEST_TMPDIR}/leaf.key" \
+    TLS_CA_CERTIFICATE_FILE="${BATS_TEST_TMPDIR}/ca.pem" \
+    OC_NAMESPACE=example-prod \
+    OC_SERVER=https://api.example.test:6443 \
+    OC_TOKEN=token-should-not-leak \
+    DRY_RUN=false \
+    ROUTE_OUT="${WORK}/route.yml" \
+    GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" \
+    "$SCRIPT"
+  [ "$status" -eq 1 ]
+  grep -F "dry_run=false. Failed: Command failed at line ${apply_line} (exit status 3)." "$GITHUB_STEP_SUMMARY"
+  ! grep -F 'token-should-not-leak' "$GITHUB_STEP_SUMMARY"
+  ! grep -F 'BEGIN PRIVATE KEY' "$GITHUB_STEP_SUMMARY"
+}
+
 @test "failure records dry_run on the summary" {
   cd "$WORK"
   run env \

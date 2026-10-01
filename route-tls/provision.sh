@@ -32,6 +32,10 @@ die() {
   exit 1
 }
 
+# set -e exits before die on oc login, backup, and oc apply. Report the line and
+# status only. BASH_COMMAND can contain the token or the private key.
+trap 'rc=$?; line=${LINENO}; trap - ERR; die "Command failed at line ${line} (exit status ${rc}). See the step log for details."' ERR
+
 load_file() {
   # $1 = destination var, $2 = optional *_FILE path. File wins when set.
   local dest="$1" file_var="$2"
