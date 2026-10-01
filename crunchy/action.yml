@@ -70,6 +70,12 @@ inputs:
   s3_endpoint:
     description: 'S3 endpoint'
 
+  dry_run:
+    description: 'When true, helm upgrade --dry-run --debug validates the chart against the OpenShift API, then the action exits without deploying, waiting, or changing PR users'
+    default: false
+    required: false
+    type: boolean
+
   self_heal_stuck_releases:
     description: 'Purge a Helm release stuck in a non-deployed state (pending-*, failed, uninstalling) before reinstalling. Deletes the PostgresCluster and its data volumes'
     default: false
@@ -241,6 +247,7 @@ runs:
         ROUTE_ENABLED: ${{ inputs.route_enabled }}
         ROUTE_HOST: ${{ inputs.route_host }}
         SELF_HEAL_STUCK_RELEASES: ${{ inputs.self_heal_stuck_releases }}
+        DRY_RUN: ${{ inputs.dry_run }}
       run: |
         # Deploy the database
 
@@ -255,7 +262,7 @@ runs:
         echo "$GITHUB_ACTION_PATH/scripts/deploy_db.sh [arguments redacted]"
         "$GITHUB_ACTION_PATH/scripts/deploy_db.sh" "${PARAMS[@]}"
 
-    - if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    - if: github.event_name == 'pull_request' && github.event.action != 'closed' && inputs.dry_run != 'true'
       shell: bash
       env:
         EVENT_NUMBER: ${{ github.event.number }}
@@ -263,7 +270,7 @@ runs:
         # Add user to Crunchy DB
         "$GITHUB_ACTION_PATH/scripts/user_change.sh" add "${EVENT_NUMBER}" "${CLUSTER_NAME}"
 
-    - if: github.event.action == 'closed' || inputs.force_cleanup == 'true'
+    - if: (github.event.action == 'closed' || inputs.force_cleanup == 'true') && inputs.dry_run != 'true'
       shell: bash
       env:
         EVENT_NUMBER: ${{ github.event.number }}
