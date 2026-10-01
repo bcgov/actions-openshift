@@ -91,15 +91,9 @@ fi
 [ -n "${TLS_PRIVATE_KEY:-}" ] || die "TLS_PRIVATE_KEY or TLS_PRIVATE_KEY_FILE is required"
 [ -n "${TLS_CA_CERTIFICATE:-}" ] || die "TLS_CA_CERTIFICATE or TLS_CA_CERTIFICATE_FILE is required"
 
-[ -n "$OC_NAMESPACE" ] || die "OC_NAMESPACE is required"
-[ -n "$OC_SERVER" ] || die "OC_SERVER is required"
-[ -n "$OC_TOKEN" ] || die "OC_TOKEN is required"
-
 umask 077
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
-
-command -v oc >/dev/null || die "oc is not on PATH"
 
 CERT_PEM="$WORKDIR/cert.pem"
 KEY_PEM="$WORKDIR/key.pem"
@@ -172,6 +166,11 @@ if ! grep -q '^    certificate: |' "$ROUTE_OUT" || ! grep -q '^    key: |' "$ROU
 fi
 grep -q '^    caCertificate: |' "$ROUTE_OUT" || die "caCertificate was not nested under spec.tls."
 grep -q '^  caCertificate:' "$ROUTE_OUT" && die "caCertificate was written as a spec sibling; expected spec.tls.caCertificate."
+
+[ -n "$OC_NAMESPACE" ] || die "OC_NAMESPACE is required"
+[ -n "$OC_SERVER" ] || die "OC_SERVER is required"
+[ -n "$OC_TOKEN" ] || die "OC_TOKEN is required"
+command -v oc >/dev/null || die "oc is not on PATH"
 
 if oc whoami >/dev/null 2>&1; then
   oc project "$OC_NAMESPACE" >/dev/null || die "oc is logged in, but not to namespace $OC_NAMESPACE"

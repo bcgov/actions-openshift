@@ -229,10 +229,17 @@ jobs:
           TLS_CERTIFICATE_FILE: /tmp/cert.pem
           TLS_PRIVATE_KEY_FILE: /tmp/key.pem
           TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
+          OC_NAMESPACE: ${{ vars.OC_NAMESPACE }}
+          OC_SERVER: ${{ vars.OC_SERVER }}
+          OC_TOKEN: ${{ secrets.OC_TOKEN }}
           DRY_RUN: "true"
           ROUTE_OUT: /tmp/route.yml
         run: |
           set -euo pipefail
+          mkdir -p /tmp/bin
+          printf '%s\n' '#!/bin/bash' 'exit 0' > /tmp/bin/oc
+          chmod +x /tmp/bin/oc
+          export PATH="/tmp/bin:${PATH}"
           output="$(./fixture/route-tls/provision.sh 2>&1)" || { echo "$output"; exit 1; }
           printf '%s\n' "$output"
           if printf '%s\n' "$output" | grep -qE 'BEGIN (PRIVATE KEY|RSA PRIVATE KEY)'; then
@@ -310,6 +317,9 @@ jobs:
           tls_certificate: ${{ env.DUMMY_CERT }}
           tls_private_key: ${{ env.DUMMY_KEY }}
           tls_ca_certificate: ${{ env.DUMMY_CA }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
           dry_run: "true"
 
   test-fork-token-degradation:
@@ -426,6 +436,9 @@ jobs:
           tls_certificate: ${{ env.FORK_CERT }}
           tls_private_key: ${{ env.FORK_KEY }}
           tls_ca_certificate: ${{ env.FORK_CA }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
           dry_run: "true"
 
       - name: Validate generated route output
