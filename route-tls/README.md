@@ -99,6 +99,8 @@ jobs:
 | `oc_token` | Token | unless `dry_run` | |
 | `dry_run` | Validate and write YAML only | No | `false` |
 
+A finished run records `dry_run=true` or `dry_run=false` on the workflow summary and raises a notice. A failure records `dry_run` and the error. The summary does not include the key.
+
 ## What it does
 
 1. Fail if the cert and key do not match, the issuing CA did not sign the leaf, the cert is expired, or the cert does not cover `hostname` (CN or SAN, including wildcards).
