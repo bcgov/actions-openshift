@@ -145,6 +145,7 @@ The action accepts the following inputs:
 | `s3_secret_key` | S3 secret key for backups | |
 | `s3_bucket` | S3 bucket for backups | |
 | `s3_endpoint` | S3 endpoint for backups | |
+| `dry_run` | `helm upgrade --dry-run=server --hide-secret` validates the chart against the OpenShift API, then the action exits without deploying, waiting, or changing PR users. Secret resources are omitted from the output | false |
 | `force_cleanup` | Force cleanup of the database | false |
 | `self_heal_stuck_releases` | Purge a Helm release stuck in a non-deployed state (`pending-*`, `failed`, `uninstalling`) before reinstalling. **Deletes the PostgresCluster and its data volumes** | false |
 | `directory` | Directory containing the Crunchy chart | charts/crunchy |

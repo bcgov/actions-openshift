@@ -63,8 +63,9 @@ if STATUS_JSON="$(helm status "$RELEASE_NAME" -o json 2> /dev/null)"; then
 fi
 echo "Helm release '${RELEASE_NAME}' status: '${HELM_RELEASE_STATUS:-<none>}'"
 
-# Triggers did not fire: skip only a healthy (deployed) release; otherwise deploy
-if [ "${TRIGGERED:-false}" != "true" ]; then
+# Triggers did not fire: skip only a healthy (deployed) release; otherwise deploy.
+# dry_run never changes the cluster, so it still renders.
+if [ "${DRY_RUN:-false}" != "true" ] && [ "${TRIGGERED:-false}" != "true" ]; then
   if [ "$HELM_RELEASE_STATUS" = "deployed" ]; then
     echo "Crunchy DB $RELEASE_NAME is already deployed, triggers did not fire, so not upgrading."
     exit 0
@@ -75,7 +76,8 @@ fi
 # Self-heal a release left in a non-deployed state (pending-*, failed, uninstalling),
 # which blocks helm upgrade --install. Opt-in: deleting the PostgresCluster also
 # deletes the operator-owned PVCs, so the database starts empty.
-if [ "${SELF_HEAL_STUCK_RELEASES:-false}" = "true" ]; then
+# Never purge on dry_run.
+if [ "${DRY_RUN:-false}" != "true" ] && [ "${SELF_HEAL_STUCK_RELEASES:-false}" = "true" ]; then
   if [ -n "$HELM_RELEASE_STATUS" ] && [ "$HELM_RELEASE_STATUS" != "deployed" ]; then
     echo "Purging release '${RELEASE_NAME}' before reinstall."
     if ! helm uninstall "$RELEASE_NAME" --wait --timeout 2m; then
@@ -96,12 +98,16 @@ if [ -n "$S3_ACCESS_KEY" ] && [ -n "$S3_SECRET_KEY" ] && [ -n "$S3_BUCKET" ] && 
     --set-string crunchy.pgBackRest.s3.endpoint=$S3_ENDPOINT"
 fi
 
-# Execute the Helm command
-if [ "${DEBUG_MODE:-false}" = "true" ]; then
-  helm upgrade --debug --dry-run --install --wait "$RELEASE_NAME" --values ./values.yml ./$APP_NAME-$CHART_VERSION.tgz $SET_STRINGS
-else
-  helm upgrade --install --wait "$RELEASE_NAME" --values ./values.yml ./$APP_NAME-$CHART_VERSION.tgz $SET_STRINGS
+# Execute the Helm command. dry_run validates against the API and stops
+# before the ready check, which would fail because nothing was applied.
+# --dry-run=server submits the chart to the API. --hide-secret omits Secret
+# bodies from the output. --debug is not used: it prints user-supplied values.
+if [ "${DRY_RUN:-false}" = "true" ]; then
+  helm upgrade --dry-run=server --hide-secret --install "$RELEASE_NAME" --values ./values.yml ./$APP_NAME-$CHART_VERSION.tgz $SET_STRINGS
+  echo "dry_run: helm upgrade --dry-run=server completed; skipping database ready check."
+  exit 0
 fi
+helm upgrade --install --wait "$RELEASE_NAME" --values ./values.yml ./$APP_NAME-$CHART_VERSION.tgz $SET_STRINGS
 # Verify successful db deployment; wait retry 10 times with 60 seconds interval
 for i in $(seq 1 "$MAX_DB_READY_RETRIES"); do
   # Check if the 'db' instance has at least 1 ready replica

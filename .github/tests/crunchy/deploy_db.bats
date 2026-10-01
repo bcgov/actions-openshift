@@ -12,6 +12,9 @@ setup() {
   cat > "${BATS_TEST_TMPDIR}/bin/helm" <<'STUB'
 #!/bin/bash
 echo "helm $*" >> "${STUB_LOG}"
+if [ "$1" = "upgrade" ] && [ -n "${HELM_UPGRADE_RC:-}" ]; then
+  exit "${HELM_UPGRADE_RC}"
+fi
 if [ "$1" = "status" ]; then
   [ -n "${HELM_STATUS:-}" ] || exit 1
   echo "{\"info\":{\"status\":\"${HELM_STATUS}\"}}"
@@ -28,7 +31,8 @@ STUB
   chmod +x "${BATS_TEST_TMPDIR}/bin/helm" "${BATS_TEST_TMPDIR}/bin/oc"
   export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
   unset HELM_STATUS SELF_HEAL_STUCK_RELEASES VALUES_URL PVC_SIZE STORAGE_CLASS \
-    POSTGRES_VERSION REPLICAS CPU_REQUEST MEMORY_REQUEST ROUTE_ENABLED ROUTE_HOST
+    POSTGRES_VERSION REPLICAS CPU_REQUEST MEMORY_REQUEST ROUTE_ENABLED ROUTE_HOST \
+    DRY_RUN HELM_UPGRADE_RC
 }
 
 deploy() {
@@ -72,4 +76,28 @@ refute_call() {
   refute_call "^helm uninstall"
   refute_call "^oc delete"
   grep -q "^helm upgrade --install --wait pg-test" "${STUB_LOG}"
+}
+
+@test "dry_run still renders when the release is already deployed" {
+  HELM_STATUS=deployed DRY_RUN=true deploy
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipping database ready check"* ]]
+  [[ "$output" != *"already deployed, triggers did not fire"* ]]
+  grep -q "^helm upgrade --dry-run=server --hide-secret --install pg-test" "${STUB_LOG}"
+  refute_call "^helm upgrade --install --wait"
+  refute_call "^oc "
+}
+
+@test "dry_run does not self-heal a stuck release" {
+  HELM_STATUS=pending-upgrade SELF_HEAL_STUCK_RELEASES=true DRY_RUN=true deploy
+  [ "$status" -eq 0 ]
+  grep -q "^helm upgrade --dry-run=server --hide-secret --install pg-test" "${STUB_LOG}"
+  refute_call "^helm uninstall"
+  refute_call "^oc "
+}
+
+@test "dry_run helm failure is not treated as success" {
+  DRY_RUN=true HELM_UPGRADE_RC=1 deploy
+  [ "$status" -eq 1 ]
+  refute_call "^oc "
 }
