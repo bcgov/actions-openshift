@@ -83,7 +83,7 @@ refute_call() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"skipping database ready check"* ]]
   [[ "$output" != *"already deployed, triggers did not fire"* ]]
-  grep -q "^helm upgrade --debug --dry-run --install pg-test" "${STUB_LOG}"
+  grep -q "^helm upgrade --dry-run=server --hide-secret --install pg-test" "${STUB_LOG}"
   refute_call "^helm upgrade --install --wait"
   refute_call "^oc "
 }
@@ -91,7 +91,7 @@ refute_call() {
 @test "dry_run does not self-heal a stuck release" {
   HELM_STATUS=pending-upgrade SELF_HEAL_STUCK_RELEASES=true DRY_RUN=true deploy
   [ "$status" -eq 0 ]
-  grep -q "^helm upgrade --debug --dry-run --install pg-test" "${STUB_LOG}"
+  grep -q "^helm upgrade --dry-run=server --hide-secret --install pg-test" "${STUB_LOG}"
   refute_call "^helm uninstall"
   refute_call "^oc "
 }

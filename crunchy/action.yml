@@ -71,7 +71,7 @@ inputs:
     description: 'S3 endpoint'
 
   dry_run:
-    description: 'When true, helm upgrade --dry-run --debug validates the chart against the OpenShift API, then the action exits without deploying, waiting, or changing PR users'
+    description: 'When true, helm upgrade --dry-run=server --hide-secret validates the chart against the OpenShift API, then the action exits without deploying, waiting, or changing PR users'
     default: false
     required: false
     type: boolean

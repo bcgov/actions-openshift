@@ -100,9 +100,11 @@ fi
 
 # Execute the Helm command. dry_run validates against the API and stops
 # before the ready check, which would fail because nothing was applied.
+# --dry-run=server submits the chart to the API. --hide-secret omits Secret
+# bodies from the output. --debug is not used: it prints user-supplied values.
 if [ "${DRY_RUN:-false}" = "true" ]; then
-  helm upgrade --debug --dry-run --install "$RELEASE_NAME" --values ./values.yml ./$APP_NAME-$CHART_VERSION.tgz $SET_STRINGS
-  echo "dry_run: helm upgrade --dry-run completed; skipping database ready check."
+  helm upgrade --dry-run=server --hide-secret --install "$RELEASE_NAME" --values ./values.yml ./$APP_NAME-$CHART_VERSION.tgz $SET_STRINGS
+  echo "dry_run: helm upgrade --dry-run=server completed; skipping database ready check."
   exit 0
 fi
 helm upgrade --install --wait "$RELEASE_NAME" --values ./values.yml ./$APP_NAME-$CHART_VERSION.tgz $SET_STRINGS
