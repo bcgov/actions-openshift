@@ -148,9 +148,9 @@ The action accepts the following inputs:
 | `dry_run` | `helm upgrade --dry-run=server --hide-secret` validates the chart against the OpenShift API, then the action exits without deploying, waiting, or changing PR users. Secret resources are omitted from the output | false |
 | `force_cleanup` | Force cleanup of the database | false |
 | `self_heal_stuck_releases` | Purge a Helm release stuck in a non-deployed state (`pending-*`, `failed`, `uninstalling`) before reinstalling. **Deletes the PostgresCluster and its data volumes** | false |
-| `directory` | Directory containing the Crunchy chart | charts/crunchy |
-| `repository` | GitHub repository (e.g., org/repo) | bcgov/action-crunchy |
-| `ref` | Git ref to use (e.g., branch, tag, SHA) | main |
+| `directory` | Chart directory inside `repository`; used only when `repository` is set | charts/crunchy |
+| `repository` | Repository to take the chart from (e.g., org/repo); omit to use the chart bundled with this action | |
+| `ref` | Git ref of `repository` (e.g., branch, tag, SHA); used only when `repository` is set | main |
 | `release_name` | The release name to use, if provided overrides the computed pg-md5hash(1-8) of github repo name, if release_name is `pg-abc`,postgres cluster created will be `pg-abc-crunchy` | |
 | `diff_branch` | The branch to diff against (if not using default branch) Optional | |
 | `github_token` | (Optional) GitHub (built-in or PAT) token, otherwise inherited from workflow token | `github.token` |
@@ -179,7 +179,7 @@ Override inputs adjust the bundled values.yml; unset inputs keep the bundled val
 
 ### External Access
 
-`route_enabled: true` renders `templates/route.yaml`, a TLS passthrough Route to the `<cluster>-primary` service. The router does not terminate TLS, so clients must connect with SSL (e.g. `sslmode=require`). The run fails if the deployed chart (`repository`/`directory`) has no `templates/route.yaml`; the default, `bcgov/action-crunchy@main`, does not have one yet, so `route_enabled` currently needs `repository`/`ref`/`directory` pointing at a chart that does.
+`route_enabled: true` renders `templates/route.yaml`, a TLS passthrough Route to the `<cluster>-primary` service. The router does not terminate TLS, so clients must connect with SSL (e.g. `sslmode=require`). The chart bundled with this action includes that template. The run fails if a custom chart (`repository`, `ref`, and `directory`) has no `templates/route.yaml`.
 
 ## Sample Usage in GitHub Actions
 
