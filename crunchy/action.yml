@@ -89,7 +89,7 @@ inputs:
     required: false
     type: boolean
   directory:
-    description: 'Crunchy Chart directory'
+    description: 'Chart directory inside repository; used only when repository is set'
     default: 'charts/crunchy'
     validation: "^.+$"
     required: false
@@ -97,13 +97,12 @@ inputs:
     description: Specify token (GH or PAT), instead of inheriting one from the calling workflow
     default: ${{ github.token }}
   repository:
-    description: 'GitHub repository; e.g. org/repo'
-    default: bcgov/action-crunchy
+    description: 'Repository to take the chart from, e.g. org/repo; omit to use the chart bundled with this action'
+    default: ''
     required: false
-    validation: "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$"
+    validation: "^([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)?$"
   ref:
-    # This should be an empty string by default, but can be set to a specific branch/tag/sha
-    description: 'Git ref to use; e.g. branch, tag, sha'
+    description: 'Git ref of repository; used only when repository is set'
     default: 'main'
     required: false
   release_name:
@@ -222,7 +221,8 @@ runs:
         repository: ${{ github.repository }}                          # Always use the downstream
         ref: ${{ github.event.pull_request.base.ref || github.ref }}  # repository to run diffs!
 
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+    - if: inputs.repository != ''
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         repository: ${{ inputs.repository }}
         ref: ${{ inputs.ref }}
@@ -248,8 +248,17 @@ runs:
         ROUTE_HOST: ${{ inputs.route_host }}
         SELF_HEAL_STUCK_RELEASES: ${{ inputs.self_heal_stuck_releases }}
         DRY_RUN: ${{ inputs.dry_run }}
+        CHART_REPOSITORY: ${{ inputs.repository }}
       run: |
         # Deploy the database
+
+        # Bundled chart unless a chart repository was given. Copied so deploy_db.sh
+        # can edit Chart.yaml and package in place without touching the action directory.
+        if [ -z "${CHART_REPOSITORY}" ]; then
+          DIRECTORY="$(mktemp -d)"
+          trap 'rm -rf "${DIRECTORY}"' EXIT
+          cp -r "${GITHUB_ACTION_PATH}/charts/crunchy/." "${DIRECTORY}"
+        fi
 
         # Check if S3 inputs are provided and construct the deploy_db.sh command accordingly
         # Array, so an empty VALUES_URL (bundled values) keeps its position
