@@ -130,6 +130,91 @@ STUB
   ! grep -F 'token-should-not-leak' "$GITHUB_STEP_SUMMARY"
 }
 
+@test "apply fails when the live certificate does not match" {
+  bin="${BATS_TEST_TMPDIR}/bin"
+  mkdir -p "$bin"
+  cat > "${bin}/oc" << 'STUB'
+#!/bin/bash
+case "$1" in
+  get)
+    case "$*" in
+      *caCertificate*) printf 'ca\n' ;;
+      *spec.tls.key*) printf 'present\n' ;;
+      *certificate*) cat "$RETURN_CERT" ;;
+      *) printf 'route.route.openshift.io/%s\n' "$3" ;;
+    esac
+    ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x "${bin}/oc"
+  cd "$WORK"
+  run env \
+    PATH="${bin}:${PATH}" \
+    RETURN_CERT="${BATS_TEST_TMPDIR}/ca.pem" \
+    ROUTE_HOST=app.example.gov.bc.ca \
+    ROUTE_NAME=app-vanity \
+    TARGET_SERVICE=app \
+    TLS_CERTIFICATE_FILE="${BATS_TEST_TMPDIR}/leaf.pem" \
+    TLS_PRIVATE_KEY_FILE="${BATS_TEST_TMPDIR}/leaf.key" \
+    TLS_CA_CERTIFICATE_FILE="${BATS_TEST_TMPDIR}/ca.pem" \
+    OC_NAMESPACE=abc123-prod \
+    OC_SERVER=https://api.example.test:6443 \
+    OC_TOKEN=token-should-not-leak \
+    DRY_RUN=false \
+    ROUTE_OUT="${WORK}/route.yml" \
+    GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" \
+    "$SCRIPT"
+  [ "$status" -eq 1 ]
+  grep -F 'Route app-vanity certificate does not match the certificate that was applied.' "$GITHUB_STEP_SUMMARY"
+  ! grep -F 'token-should-not-leak' "$GITHUB_STEP_SUMMARY"
+  ! grep -F 'BEGIN PRIVATE KEY' "$GITHUB_STEP_SUMMARY"
+  ! grep -F 'BEGIN CERTIFICATE' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "apply records the route and the live certificate expiry" {
+  bin="${BATS_TEST_TMPDIR}/bin"
+  mkdir -p "$bin"
+  cat > "${bin}/oc" << 'STUB'
+#!/bin/bash
+case "$1" in
+  get)
+    case "$*" in
+      *caCertificate*) printf 'ca\n' ;;
+      *spec.tls.key*) printf 'present\n' ;;
+      *certificate*) cat "$RETURN_CERT" ;;
+      *) printf 'route.route.openshift.io/%s\n' "$3" ;;
+    esac
+    ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x "${bin}/oc"
+  expires="$(openssl x509 -in "${BATS_TEST_TMPDIR}/leaf.pem" -noout -enddate | sed 's/^notAfter=//')"
+  cd "$WORK"
+  run env \
+    PATH="${bin}:${PATH}" \
+    RETURN_CERT="${BATS_TEST_TMPDIR}/leaf.pem" \
+    ROUTE_HOST=app.example.gov.bc.ca \
+    ROUTE_NAME=app-vanity \
+    TARGET_SERVICE=app \
+    TLS_CERTIFICATE_FILE="${BATS_TEST_TMPDIR}/leaf.pem" \
+    TLS_PRIVATE_KEY_FILE="${BATS_TEST_TMPDIR}/leaf.key" \
+    TLS_CA_CERTIFICATE_FILE="${BATS_TEST_TMPDIR}/ca.pem" \
+    OC_NAMESPACE=abc123-prod \
+    OC_SERVER=https://api.example.test:6443 \
+    OC_TOKEN=token-should-not-leak \
+    DRY_RUN=false \
+    ROUTE_OUT="${WORK}/route.yml" \
+    GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" \
+    "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -F "dry_run=false. Applied route app-vanity to app for app.example.gov.bc.ca. Certificate expires ${expires}." "$GITHUB_STEP_SUMMARY"
+  ! grep -F 'token-should-not-leak' "$GITHUB_STEP_SUMMARY"
+  ! grep -F 'BEGIN PRIVATE KEY' "$GITHUB_STEP_SUMMARY"
+  ! grep -F 'BEGIN CERTIFICATE' "$GITHUB_STEP_SUMMARY"
+}
+
 @test "failure records dry_run on the summary" {
   cd "$WORK"
   run env \
