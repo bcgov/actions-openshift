@@ -91,19 +91,9 @@ fi
 [ -n "${TLS_PRIVATE_KEY:-}" ] || die "TLS_PRIVATE_KEY or TLS_PRIVATE_KEY_FILE is required"
 [ -n "${TLS_CA_CERTIFICATE:-}" ] || die "TLS_CA_CERTIFICATE or TLS_CA_CERTIFICATE_FILE is required"
 
-if [ "$DRY_RUN" != "true" ]; then
-  [ -n "$OC_NAMESPACE" ] || die "OC_NAMESPACE is required unless DRY_RUN=true"
-  [ -n "$OC_SERVER" ] || die "OC_SERVER is required unless DRY_RUN=true"
-  [ -n "$OC_TOKEN" ] || die "OC_TOKEN is required unless DRY_RUN=true"
-fi
-
 umask 077
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
-
-if [ "$DRY_RUN" != "true" ]; then
-  command -v oc >/dev/null || die "oc is not on PATH (install the OpenShift CLI, or use DRY_RUN=true)"
-fi
 
 CERT_PEM="$WORKDIR/cert.pem"
 KEY_PEM="$WORKDIR/key.pem"
@@ -177,11 +167,10 @@ fi
 grep -q '^    caCertificate: |' "$ROUTE_OUT" || die "caCertificate was not nested under spec.tls."
 grep -q '^  caCertificate:' "$ROUTE_OUT" && die "caCertificate was written as a spec sibling; expected spec.tls.caCertificate."
 
-if [ "$DRY_RUN" = "true" ]; then
-  echo "DRY RUN: cert/key match, host covered, YAML written to $ROUTE_OUT (contains the private key; not printed)."
-  summarize "dry_run=true. Validated ${ROUTE_HOST}. The route was not changed."
-  exit 0
-fi
+[ -n "$OC_NAMESPACE" ] || die "OC_NAMESPACE is required"
+[ -n "$OC_SERVER" ] || die "OC_SERVER is required"
+[ -n "$OC_TOKEN" ] || die "OC_TOKEN is required"
+command -v oc >/dev/null || die "oc is not on PATH"
 
 if oc whoami >/dev/null 2>&1; then
   oc project "$OC_NAMESPACE" >/dev/null || die "oc is logged in, but not to namespace $OC_NAMESPACE"
@@ -190,7 +179,23 @@ else
   oc project "$OC_NAMESPACE" >/dev/null
 fi
 
-if oc get route "$ROUTE_NAME" >/dev/null 2>&1; then
+# --ignore-not-found: absence is empty output. Any other failure is an error.
+if ! route_ref="$(oc get route "$ROUTE_NAME" --ignore-not-found -o name)"; then
+  die "Could not read Route ${ROUTE_NAME}."
+fi
+
+if [ "$DRY_RUN" = "true" ]; then
+  if [ -n "$route_ref" ]; then
+    route_state="Route ${ROUTE_NAME} exists."
+  else
+    route_state="Route ${ROUTE_NAME} does not exist."
+  fi
+  echo "DRY RUN: cert/key match, host covered, logged in. ${route_state} No Secret and no apply. YAML at $ROUTE_OUT (contains the private key; not printed)."
+  summarize "dry_run=true. Validated ${ROUTE_HOST}. ${route_state} The route was not changed."
+  exit 0
+fi
+
+if [ -n "$route_ref" ]; then
   echo "Existing route found. Archiving working certificates..."
   OLD_CERT="$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.certificate}')"
   OLD_KEY="$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.key}')"
