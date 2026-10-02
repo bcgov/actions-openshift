@@ -42,7 +42,7 @@ on:
         required: false
         type: string
       tag:
-        description: Specify a tag to deploy; defaults to PR number
+        description: 'Tag to deploy. On pull_request an empty tag becomes the PR number. When promote_images is set and tag is empty, image-tracker supplies the PR number and that value is used. push and merge must set tag unless promote_images resolves one.'
         required: false
         type: string
       triggers:
@@ -84,6 +84,10 @@ jobs:
   deploy:
     name: Helm
     environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      packages: read
+      pull-requests: read
     runs-on: ubuntu-24.04
     outputs:
       packages: ${{ steps.vars.outputs.packages }}
@@ -92,23 +96,54 @@ jobs:
     steps:
       ### Triggers, tag and release
 
-      # Variables
-      - if: inputs.tag  == ''
-        id: pr
-        uses: bcgov/action-get-pr@28b0adf8e4d40720d41f9c87356ce24b0a4bd6af # v0.3.1
+      # inputs.tag wins. When tag is empty and promote_images is set, image-tracker
+      # supplies the PR number and that value is used. Otherwise pull_request
+      # uses the event PR number. push and merge must set tag when it does not.
+      - name: Checkout
+        if: inputs.tag == '' && inputs.promote_images != ''
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve PR from images
+        id: tracker
+        if: inputs.tag == '' && inputs.promote_images != ''
+        uses: bcgov/actions/image-tracker@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
+        with:
+          max_depth: 100
+          package: ${{ inputs.promote_images }}
 
       - name: Vars
         id: vars
         env:
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_ENVIRONMENT: ${{ inputs.environment }}
-          PR_NUM: ${{ steps.pr.outputs.pr }}
           PROMOTE_IMAGES: ${{ inputs.promote_images }}
           REPOSITORY_NAME: ${{ github.event.repository.name }}
           RUN_NUMBER: ${{ github.run_number }}
+          TRACKED_PR: ${{ steps.tracker.outputs.pr }}
+          TRACKER_OUTCOME: ${{ steps.tracker.outcome }}
         run: |
-          # Tag defaults to PR number, but can be overridden by inputs.tag
-          tag="${INPUT_TAG:-$PR_NUM}"
+          tag="${INPUT_TAG}"
+          if [ -z "${tag}" ] && [ "${TRACKER_OUTCOME}" = "success" ]; then
+            tag="${TRACKED_PR}"
+            if [[ ! "${tag}" =~ ^[0-9]+$ ]]; then
+              echo "::error::image-tracker did not return a numeric PR number; set tag."
+              exit 1
+            fi
+          fi
+          if [ -z "${tag}" ] && [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            tag="$(jq -r '.number // empty' "${GITHUB_EVENT_PATH}")"
+            if [[ ! "${tag}" =~ ^[0-9]+$ ]]; then
+              echo "::error::pull_request payload has no numeric PR number; set tag."
+              exit 1
+            fi
+          fi
+          if [ -z "${tag}" ]; then
+            echo "::error::tag is required for ${GITHUB_EVENT_NAME}. On pull_request it defaults to the PR number. When promote_images is set, image-tracker supplies it. push and merge callers must set tag otherwise."
+            exit 1
+          fi
 
           # Release name includes run numbers to ensure uniqueness
           target_env="${INPUT_ENVIRONMENT:-$tag}"
