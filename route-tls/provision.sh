@@ -219,5 +219,21 @@ else
 fi
 
 oc apply -f "$ROUTE_OUT"
-echo "Applied route $ROUTE_NAME -> $TARGET_SERVICE (host $ROUTE_HOST)"
-summarize "dry_run=false. Applied route ${ROUTE_NAME} to ${TARGET_SERVICE} for ${ROUTE_HOST}."
+
+if ! LIVE_CERT="$(oc get route "$ROUTE_NAME" -o jsonpath='{.spec.tls.certificate}')"; then
+  die "Could not read Route ${ROUTE_NAME} after apply."
+fi
+[ -n "$LIVE_CERT" ] || die "Route ${ROUTE_NAME} has no certificate after apply."
+if ! LIVE_PUB_SHA="$(printf '%s\n' "$LIVE_CERT" | openssl x509 -noout -pubkey 2>/dev/null | openssl pkey -pubin -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)"; then
+  die "Route ${ROUTE_NAME} certificate could not be read after apply."
+fi
+if [ -z "$LIVE_PUB_SHA" ] || [ "$LIVE_PUB_SHA" != "$CERT_PUB_SHA" ]; then
+  die "Route ${ROUTE_NAME} certificate does not match the certificate that was applied."
+fi
+if ! LIVE_NOT_AFTER="$(printf '%s\n' "$LIVE_CERT" | openssl x509 -noout -enddate 2>/dev/null | sed 's/^notAfter=//')"; then
+  die "Route ${ROUTE_NAME} certificate expiry could not be read after apply."
+fi
+[ -n "$LIVE_NOT_AFTER" ] || die "Route ${ROUTE_NAME} certificate has no expiry after apply."
+
+echo "Applied route $ROUTE_NAME -> $TARGET_SERVICE (host $ROUTE_HOST). Certificate expires ${LIVE_NOT_AFTER}."
+summarize "dry_run=false. Applied route ${ROUTE_NAME} to ${TARGET_SERVICE} for ${ROUTE_HOST}. Certificate expires ${LIVE_NOT_AFTER}."

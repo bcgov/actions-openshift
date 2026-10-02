@@ -99,14 +99,14 @@ jobs:
 | `oc_token` | Token | Yes | |
 | `dry_run` | Log in and read the route. Do not create the backup Secret or apply | No | `false` |
 
-A finished run records `dry_run=true` or `dry_run=false` on the workflow summary and raises a notice. A failure records `dry_run` and the error. The summary does not include the key.
+A finished run records `dry_run=true` or `dry_run=false` on the workflow summary and raises a notice. A real apply names the Route and the live certificate expiry. A failure records `dry_run` and the error. The summary does not include the key.
 
 ## What it does
 
 1. Fail if the cert and key do not match, the issuing CA did not sign the leaf, the cert is expired, or the cert does not cover `hostname` (CN or SAN, including wildcards).
 2. Log in and read the route. `dry_run=true` stops here. It does not create a Secret and does not apply.
 3. Unless `dry_run`, snapshot the live Route's TLS (cert, key, CA) into a Secret named `<route>-backup-<sha256-prefix>`, labeled `backup-type=route-tls` (no `app` label). Re-applying the same cert is a no-op on that Secret. Restore from that Secret if an apply goes wrong.
-4. Unless `dry_run`, `oc apply` the Route (GitHub installs `oc` via `bcgov/action-oc-runner`). Private keys are never printed.
+4. Unless `dry_run`, `oc apply` the Route (GitHub installs `oc` via `bcgov/action-oc-runner`), then read the live certificate and fail unless its public key matches the certificate that was applied. Private keys are never printed.
 
 ## Local CLI (optional)
 
