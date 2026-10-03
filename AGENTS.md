@@ -5,7 +5,7 @@ Repository facts for automated coding assistants. Teams may edit or remove this 
 ## Layout
 - Composite actions: `cleanup-pr/`, `crunchy/`, `deployer/`, `oc-runner/`, `route-tls/`
 - Helm chart: `crunchy/charts/crunchy` (`crunchy/values.yml`). OpenShift templates: `deployer/templates/`, `oc-runner/cronjob/openshift.deploy.yml`
-- Workflows: `.github/workflows/` (checks: `pr-open.yml`, `pr-close.yml`, `oc-runner-commands.yml`; reusable: `.deployer.yml`, `.pr-close.yml`, `.schema-spy.yml`)
+- Workflows: `.github/workflows/` (checks: `pr-open.yml`, `pr-close.yml`, `oc-runner-commands.yml`; reachability: `probe-runner-reachability.yml`; reusable: `.deployer.yml`, `.pr-close.yml`, `.schema-spy.yml`)
 - Tests: `.github/tests/` (bats). Script-injection audit: `scripts/audit_composite_actions.py`
 
 ## Build, test, deploy
