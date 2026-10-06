@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Flyway
-        uses: docker://flyway/flyway:12@sha256:c345513c9240ff3543599fac78f59d0fa3806c2e38ad7e75b6bc5533078c0bc9
+        uses: docker://flyway/flyway:12@sha256:455c23d438811c27415f2c28052d0cc4494665a313b6faa41a7ece5242c24f10
         env:
           FLYWAY_URL: jdbc:postgresql://postgres:5432/default
           FLYWAY_USER: postgres
@@ -78,7 +78,7 @@ jobs:
         run: docker run --network host -v "$PWD/output:/output" schemaspy/schemaspy:6.2.4 -t pgsql11 -db default -host 127.0.0.1 -port 5432 -u postgres -p default -schemas "$SCHEMASPY_SCHEMA"
 
       - name: Deploy to Pages
-        uses: JamesIves/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f # v4
+        uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445 # v4
         with:
           folder: output
           target-folder: ${{ inputs.deploy_dir }}
