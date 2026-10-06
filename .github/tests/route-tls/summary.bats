@@ -61,6 +61,55 @@ STUB
   ! grep -F 'BEGIN PRIVATE KEY' "$GITHUB_STEP_SUMMARY"
 }
 
+@test "dry run fails when another route already has the host" {
+  bin="${BATS_TEST_TMPDIR}/bin"
+  mkdir -p "$bin"
+  export OC_LOG="${BATS_TEST_TMPDIR}/oc-host.log"
+  : > "$OC_LOG"
+  cat > "${bin}/oc" << 'STUB'
+#!/bin/bash
+echo "$*" >> "$OC_LOG"
+case "$1" in
+  get)
+    case "$*" in
+      *spec.host*)
+        printf 'app-prod-frontend-vanity\tapp.example.gov.bc.ca\n'
+        ;;
+      *)
+        exit 0
+        ;;
+    esac
+    ;;
+  create|apply) exit 99 ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x "${bin}/oc"
+  cd "$WORK"
+  run env \
+    PATH="${bin}:${PATH}" \
+    OC_LOG="$OC_LOG" \
+    ROUTE_HOST=app.example.gov.bc.ca \
+    ROUTE_NAME=app-vanity-url \
+    TARGET_SERVICE=app \
+    TLS_CERTIFICATE_FILE="${BATS_TEST_TMPDIR}/leaf.pem" \
+    TLS_PRIVATE_KEY_FILE="${BATS_TEST_TMPDIR}/leaf.key" \
+    TLS_CA_CERTIFICATE_FILE="${BATS_TEST_TMPDIR}/ca.pem" \
+    OC_NAMESPACE=abc123-prod \
+    OC_SERVER=https://api.example.test:6443 \
+    OC_TOKEN=token-should-not-leak \
+    DRY_RUN=true \
+    ROUTE_OUT="${WORK}/route.yml" \
+    GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" \
+    "$SCRIPT"
+  [ "$status" -eq 1 ]
+  grep -F 'Host app.example.gov.bc.ca is already claimed by route app-prod-frontend-vanity. app-vanity-url would be rejected.' "$GITHUB_STEP_SUMMARY"
+  grep -F 'dry_run=true' "$GITHUB_STEP_SUMMARY"
+  ! grep -E '^(create|apply) ' "$OC_LOG"
+  ! grep -F 'token-should-not-leak' "$GITHUB_STEP_SUMMARY"
+  ! grep -F 'BEGIN PRIVATE KEY' "$GITHUB_STEP_SUMMARY"
+}
+
 @test "failed oc apply records the line and exit status, not the token" {
   bin="${BATS_TEST_TMPDIR}/bin"
   mkdir -p "$bin"
