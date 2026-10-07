@@ -20,6 +20,25 @@ NR cert packages from Entrust look like `app.example.gov.bc.ca/`. Map them like 
 
 Leave out **Sectigo Public Server Authentication Root R46.pem** and **USERTrust RSA Certification Authority.pem**. Those are roots; clients already have them. Leave out `<host>.csr`; the request is finished.
 
+Upload secrets to the `prod` environment with the GitHub CLI:
+
+```bash
+CERT_HOST='myapp.gov.bc.ca' # Replace with the certificate filename prefix
+gh secret set TLS_CERTIFICATE --env prod < "${CERT_HOST}.pem"
+gh secret set TLS_PRIVATE_KEY --env prod < "${CERT_HOST}.key"
+gh secret set TLS_CA_CERTIFICATE --env prod < 'Entrust OV TLS Issuing RSA CA 2.pem'
+```
+
+## Standalone Workflow Architecture
+
+**Always deploy as a standalone, on-demand workflow (`.github/workflows/route-tls.yml` with `workflow_dispatch`).**
+
+Do not embed `route-tls` into `merge.yml`, `release.yml`, or continuous deployment pipelines:
+- Certificates rotate yearly; application code deploys continuously.
+- Decoupling avoids holding or failing application releases for certificate renewals or transient test failures.
+- Standalone execution supports `dry_run=true` validation before applying.
+- Inlining performs redundant OpenShift API calls, token use, and route reconcile operations on every application release.
+
 ## Usage
 
 ```yaml
