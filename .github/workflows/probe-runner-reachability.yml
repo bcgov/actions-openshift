@@ -62,7 +62,7 @@ jobs:
             --argjson router_ok_while_api_blocked "${ROUTER_OK_WHILE_API_BLOCKED}" \
             '$ARGS.named' | tee "${RUNNER_TEMP}/probe-${SAMPLE}.json"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: probe-${{ matrix.sample }}
           path: ${{ runner.temp }}/probe-${{ matrix.sample }}.json
@@ -85,7 +85,7 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: probe-*
           merge-multiple: true
