@@ -184,6 +184,17 @@ if ! route_ref="$(oc get route "$ROUTE_NAME" --ignore-not-found -o name)"; then
   die "Could not read Route ${ROUTE_NAME}."
 fi
 
+# OpenShift admits one route per host. A second name is created and then Rejected.
+if ! host_rows="$(oc get route -o 'jsonpath={range .items[*]}{.metadata.name}{"\t"}{.spec.host}{"\n"}{end}')"; then
+  die "Could not list Routes."
+fi
+while IFS=$'\t' read -r other_name other_host; do
+  [ -n "$other_name" ] || continue
+  if [ "$other_host" = "$ROUTE_HOST" ] && [ "$other_name" != "$ROUTE_NAME" ]; then
+    die "Host ${ROUTE_HOST} is already claimed by route ${other_name}. ${ROUTE_NAME} would be rejected."
+  fi
+done <<< "$host_rows"
+
 if [ "$DRY_RUN" = "true" ]; then
   if [ -n "$route_ref" ]; then
     route_state="Route ${ROUTE_NAME} exists."

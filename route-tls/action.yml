@@ -31,7 +31,7 @@ inputs:
     description: "OpenShift token."
     required: true
   dry_run:
-    description: "If true, log in and read the route. Do not create the backup Secret or apply. The workflow summary records dry_run=true or dry_run=false."
+    description: "If true, log in, read the route, and fail if another route already has hostname. Do not create the backup Secret or apply. The workflow summary records dry_run=true or dry_run=false."
     required: false
     default: "false"
 
