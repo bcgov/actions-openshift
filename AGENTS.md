@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Repository facts for automated coding assistants. Teams may edit or remove this file.
+Repository facts and constraints for automated coding assistants.
 
 ## Layout
 - Composite actions: `cleanup-pr/`, `crunchy/`, `deployer/`, `oc-runner/`, `route-tls/`
@@ -15,4 +15,14 @@ Repository facts for automated coding assistants. Teams may edit or remove this 
 
 ## Shared actions
 - Call a sibling action as `$/<name>`, never `./`. Use bcgov shared actions (`bcgov/actions/*`, `bcgov/action-*`) as provided; don't copy or fork them.
-- Never pin `@main`. Pin bcgov shared actions to a published release SHA with a `# vX.Y.Z` comment.
+
+## Action Architecture & Rules
+
+- **`route-tls` is standalone only**: When assisting downstream repositories with custom vanity Route TLS, always implement it as an independent on-demand workflow (`.github/workflows/route-tls.yml` on `workflow_dispatch` with `dry_run` choice defaulting to `true`). **NEVER** embed `route-tls` into `merge.yml`, `release.yml`, or continuous deployment pipelines.
+- **Secret Management**: Certificates belong in the `prod` GitHub Environment (`TLS_CERTIFICATE`, `TLS_PRIVATE_KEY`, `TLS_CA_CERTIFICATE`). Automated assistants must never manage secrets directly; draft copy-pasteable `gh secret set` commands in chat for human maintainers.
+- **Entrust Certificate Mapping**:
+  - `TLS_CERTIFICATE`: leaf only (`<host>.pem`).
+  - `TLS_PRIVATE_KEY`: unencrypted private key (`<host>.key`).
+  - `TLS_CA_CERTIFICATE`: issuing intermediate only (`Entrust OV TLS Issuing RSA CA 2.pem`). Exclude root CAs and `.csr`.
+- **Bash over JavaScript**: Actions in this repository stay in bash (`openssl` + `oc`). Do not rewrite composite actions to Node.js or JavaScript.
+- **Pinning**: Pin third-party actions to full 40-character commit SHAs with `# vX.Y.Z` trailing comments. Never pin `@main`. Pin bcgov shared actions (`bcgov/actions/*`, `bcgov/action-*`) to a published release SHA with a `# vX.Y.Z` comment.
