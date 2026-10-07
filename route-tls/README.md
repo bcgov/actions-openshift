@@ -23,8 +23,9 @@ Leave out **Sectigo Public Server Authentication Root R46.pem** and **USERTrust 
 Upload secrets to the `prod` environment with the GitHub CLI:
 
 ```bash
-gh secret set TLS_CERTIFICATE --env prod < <host>.pem
-gh secret set TLS_PRIVATE_KEY --env prod < <host>.key
+CERT_HOST='myapp.gov.bc.ca' # Replace with the certificate filename prefix
+gh secret set TLS_CERTIFICATE --env prod < "${CERT_HOST}.pem"
+gh secret set TLS_PRIVATE_KEY --env prod < "${CERT_HOST}.key"
 gh secret set TLS_CA_CERTIFICATE --env prod < 'Entrust OV TLS Issuing RSA CA 2.pem'
 ```
 
@@ -36,7 +37,7 @@ Do not embed `route-tls` into `merge.yml`, `release.yml`, or continuous deployme
 - Certificates rotate yearly; application code deploys continuously.
 - Decoupling avoids holding or failing application releases for certificate renewals or transient test failures.
 - Standalone execution supports `dry_run=true` validation before applying.
-- Inlining creates redundant backup Secrets in OpenShift on every merge.
+- Inlining performs redundant OpenShift API calls, token use, and route reconcile operations on every application release.
 
 ## Usage
 
