@@ -37,8 +37,8 @@ Testing has only been done with public images (ghcr.io, hub.docker.com) so far.
 
     ### Typical / recommended
     
-    # Overwrite objects using `oc apply` or only create with `oc create`
-    # Expected errors from `oc create` are handled with `set +o pipefail`
+    # Overwrite objects using `oc apply` (true) or create once with `oc create` (false)
+    # With overwrite: false, AlreadyExists is tolerated while other errors fail
     overwrite: "true"
 
     # Template parameters/variables to pass

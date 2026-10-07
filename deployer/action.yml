@@ -243,7 +243,23 @@ runs:
         else
           # Allow AlreadyExists errors and expected failures
           echo "Overwrite=false; using oc create"
-          (set +o pipefail; oc create -f "${TEMPLATE_FILE}" 2>&1 | sed 's/.*: //')
+          CREATE_ERR="$(mktemp "${RUNNER_TEMP}/deployer-create-err.XXXXXX")"
+          trap 'rm -f "${CREATE_ERR:-}"' EXIT
+          if oc create -f "${TEMPLATE_FILE}" 2>"${CREATE_ERR}"; then
+            [ -s "${CREATE_ERR}" ] && cat "${CREATE_ERR}" >&2 || true
+            rm -f "${CREATE_ERR}"
+          else
+            CREATE_EXIT=$?
+            UNEXPECTED_ERRORS="$(grep -Ev '^[[:space:]]*Error from server \(AlreadyExists\):' "${CREATE_ERR}" | grep -Evi '^[[:space:]]*warning:' | grep -Ev '^[[:space:]]*$' || true)"
+            if grep -qE '^[[:space:]]*Error from server \(AlreadyExists\):' "${CREATE_ERR}" && [ -z "${UNEXPECTED_ERRORS}" ]; then
+              grep -Ei '^[[:space:]]*warning:' "${CREATE_ERR}" >&2 || true
+              grep -E '^[[:space:]]*Error from server \(AlreadyExists\):' "${CREATE_ERR}" | sed 's/.*: //'
+              rm -f "${CREATE_ERR}"
+            else
+              cat "${CREATE_ERR}" >&2
+              exit "${CREATE_EXIT}"
+            fi
+          fi
         fi
 
         # Follow any active deployments
