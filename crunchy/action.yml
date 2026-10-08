@@ -122,19 +122,19 @@ outputs:
     value: ${{ steps.vars.outputs.CLUSTER_NAME }}
   db_secret:
     description: 'Database credentials secret name'
-    value: ${{ steps.vars.outputs.DB_SECRET }}
+    value: ${{ steps.deploy.outputs.DB_SECRET || steps.vars.outputs.DB_SECRET }}
   db_host:
-    description: 'Database host (pgBouncer service)'
-    value: ${{ steps.vars.outputs.DB_HOST }}
+    description: 'Database host (pgBouncer or primary service)'
+    value: ${{ steps.deploy.outputs.DB_HOST || steps.vars.outputs.DB_HOST }}
   db_port:
     description: 'Database port'
-    value: ${{ steps.vars.outputs.DB_PORT }}
+    value: ${{ steps.deploy.outputs.DB_PORT || steps.vars.outputs.DB_PORT }}
   db_user:
     description: 'Database user'
-    value: ${{ steps.vars.outputs.DB_USER }}
+    value: ${{ steps.deploy.outputs.DB_USER || steps.vars.outputs.DB_USER }}
   db_name:
     description: 'Database name'
-    value: ${{ steps.vars.outputs.DB_NAME }}
+    value: ${{ steps.deploy.outputs.DB_NAME || steps.vars.outputs.DB_NAME }}
 
 runs:
   using: "composite"
@@ -255,8 +255,11 @@ runs:
         ref: ${{ inputs.ref }}
 
     - if: github.event.action != 'closed'
+      id: deploy
       shell: bash
       env:
+        EVENT_NAME: ${{ github.event_name }}
+        EVENT_NUMBER: ${{ github.event.number }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
         DIRECTORY: ${{ inputs.directory }}
         REPO_NAME: ${{ github.event.repository.name }}
@@ -297,6 +300,33 @@ runs:
         # Execute the deploy command
         echo "$GITHUB_ACTION_PATH/scripts/deploy_db.sh [arguments redacted]"
         "$GITHUB_ACTION_PATH/scripts/deploy_db.sh" "${PARAMS[@]}"
+
+        # Export effective database contract outputs from deployed values
+        EFFECTIVE_DB_NAME="$(yq -r '.global.config.dbName // "app"' "${DIRECTORY}/values.yml" 2>/dev/null || echo "app")"
+        PGBOUNCER_ENABLED="$(yq -r '.crunchy.proxy.enabled // true' "${DIRECTORY}/values.yml" 2>/dev/null || echo "true")"
+
+        if [ "${EVENT_NAME}" = "pull_request" ] && [ -n "${EVENT_NUMBER}" ]; then
+          DB_USER="app-${EVENT_NUMBER}"
+          DB_NAME="app-${EVENT_NUMBER}"
+        else
+          DB_USER="${EFFECTIVE_DB_NAME}"
+          DB_NAME="${EFFECTIVE_DB_NAME}"
+        fi
+
+        if [ "${PGBOUNCER_ENABLED}" = "true" ]; then
+          DB_HOST="${CLUSTER_NAME}-pgbouncer"
+        else
+          DB_HOST="${CLUSTER_NAME}-primary"
+        fi
+
+        DB_SECRET="${CLUSTER_NAME}-pguser-${DB_USER}"
+        DB_PORT="5432"
+
+        echo "DB_USER=${DB_USER}" >> $GITHUB_OUTPUT
+        echo "DB_NAME=${DB_NAME}" >> $GITHUB_OUTPUT
+        echo "DB_HOST=${DB_HOST}" >> $GITHUB_OUTPUT
+        echo "DB_SECRET=${DB_SECRET}" >> $GITHUB_OUTPUT
+        echo "DB_PORT=${DB_PORT}" >> $GITHUB_OUTPUT
 
     - if: github.event_name == 'pull_request' && github.event.action != 'closed' && inputs.dry_run != 'true'
       shell: bash

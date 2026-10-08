@@ -289,12 +289,16 @@ The action exports `db_secret` containing the operator-generated Secret name (`<
           oc_token: ${{ secrets.OC_TOKEN }}
 
       - name: Deploy Application
-        # Pass the secret name to your application manifests or deployment action
-        env:
-          DB_SECRET: ${{ steps.crunchy.outputs.db_secret }}
+        uses: bcgov/actions-openshift/deployer@<sha> # <tag>
+        with:
+          file: backend/openshift.deploy.yml
+          oc_namespace: ${{ secrets.OC_NAMESPACE }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          oc_server: ${{ vars.OC_SERVER }}
+          parameters: -p DB_SECRET="${{ steps.crunchy.outputs.db_secret }}"
 ```
 
-Inside your Kubernetes or OpenShift Deployment / StatefulSet manifest:
+Inside your OpenShift template or Kubernetes manifest:
 
 ```yaml
 envFrom:
@@ -303,12 +307,11 @@ envFrom:
 ```
 
 The operator-managed secret provides the following keys:
-- `host`: pgBouncer hostname (`<cluster>-pgbouncer`)
-- `port`: database port (`5432`)
+- `pgbouncer-host` / `pgbouncer-port` / `pgbouncer-uri`: pooled connection details via pgBouncer (recommended for applications/ORMs)
+- `host` / `port` / `uri`: direct connection details to the primary PostgreSQL pod (bypasses pgBouncer)
 - `dbname`: target database name (`app[-<pr>]`)
 - `user`: database user (`app[-<pr>]`)
 - `password`: database password
-- `pgbouncer-uri` / `uri`: full connection URI for ORMs (Prisma, TypeORM)
 
 ## Use with private repositories
 
