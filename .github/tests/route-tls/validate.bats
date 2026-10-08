@@ -97,6 +97,19 @@ provision() {
   [[ "$output" == *"TLS_CA_CERTIFICATE certificate 2 did not issue TLS_CA_CERTIFICATE certificate 1."* ]]
 }
 
+@test "a repeated issuing CA fails" {
+  cat "${D}/int.pem" "${D}/int.pem" "${D}/root.pem" > "${D}/chain-repeat.pem"
+  provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/chain-repeat.pem"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"TLS_CA_CERTIFICATE certificate 2 did not issue TLS_CA_CERTIFICATE certificate 1."* ]]
+}
+
+@test "a repeated self-signed certificate passes" {
+  openssl req -x509 -newkey rsa:2048 -keyout "${D}/self.key" -out "${D}/self.pem" -days 30 -nodes -subj "/CN=app.example.gov.bc.ca" -addext "subjectAltName=DNS:app.example.gov.bc.ca" 2>/dev/null
+  provision "${D}/self.pem" "${D}/self.key" "${D}/self.pem"
+  [ "$status" -eq 0 ]
+}
+
 @test "expired certificate fails as expired, not as a chain error" {
   provision "${D}/leaf-expired.pem" "${D}/leaf.key" "${D}/int.pem"
   [ "$status" -eq 1 ]
@@ -121,7 +134,21 @@ provision() {
   cat "${D}/int.pem" "${D}/leaf.key" > "${D}/ca-with-key.pem"
   provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/ca-with-key.pem"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"TLS_CA_CERTIFICATE must hold only certificates."* ]]
+  [[ "$output" == *"TLS_CA_CERTIFICATE must hold only certificate PEM blocks, with no other text or keys."* ]]
+}
+
+@test "text around the CA certificate fails" {
+  { echo "subject=CN=Test Issuing CA"; cat "${D}/int.pem"; } > "${D}/ca-with-text.pem"
+  provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/ca-with-text.pem"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"TLS_CA_CERTIFICATE must hold only certificate PEM blocks"* ]]
+}
+
+@test "private key after the leaf fails without printing it" {
+  cat "${D}/leaf.pem" "${D}/leaf.key" > "${D}/leaf-with-key.pem"
+  provision "${D}/leaf-with-key.pem" "${D}/leaf.key" "${D}/int.pem"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"TLS_CERTIFICATE must hold only the certificate PEM block, with no other text or keys."* ]]
 }
 
 @test "encrypted private key fails without prompting" {

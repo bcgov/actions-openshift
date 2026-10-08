@@ -74,6 +74,14 @@ cert_covers_host() {
   [ -n "$cn" ] && host_matches_name "$host" "$cn"
 }
 
+# Every non-blank line sits inside a complete BEGIN/END CERTIFICATE block.
+certs_only() {
+  awk '/^-----BEGIN CERTIFICATE-----\r?$/ { if (b) bad = 1; b = 1; next }
+    /^-----END CERTIFICATE-----\r?$/ { if (!b) bad = 1; b = 0; next }
+    !b && /[^[:space:]]/ { bad = 1 }
+    END { exit (bad || b) }' "$1"
+}
+
 load_file TLS_CERTIFICATE TLS_CERTIFICATE_FILE
 load_file TLS_PRIVATE_KEY TLS_PRIVATE_KEY_FILE
 load_file TLS_CA_CERTIFICATE TLS_CA_CERTIFICATE_FILE
@@ -105,6 +113,7 @@ printf '%s\n' "$TLS_CA_CERTIFICATE" > "$CA_PEM"
 echo "Validating certificate, private key and CA chain. PEM contents are not printed."
 cert_count="$(grep -c -e '-----BEGIN CERTIFICATE-----' "$CERT_PEM" || true)"
 [ "$cert_count" -eq 1 ] || die "TLS_CERTIFICATE must hold only the leaf certificate (found ${cert_count}). Put the issuing CA in TLS_CA_CERTIFICATE."
+certs_only "$CERT_PEM" || die "TLS_CERTIFICATE must hold only the certificate PEM block, with no other text or keys."
 if ! CERT_PUB_SHA="$(openssl x509 -in "$CERT_PEM" -noout -pubkey 2>/dev/null | openssl pkey -pubin -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)"; then
   die "TLS certificate is invalid."
 fi
@@ -127,7 +136,7 @@ echo "PASS: certificate is not expired"
 # Chain order: CA 1 issued the leaf, and each later CA issued the one before it.
 ca_count="$(grep -c -e '-----BEGIN CERTIFICATE-----' "$CA_PEM" || true)"
 [ "$ca_count" -ge 1 ] || die "TLS_CA_CERTIFICATE holds no certificate."
-[ "$(grep -c -e '-----BEGIN ' "$CA_PEM")" -eq "$ca_count" ] || die "TLS_CA_CERTIFICATE must hold only certificates."
+certs_only "$CA_PEM" || die "TLS_CA_CERTIFICATE must hold only certificate PEM blocks, with no other text or keys."
 awk -v dir="$WORKDIR" '/-----BEGIN CERTIFICATE-----/ { n++ } n { print > (dir "/ca-" n ".pem") }' "$CA_PEM"
 child="$CERT_PEM"
 child_name="TLS_CERTIFICATE"
@@ -135,7 +144,10 @@ for i in $(seq 1 "$ca_count"); do
   ca="${WORKDIR}/ca-${i}.pem"
   openssl x509 -in "$ca" -noout >/dev/null 2>&1 || die "TLS_CA_CERTIFICATE certificate ${i} is invalid."
   openssl x509 -in "$ca" -noout -checkend 0 >/dev/null 2>&1 || die "TLS_CA_CERTIFICATE certificate ${i} has expired."
-  if ! openssl verify -partial_chain -trusted "$ca" "$child" >/dev/null 2>&1; then
+  # A certificate may only issue itself if it is self-signed; -partial_chain would trust it as is.
+  partial=(-partial_chain)
+  [ "$(openssl x509 -in "$ca" -noout -fingerprint -sha256)" != "$(openssl x509 -in "$child" -noout -fingerprint -sha256)" ] || partial=()
+  if ! openssl verify "${partial[@]}" -trusted "$ca" "$child" >/dev/null 2>&1; then
     die "TLS_CA_CERTIFICATE certificate ${i} did not issue ${child_name}. List the issuing CA first, then each CA after the one it issued."
   fi
   child="$ca"
