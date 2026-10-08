@@ -26,3 +26,7 @@ Repository facts and constraints for automated coding assistants.
   - `TLS_CA_CERTIFICATE`: issuing intermediate only (`Entrust OV TLS Issuing RSA CA 2.pem`). Exclude root CAs and `.csr`.
 - **Bash over JavaScript**: Actions in this repository stay in bash (`openssl` + `oc`). Do not rewrite composite actions to Node.js or JavaScript.
 - **Pinning**: Pin third-party actions to full 40-character commit SHAs with `# vX.Y.Z` trailing comments. Never pin `@main`. Pin bcgov shared actions (`bcgov/actions/*`, `bcgov/action-*`) to a published release SHA with a `# vX.Y.Z` comment.
+
+## README usage examples
+
+- Usage examples in action READMEs show how `bcgov/quickstart-openshift` would call the action: its workflows (`pr-open.yml`, `pr-close.yml`, `merge.yml`, `scheduled.yml`), its packages (`backend`, `frontend`, `migrations`) and its job order. Add a separate example only when the quickstart shape does not fit. Never say quickstart uses an action it does not use; read its workflows first.
