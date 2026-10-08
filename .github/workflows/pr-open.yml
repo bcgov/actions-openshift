@@ -332,33 +332,40 @@ jobs:
 
   test-route-tls-logs:
     name: Test Route TLS logs
-    needs: [test-route-tls]
+    needs: [test-route-tls, test-fork-token-degradation]
     # Failed runs are the likeliest to have printed PEM data
     if: ${{ !cancelled() }}
     permissions:
       actions: read
     runs-on: ubuntu-26.04
     steps:
-      - name: No PEM contents in the Test Route TLS log
+      - name: No PEM contents in the route-tls job logs
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          job_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" --paginate \
-            --jq '.jobs[] | select(.name == "Test Route TLS") | .id')"
-          [ -n "$job_id" ] || { echo "::error::Test Route TLS job not found"; exit 1; }
-          # Raw logs hold ANSI colour codes; the log is only scanned, never printed
-          gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" > "${RUNNER_TEMP}/route-tls.log"
-          [ -s "${RUNNER_TEMP}/route-tls.log" ] || { echo "::error::Test Route TLS log is empty"; exit 1; }
-          # A PEM body line is 64 base64 characters. Count only; never print a match.
-          leaks="$(sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9T:.-]+Z //' "${RUNNER_TEMP}/route-tls.log" | grep -cE '^[[:space:]]*[A-Za-z0-9+/]{64}[[:space:]]*$' || true)"
-          if [ "$leaks" -ne 0 ]; then
-            echo "::error::Test Route TLS log holds ${leaks} PEM body line(s)"
-            exit 1
-          fi
-          echo "PASS: no PEM body lines in $(wc -l < "${RUNNER_TEMP}/route-tls.log") log lines"
+          jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" --paginate \
+            --jq '.jobs[] | "\(.id)\t\(.name)"')"
+          failed=0
+          for name in "Test Route TLS" "Fork Token Degradation Matrix (route-tls-isolated)"; do
+            job_id="$(awk -F'\t' -v n="$name" '$2 == n { print $1 }' <<< "$jobs")"
+            [ -n "$job_id" ] || { echo "::error::${name} job not found"; exit 1; }
+            log="${RUNNER_TEMP}/${job_id}.log"
+            # Raw logs hold ANSI colour codes; the log is only scanned, never printed
+            gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" > "$log"
+            [ -s "$log" ] || { echo "::error::${name} log is empty"; exit 1; }
+            # A PEM body line is 64 base64 characters. Count only; never print a match.
+            leaks="$(sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9T:.-]+Z //' "$log" | grep -cE '^[[:space:]]*[A-Za-z0-9+/]{64}[[:space:]]*$' || true)"
+            if [ "$leaks" -ne 0 ]; then
+              echo "::error::${name} log holds ${leaks} PEM body line(s)"
+              failed=1
+            else
+              echo "PASS: ${name}: no PEM body lines in $(wc -l < "$log") log lines"
+            fi
+          done
+          exit "$failed"
 
   test-fork-token-degradation:
     name: Fork Token Degradation Matrix (${{ matrix.scenario.name }})
@@ -453,6 +460,10 @@ jobs:
           openssl req -x509 -newkey rsa:2048 -keyout /tmp/fork-other-key.pem -out /tmp/fork-other.pem \
             -days 30 -nodes -subj "/CN=other.example"
           cp /tmp/fork-cert.pem /tmp/fork-ca.pem
+          # Mask every PEM body line, so env and input displays show *** instead
+          for f in /tmp/fork-*.pem; do
+            grep -v -e '-----' "$f" | while IFS= read -r line; do echo "::add-mask::${line}"; done
+          done
           {
             echo "FORK_CERT<<EOF"
             cat /tmp/fork-cert.pem
