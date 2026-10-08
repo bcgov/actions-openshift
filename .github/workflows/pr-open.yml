@@ -15,7 +15,7 @@ permissions: {}
 jobs:
   actionlint:
     name: Actionlint
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -34,7 +34,7 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -98,7 +98,7 @@ jobs:
   test-crunchy:
     name: Test Crunchy
     permissions: {}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -175,7 +175,7 @@ jobs:
   test-route-tls:
     name: Test Route TLS
     permissions: {}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout Code to Subdirectory
         uses: actions/checkout@v7
@@ -325,7 +325,7 @@ jobs:
   test-fork-token-degradation:
     name: Fork Token Degradation Matrix (${{ matrix.scenario.name }})
     permissions: read-all
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         scenario:
