@@ -1,0 +1,127 @@
+name: Probe Runner Report
+
+# Weekly IP-health picture from the probe-results artifacts that
+# probe-runner-reachability.yml uploads each run (kept 14 days): this week vs
+# last week, block rate per /24 runner IP range, and the gold vs silver split.
+# Reports only; blocked runners never fail this workflow, and no data is fine.
+# Background: #49 (cluster admins blocking GitHub runner IPs from the API).
+
+on:
+  schedule:
+    - cron: "43 16 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/probe-runner-report.yml
+
+permissions:
+  actions: read
+
+jobs:
+  report:
+    name: Report
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Download probe-results from the past 14 days
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SINCE="$(date -u -d '14 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p results
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=probe-results&per_page=100" \
+            --jq ".artifacts[] | select(.expired | not) | select(.created_at >= \"${SINCE}\") | .workflow_run.id" \
+            | sort -u > runs.txt
+          echo "Runs with probe-results since ${SINCE}: $(wc -l < runs.txt)"
+          while read -r RUN; do
+            gh run download "${RUN}" -R "${GITHUB_REPOSITORY}" -n probe-results -D "results/${RUN}" \
+              || echo "::warning::Could not download probe-results from run ${RUN}"
+          done < runs.txt
+
+      - name: Report
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          FILES=(results/*/probe-results.json)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            {
+              echo "## Runner IP health"
+              echo ""
+              echo "No data yet: no probe-results artifacts from the past 14 days."
+            } | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          jq -rs --arg since "$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)" '
+            def answered: split(" ") | any(test("^[1-9][0-9][0-9]$"));
+            def range24: if (.ip | test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))
+              then (.ip | split(".")[0:3] | join(".")) + ".0/24" else "unknown" end;
+            def pct($b; $n): if $n == 0 then "-" else "\(($b * 1000 / $n | round) / 10)%" end;
+            def samples: [.[].samples[]];
+            def totals: (samples | length) as $n | (samples | map(select(.api_blocked)) | length) as $b
+              | {runs: length, samples: $n, blocked: $b, rate: pct($b; $n)};
+            def apis: samples as $s | ($s | length) as $n
+              | ($s | map(select(.gold_api | answered | not)) | length) as $g
+              | ($s | map(select(.silver_api | answered | not)) | length) as $v
+              | ($s | map(select((.gold_api | answered | not) and (.silver_api | answered | not))) | length) as $both
+              | {gold: "\($g) (\(pct($g; $n)))", silver: "\($v) (\(pct($v; $n)))", both: $both,
+                 gold_only: ($g - $both), silver_only: ($v - $both),
+                 router: ($s | map(select(.router_ok_while_api_blocked)) | length)};
+
+            (map(select(.timestamp >= $since))) as $this
+            | (map(select(.timestamp < $since))) as $last
+            | ($this | totals) as $t | ($last | totals) as $l
+            | ($this | apis) as $ts | ($last | apis) as $ls
+            | (samples | group_by(range24) | map(
+                (length) as $n | (map(select(.api_blocked)) | length) as $b
+                | {range: (.[0] | range24), n: $n, b: $b, rate: pct($b; $n),
+                   status: (if $b == 0 then "never" elif $b == $n then "always" else "sometimes" end)})
+              | sort_by(-.b, -(.b / .n), .range)) as $ranges
+            | ($ranges | map(select(.b > 0))) as $blocked
+            | ($ranges | map(select(.b == 0))) as $clear
+
+            | "## Runner IP health",
+              "",
+              "Probe runs from \(map(.timestamp) | min) to \(map(.timestamp) | max). This week means since \($since).",
+              "",
+              "### Totals",
+              "",
+              "| | This week | Last week |",
+              "|---|---|---|",
+              "| Runs | \($t.runs) | \($l.runs) |",
+              "| Samples | \($t.samples) | \($l.samples) |",
+              "| Blocked samples | \($t.blocked) | \($l.blocked) |",
+              "| Block rate | \($t.rate) | \($l.rate) |",
+              "",
+              "### Block rate per /24 runner IP range (14 days)",
+              "",
+              "\($ranges | length) ranges: \($ranges | map(select(.status == "always")) | length) always blocked, \($ranges | map(select(.status == "sometimes")) | length) sometimes blocked, \($clear | length) never blocked.",
+              "",
+              (if ($blocked | length) > 0 then
+                "| Range | Status | Blocked | Samples | Block rate |",
+                "|---|---|---|---|---|",
+                ($blocked[] | "| \(.range) | \(.status) | \(.b) | \(.n) | \(.rate) |")
+              else "No range was blocked." end),
+              "",
+              (if ($clear | length) > 0 then
+                "<details><summary>Never blocked (\($clear | length) ranges)</summary>",
+                "",
+                "| Range | Samples |",
+                "|---|---|",
+                ($clear | sort_by(-.n, .range)[] | "| \(.range) | \(.n) |"),
+                "",
+                "</details>"
+              else empty end),
+              "",
+              "### gold vs silver API (samples with no answer)",
+              "",
+              "| | This week | Last week |",
+              "|---|---|---|",
+              "| gold :6443 blocked | \($ts.gold) | \($ls.gold) |",
+              "| silver :6443 blocked | \($ts.silver) | \($ls.silver) |",
+              "| Both blocked | \($ts.both) | \($ls.both) |",
+              "| gold only | \($ts.gold_only) | \($ls.gold_only) |",
+              "| silver only | \($ts.silver_only) | \($ls.silver_only) |",
+              "| silver router OK while silver API blocked | \($ts.router) | \($ls.router) |"
+          ' "${FILES[@]}" | tee -a "${GITHUB_STEP_SUMMARY}"

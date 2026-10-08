@@ -57,6 +57,11 @@ jobs:
       deploy_dir: docs/schema
 ```
 
+### 7. Runner reachability records (`.github/workflows/probe-runner-*.yml`)
+Internal records of whether GitHub-hosted runner IPs can reach the OpenShift APIs (background: #49). Nothing alerts on blocked runners; the runs stay green.
+* `probe-runner-reachability.yml` runs every 6 hours, probes the gold and silver APIs (:6443) and the silver router (:443) from 20 runners, writes a table to the run summary and uploads a `probe-results` JSON artifact (kept 14 days). A blocked runner is a warning; the run fails only when probe jobs break and samples are missing.
+* `probe-runner-report.yml` runs weekly and summarizes the past 14 days of `probe-results`: this week vs last week, block rate per /24 runner IP range (always, sometimes or never blocked), and the gold vs silver split.
+
 ## Operational Scripts
 
 Standalone CLI utilities that a person runs with their own login (certificate management, deployment renames, Postgres transfers and comparisons, rights reports) now live in [bcgov/devops-scripts](https://github.com/bcgov/devops-scripts):
