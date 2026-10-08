@@ -1,7 +1,11 @@
 name: Probe Runner Reachability
 
-# Samples many GitHub-hosted runner egress IPs and records whether the OpenShift
-# API (:6443) answers, and whether the router (:443) still answers when it does not.
+# Records, it does not alert. Samples many GitHub-hosted runner egress IPs and
+# records whether the OpenShift API (:6443) answers, and whether the router (:443)
+# still answers when it does not. Blocked samples are a warning, not a failure;
+# the run fails only when probe jobs break and samples go missing.
+# Each run uploads one probe-results artifact (JSON, kept 14 days), which
+# probe-runner-report.yml turns into a weekly IP-health summary.
 # Background: #49 (cluster admins blocking GitHub runner IPs from the API).
 
 on:
@@ -62,11 +66,13 @@ jobs:
             --argjson router_ok_while_api_blocked "${ROUTER_OK_WHILE_API_BLOCKED}" \
             '$ARGS.named' | tee "${RUNNER_TEMP}/probe-${SAMPLE}.json"
 
-      - uses: actions/upload-artifact@v7
+      # Only the summary job reads these; probe-results is the record
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: probe-${{ matrix.sample }}
           path: ${{ runner.temp }}/probe-${{ matrix.sample }}.json
-          retention-days: 30
+          retention-days: 1
+          overwrite: true
 
   summary:
     name: Summary
@@ -74,26 +80,15 @@ jobs:
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
-    permissions:
-      contents: read
-      issues: write
     steps:
-      # workflow-notifier reads CODEOWNERS from the workspace
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          sparse-checkout: .github/CODEOWNERS
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: probe-*
+          # Not probe-results, which a re-run of this job may already have uploaded
+          pattern: probe-[0-9]*
           merge-multiple: true
           path: probes
 
       - name: Summarize
-        env:
-          PROBE_RESULT: ${{ needs.probe.result }}
         run: |
           set -euo pipefail
           jq -rs '
@@ -105,23 +100,32 @@ jobs:
             "Samples: \(length), unique IPs: \(map(.ip) | unique | length), API blocked: \(map(select(.api_blocked)) | length), router OK while API blocked: \(map(select(.router_ok_while_api_blocked)) | length)"
           ' probes/*.json | tee -a "${GITHUB_STEP_SUMMARY}"
 
-          if [ "${PROBE_RESULT}" != success ]; then
-            echo "::error::Probe jobs did not all succeed (result: ${PROBE_RESULT}); samples may be missing"
-            exit 1
-          fi
-          BLOCKED="$(jq -s 'map(select(.api_blocked)) | length' probes/*.json)"
+          # One record per run for probe-runner-report.yml
+          jq -s \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson run_id "${GITHUB_RUN_ID}" \
+            --argjson run_attempt "${GITHUB_RUN_ATTEMPT}" \
+            '{timestamp: $timestamp, run_id: $run_id, run_attempt: $run_attempt, samples: sort_by(.sample | tonumber)}' \
+            probes/*.json > probe-results.json
+
+          TOTAL="$(jq '.samples | length' probe-results.json)"
+          BLOCKED="$(jq '.samples | map(select(.api_blocked)) | length' probe-results.json)"
           if [ "${BLOCKED}" -gt 0 ]; then
-            echo "::error::OpenShift API unreachable from ${BLOCKED} runner sample(s); see the table above"
-            exit 1
+            echo "::warning::OpenShift API unreachable from ${BLOCKED} of ${TOTAL} runner sample(s); recorded in the table above and in probe-results"
           fi
 
-      - if: failure() && github.event_name != 'pull_request'
-        uses: bcgov/actions/workflow-notifier@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          title: "Runner reachability probe: OpenShift API blocked"
-          body: |
-            The runner reachability probe failed: a GitHub-hosted runner could not reach an OpenShift API, or a probe job failed.
-            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            Background: #49
-          # This repo has no "failure" label, and gh issue create fails on unknown labels
-          labels: bug
+          name: probe-results
+          path: probe-results.json
+          retention-days: 14
+          overwrite: true
+
+      - name: Check for missing samples
+        env:
+          PROBE_RESULT: ${{ needs.probe.result }}
+        run: |
+          if [ "${PROBE_RESULT}" != success ]; then
+            echo "::error::Probe jobs did not all succeed (result: ${PROBE_RESULT}); samples are missing"
+            exit 1
+          fi
