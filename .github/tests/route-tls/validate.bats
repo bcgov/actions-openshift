@@ -52,7 +52,7 @@ provision() {
     OC_LOG="$OC_LOG" \
     LEAF="${D}/leaf.pem" \
     ROUTE_KEY="${ROUTE_KEY-present}" \
-    ROUTE_HOST=app.example.gov.bc.ca \
+    ROUTE_HOST="${ROUTE_HOST_OVERRIDE:-app.example.gov.bc.ca}" \
     ROUTE_NAME=app-vanity \
     TARGET_SERVICE=app \
     TLS_CERTIFICATE_FILE="$1" \
@@ -65,7 +65,11 @@ provision() {
     ROUTE_OUT="${D}/route.yml" \
     RUNNER_TEMP="$D" \
     "$SCRIPT" < /dev/null
-  [[ "$output" != *"BEGIN "* ]]
+  # Fix hints name the BEGIN/END markers, so check for PEM bodies instead
+  [[ "$output" != *"PRIVATE KEY-----"* ]]
+  for pem in leaf.key leaf.pem int.pem root.pem; do
+    [[ "$output" != *"$(sed -n 2p "${D}/${pem}")"* ]]
+  done
   [[ "$output" != *"token-should-not-leak"* ]]
 }
 
@@ -88,6 +92,7 @@ provision() {
   provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/chain-reversed.pem"
   [ "$status" -eq 1 ]
   [[ "$output" == *"TLS_CA_CERTIFICATE certificate 1 did not issue TLS_CERTIFICATE."* ]]
+  [[ "$output" == *"Fix: Reorder TLS_CA_CERTIFICATE so the issuer of the leaf comes first, then its issuer, and so on"* ]]
 }
 
 @test "a CA that did not issue the one before it fails" {
@@ -95,6 +100,7 @@ provision() {
   provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/chain-bad.pem"
   [ "$status" -eq 1 ]
   [[ "$output" == *"TLS_CA_CERTIFICATE certificate 2 did not issue TLS_CA_CERTIFICATE certificate 1."* ]]
+  [[ "$output" == *"Fix: Reorder TLS_CA_CERTIFICATE"* ]]
 }
 
 @test "a repeated issuing CA fails" {
@@ -102,6 +108,7 @@ provision() {
   provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/chain-repeat.pem"
   [ "$status" -eq 1 ]
   [[ "$output" == *"TLS_CA_CERTIFICATE certificate 2 did not issue TLS_CA_CERTIFICATE certificate 1."* ]]
+  [[ "$output" == *"Fix: Reorder TLS_CA_CERTIFICATE"* ]]
 }
 
 @test "a repeated self-signed certificate passes" {
@@ -114,6 +121,7 @@ provision() {
   provision "${D}/leaf-expired.pem" "${D}/leaf.key" "${D}/int.pem"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Certificate has expired."* ]]
+  [[ "$output" == *"Fix: Renew the certificate"*"openssl x509 -in leaf.pem -noout -enddate"* ]]
   [[ "$output" != *"did not issue"* ]]
 }
 
@@ -121,6 +129,24 @@ provision() {
   provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/int-expired.pem"
   [ "$status" -eq 1 ]
   [[ "$output" == *"TLS_CA_CERTIFICATE certificate 1 has expired."* ]]
+  [[ "$output" == *"Fix: Replace certificate 1 with the current CA"* ]]
+}
+
+@test "mismatched key fails with a fix" {
+  provision "${D}/leaf.pem" "${D}/int.key" "${D}/int.pem"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"TLS certificate and private key do not match."* ]]
+  [[ "$output" == *"Fix: Use the key that made this certificate's CSR."* ]]
+}
+
+@test "certificate that does not cover the host fails with a fix in the summary" {
+  export GITHUB_STEP_SUMMARY="${D}/summary.md"
+  : > "$GITHUB_STEP_SUMMARY"
+  ROUTE_HOST_OVERRIDE=other.example.gov.bc.ca provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/int.pem"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Fix: Set hostname to a name the certificate covers"* ]]
+  grep -F -- "- Fix: Set hostname to a name the certificate covers" "$GITHUB_STEP_SUMMARY"
+  ! grep -F "$(sed -n 2p "${D}/leaf.pem")" "$GITHUB_STEP_SUMMARY"
 }
 
 @test "full chain in TLS_CERTIFICATE fails" {
@@ -128,6 +154,7 @@ provision() {
   provision "${D}/fullchain.pem" "${D}/leaf.key" "${D}/int.pem"
   [ "$status" -eq 1 ]
   [[ "$output" == *"TLS_CERTIFICATE must hold only the leaf certificate (found 2)."* ]]
+  [[ "$output" == *"Fix: Put only the leaf (first block) in TLS_CERTIFICATE and move the rest to TLS_CA_CERTIFICATE, issuer first: openssl x509 -in fullchain.pem -out leaf.pem"* ]]
 }
 
 @test "private key in the CA bundle fails without printing it" {
@@ -135,6 +162,7 @@ provision() {
   provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/ca-with-key.pem"
   [ "$status" -eq 1 ]
   [[ "$output" == *"TLS_CA_CERTIFICATE must hold only certificate PEM blocks, with no other text or keys."* ]]
+  [[ "$output" == *"Fix: Strip everything outside the BEGIN/END lines: sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' ca.pem"* ]]
 }
 
 @test "text around the CA certificate fails" {
@@ -142,6 +170,7 @@ provision() {
   provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/ca-with-text.pem"
   [ "$status" -eq 1 ]
   [[ "$output" == *"TLS_CA_CERTIFICATE must hold only certificate PEM blocks"* ]]
+  [[ "$output" == *"Fix: Strip everything outside the BEGIN/END lines"* ]]
 }
 
 @test "private key after the leaf fails without printing it" {
@@ -149,12 +178,14 @@ provision() {
   provision "${D}/leaf-with-key.pem" "${D}/leaf.key" "${D}/int.pem"
   [ "$status" -eq 1 ]
   [[ "$output" == *"TLS_CERTIFICATE must hold only the certificate PEM block, with no other text or keys."* ]]
+  [[ "$output" == *"Fix: Strip everything outside the BEGIN/END lines: sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' leaf.pem"* ]]
 }
 
 @test "encrypted private key fails without prompting" {
   provision "${D}/leaf.pem" "${D}/leaf-encrypted.key" "${D}/int.pem"
   [ "$status" -eq 1 ]
   [[ "$output" == *"TLS private key is invalid or encrypted."* ]]
+  [[ "$output" == *"Fix: Decrypt it first (asks for the passphrase): openssl pkey -in key.pem -out key-decrypted.pem."* ]]
 }
 
 @test "existing route TLS is backed up before apply" {

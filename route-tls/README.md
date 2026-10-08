@@ -122,10 +122,25 @@ A finished run records `dry_run=true` or `dry_run=false` on the workflow summary
 
 ## What it does
 
-1. Fail if `tls_certificate` holds anything but the leaf PEM, `tls_ca_certificate` holds anything but certificate PEMs, the key is encrypted or does not match the cert, the cert or a CA is expired, the CAs are out of order (the first must have issued the leaf, and each later one the CA before it), or the cert does not cover `hostname` (CN or SAN, including wildcards). Each check prints `PASS` or the error. The log shows only names, dates and results, never PEM contents.
+1. Fail if `tls_certificate` holds anything but the leaf PEM, `tls_ca_certificate` holds anything but certificate PEMs, the key is encrypted or does not match the cert, the cert or a CA is expired, the CAs are out of order (the first must have issued the leaf, and each later one the CA before it), or the cert does not cover `hostname` (CN or SAN, including wildcards). Each check prints `PASS`, or the error and a `Fix:` line (see [Common fixes](#common-fixes)). The log shows only names, dates and results, never PEM contents.
 2. Log in and read the route. Fail if another route already has `hostname` (OpenShift would create this name and then Reject it). `dry_run=true` stops here. It does not create a Secret and does not apply.
 3. Unless `dry_run`, snapshot the live Route's TLS (cert, key, CA) into a Secret named `<route>-backup-<sha256-prefix>`, labeled `backup-type=route-tls` (no `app` label). Re-applying the same cert is a no-op on that Secret. Restore from that Secret if an apply goes wrong. A Route with no inline key has nothing to back up, and the log says so.
 4. Unless `dry_run`, `oc apply` the Route (GitHub installs `oc` via `bcgov/action-oc-runner`), then read the live certificate and fail unless its public key matches the certificate that was applied. Private keys are never printed.
+
+## Common fixes
+
+Every validation error is followed by a `Fix:` line. The same fixes, run on your copies of the files (never paste the output anywhere):
+
+| Error | Fix |
+| --- | --- |
+| `TLS_CERTIFICATE must hold only the leaf certificate` | Keep the leaf (first block) and move the rest to `TLS_CA_CERTIFICATE`, issuer first: `openssl x509 -in fullchain.pem -out leaf.pem && sed '1,/-----END CERTIFICATE-----/d' fullchain.pem > ca.pem` |
+| `... must hold only ... PEM block(s), with no other text or keys` (`Bag Attributes`, `subject=` lines) | Strip everything outside the BEGIN/END lines: `sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' in.pem > clean.pem` |
+| `TLS private key is invalid or encrypted` | Decrypt it first (asks for the passphrase): `openssl pkey -in key.pem -out key-decrypted.pem` |
+| `TLS certificate and private key do not match` | Use the key that made the certificate's CSR. These hashes must match: `openssl x509 -in leaf.pem -noout -pubkey \| sha256sum` and `openssl pkey -in key.pem -pubout \| sha256sum` |
+| `Certificate has expired` | Renew the certificate. Check: `openssl x509 -in leaf.pem -noout -enddate` |
+| `TLS_CA_CERTIFICATE certificate N has expired` | Replace it with the current CA from the certificate package. Check: `openssl x509 -in ca.pem -noout -subject -enddate` |
+| `TLS_CA_CERTIFICATE certificate N did not issue ...` | Reorder so the issuer of the leaf comes first, then its issuer, and so on. Compare `openssl x509 -in leaf.pem -noout -issuer` with `openssl crl2pkcs7 -nocrl -certfile ca.pem \| openssl pkcs7 -print_certs -noout` |
+| `Certificate does not cover host` | Set `hostname` to a name the certificate covers. List them: `openssl x509 -in leaf.pem -noout -subject -ext subjectAltName` |
 
 ## Local CLI (optional)
 

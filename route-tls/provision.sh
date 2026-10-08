@@ -24,10 +24,17 @@ summarize() {
   fi
 }
 
+# $1 = error, $2 = optional fix hint. Hints are fixed text: never put PEM input in them.
 die() {
   err "$1"
+  if [ -n "${2:-}" ] && [ -n "${GITHUB_ACTIONS:-}" ]; then
+    echo "Fix: $2"
+  elif [ -n "${2:-}" ]; then
+    echo "Fix: $2" >&2
+  fi
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     printf '%s\n' "### Route TLS" "" "- dry_run=${DRY_RUN}. Failed: $1" >> "$GITHUB_STEP_SUMMARY"
+    [ -z "${2:-}" ] || printf '%s\n' "- Fix: $2" >> "$GITHUB_STEP_SUMMARY"
   fi
   exit 1
 }
@@ -112,21 +119,29 @@ printf '%s\n' "$TLS_CA_CERTIFICATE" > "$CA_PEM"
 
 echo "Validating certificate, private key and CA chain. PEM contents are not printed."
 cert_count="$(grep -c -e '-----BEGIN CERTIFICATE-----' "$CERT_PEM" || true)"
-[ "$cert_count" -eq 1 ] || die "TLS_CERTIFICATE must hold only the leaf certificate (found ${cert_count}). Put the issuing CA in TLS_CA_CERTIFICATE."
-certs_only "$CERT_PEM" || die "TLS_CERTIFICATE must hold only the certificate PEM block, with no other text or keys."
+[ "$cert_count" -ge 1 ] || die "TLS_CERTIFICATE holds no PEM certificate." \
+  "Use the leaf PEM (<host>.pem, starts with -----BEGIN CERTIFICATE-----). From DER: openssl x509 -inform der -in leaf.der -out leaf.pem"
+[ "$cert_count" -eq 1 ] || die "TLS_CERTIFICATE must hold only the leaf certificate (found ${cert_count})." \
+  "Put only the leaf (first block) in TLS_CERTIFICATE and move the rest to TLS_CA_CERTIFICATE, issuer first: openssl x509 -in fullchain.pem -out leaf.pem && sed '1,/-----END CERTIFICATE-----/d' fullchain.pem > ca.pem"
+certs_only "$CERT_PEM" || die "TLS_CERTIFICATE must hold only the certificate PEM block, with no other text or keys." \
+  "Strip everything outside the BEGIN/END lines: sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' leaf.pem > leaf-clean.pem"
 if ! CERT_PUB_SHA="$(openssl x509 -in "$CERT_PEM" -noout -pubkey 2>/dev/null | openssl pkey -pubin -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)"; then
-  die "TLS certificate is invalid."
+  die "TLS certificate is invalid." \
+    "Use the leaf PEM from the certificate package (<host>.pem). Check it: openssl x509 -in leaf.pem -noout -subject"
 fi
 if ! KEY_PUB_SHA="$(openssl pkey -in "$KEY_PEM" -passin pass: -pubout -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)"; then
-  die "TLS private key is invalid or encrypted."
+  die "TLS private key is invalid or encrypted." \
+    "Decrypt it first (asks for the passphrase): openssl pkey -in key.pem -out key-decrypted.pem. Store key-decrypted.pem as TLS_PRIVATE_KEY."
 fi
 if [ -z "$CERT_PUB_SHA" ] || [ -z "$KEY_PUB_SHA" ] || [ "$CERT_PUB_SHA" != "$KEY_PUB_SHA" ]; then
-  die "TLS certificate and private key do not match."
+  die "TLS certificate and private key do not match." \
+    "Use the key that made this certificate's CSR. These two hashes must match: openssl x509 -in leaf.pem -noout -pubkey | sha256sum; openssl pkey -in key.pem -pubout | sha256sum"
 fi
 echo "PASS: private key matches the certificate"
 
 if ! openssl x509 -in "$CERT_PEM" -noout -checkend 0 >/dev/null 2>&1; then
-  die "Certificate has expired."
+  die "Certificate has expired." \
+    "Renew the certificate, then update TLS_CERTIFICATE (and TLS_PRIVATE_KEY if it changed). Check: openssl x509 -in leaf.pem -noout -enddate"
 fi
 if ! openssl x509 -in "$CERT_PEM" -noout -checkend 1209600 >/dev/null 2>&1; then
   echo "warning: certificate expires within 14 days"
@@ -135,20 +150,25 @@ echo "PASS: certificate is not expired"
 
 # Chain order: CA 1 issued the leaf, and each later CA issued the one before it.
 ca_count="$(grep -c -e '-----BEGIN CERTIFICATE-----' "$CA_PEM" || true)"
-[ "$ca_count" -ge 1 ] || die "TLS_CA_CERTIFICATE holds no certificate."
-certs_only "$CA_PEM" || die "TLS_CA_CERTIFICATE must hold only certificate PEM blocks, with no other text or keys."
+[ "$ca_count" -ge 1 ] || die "TLS_CA_CERTIFICATE holds no certificate." \
+  "Set TLS_CA_CERTIFICATE to the issuing CA PEM (Entrust OV TLS Issuing RSA CA 2.pem)."
+certs_only "$CA_PEM" || die "TLS_CA_CERTIFICATE must hold only certificate PEM blocks, with no other text or keys." \
+  "Strip everything outside the BEGIN/END lines: sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' ca.pem > ca-clean.pem"
 awk -v dir="$WORKDIR" '/-----BEGIN CERTIFICATE-----/ { n++ } n { print > (dir "/ca-" n ".pem") }' "$CA_PEM"
 child="$CERT_PEM"
 child_name="TLS_CERTIFICATE"
 for i in $(seq 1 "$ca_count"); do
   ca="${WORKDIR}/ca-${i}.pem"
-  openssl x509 -in "$ca" -noout >/dev/null 2>&1 || die "TLS_CA_CERTIFICATE certificate ${i} is invalid."
-  openssl x509 -in "$ca" -noout -checkend 0 >/dev/null 2>&1 || die "TLS_CA_CERTIFICATE certificate ${i} has expired."
+  openssl x509 -in "$ca" -noout >/dev/null 2>&1 || die "TLS_CA_CERTIFICATE certificate ${i} is invalid." \
+    "Replace it with the CA PEM from the certificate package. List the bundle: openssl crl2pkcs7 -nocrl -certfile ca.pem | openssl pkcs7 -print_certs -noout"
+  openssl x509 -in "$ca" -noout -checkend 0 >/dev/null 2>&1 || die "TLS_CA_CERTIFICATE certificate ${i} has expired." \
+    "Replace certificate ${i} with the current CA from the certificate package. Check dates: openssl x509 -in ca.pem -noout -subject -enddate"
   # A certificate may only issue itself if it is self-signed; -partial_chain would trust it as is.
   partial=(-partial_chain)
   [ "$(openssl x509 -in "$ca" -noout -fingerprint -sha256)" != "$(openssl x509 -in "$child" -noout -fingerprint -sha256)" ] || partial=()
   if ! openssl verify "${partial[@]}" -trusted "$ca" "$child" >/dev/null 2>&1; then
-    die "TLS_CA_CERTIFICATE certificate ${i} did not issue ${child_name}. List the issuing CA first, then each CA after the one it issued."
+    die "TLS_CA_CERTIFICATE certificate ${i} did not issue ${child_name}." \
+      "Reorder TLS_CA_CERTIFICATE so the issuer of the leaf comes first, then its issuer, and so on (or use the right CA). Compare: openssl x509 -in leaf.pem -noout -issuer; openssl crl2pkcs7 -nocrl -certfile ca.pem | openssl pkcs7 -print_certs -noout"
   fi
   child="$ca"
   child_name="TLS_CA_CERTIFICATE certificate ${i}"
@@ -156,7 +176,8 @@ done
 echo "PASS: CA chain (${ca_count} certificate(s)) issued the certificate, in order, none expired"
 
 if ! cert_covers_host "$CERT_PEM" "$ROUTE_HOST"; then
-  die "Certificate does not cover host '$ROUTE_HOST' (CN/SAN mismatch)."
+  die "Certificate does not cover host '$ROUTE_HOST' (CN/SAN mismatch)." \
+    "Set hostname to a name the certificate covers, or use a certificate for this host. List its names: openssl x509 -in leaf.pem -noout -subject -ext subjectAltName"
 fi
 echo "PASS: certificate covers ${ROUTE_HOST}"
 
