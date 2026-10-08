@@ -3,7 +3,7 @@ name: Probe Runner Reachability
 # Records, it does not alert. Samples many GitHub-hosted runner egress IPs and
 # records whether the OpenShift API (:6443) answers, and whether the router (:443)
 # still answers when it does not. Blocked samples are a warning, not a failure;
-# the run fails only when probe jobs break and samples go missing.
+# the run fails only when samples are missing, and then keeps the earlier record.
 # Each run uploads one probe-results artifact (JSON, kept 14 days), which
 # probe-runner-report.yml turns into a weekly IP-health summary.
 # Background: #49 (cluster admins blocking GitHub runner IPs from the API).
@@ -26,6 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # The summary job checks for exactly these samples; keep EXPECTED_SAMPLES there in sync
         sample: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     steps:
       - name: Probe API :6443 and router :443
@@ -89,8 +90,13 @@ jobs:
           path: probes
 
       - name: Summarize
+        env:
+          EXPECTED_SAMPLES: 20 # matches the probe matrix
         run: |
           set -euo pipefail
+          shopt -s nullglob
+          # </dev/null: with no sample files, jq slurps an empty list instead of waiting on stdin
+          FILES=(probes/*.json)
           jq -rs '
             "| Sample | Runner IP | gold :6443 | silver :6443 | silver router :443 | API blocked | Router OK while API blocked |",
             "|---|---|---|---|---|---|---|",
@@ -98,7 +104,7 @@ jobs:
               "| \(.sample) | \(.ip) | \(.gold_api) | \(.silver_api) | \(.silver_router) | \(.api_blocked) | \(.router_ok_while_api_blocked) |"),
             "",
             "Samples: \(length), unique IPs: \(map(.ip) | unique | length), API blocked: \(map(select(.api_blocked)) | length), router OK while API blocked: \(map(select(.router_ok_while_api_blocked)) | length)"
-          ' probes/*.json | tee -a "${GITHUB_STEP_SUMMARY}"
+          ' "${FILES[@]}" < /dev/null | tee -a "${GITHUB_STEP_SUMMARY}"
 
           # One record per run for probe-runner-report.yml
           jq -s \
@@ -106,12 +112,20 @@ jobs:
             --argjson run_id "${GITHUB_RUN_ID}" \
             --argjson run_attempt "${GITHUB_RUN_ATTEMPT}" \
             '{timestamp: $timestamp, run_id: $run_id, run_attempt: $run_attempt, samples: sort_by(.sample | tonumber)}' \
-            probes/*.json > probe-results.json
+            "${FILES[@]}" < /dev/null > probe-results.json
 
           TOTAL="$(jq '.samples | length' probe-results.json)"
           BLOCKED="$(jq '.samples | map(select(.api_blocked)) | length' probe-results.json)"
           if [ "${BLOCKED}" -gt 0 ]; then
             echo "::warning::OpenShift API unreachable from ${BLOCKED} of ${TOTAL} runner sample(s); recorded in the table above and in probe-results"
+          fi
+
+          # A failed or partial re-run (per-sample artifacts expire after a day) must not
+          # overwrite a fuller record, so stop before the upload unless samples are exactly 1-N
+          if ! jq -e --argjson n "${EXPECTED_SAMPLES}" \
+            '.samples | map(.sample | tonumber) | sort == [range(1; $n + 1)]' probe-results.json > /dev/null; then
+            echo "::error::Incomplete probe record: expected samples 1-${EXPECTED_SAMPLES}. Re-run all jobs to regenerate missing or expired samples."
+            exit 1
           fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -120,12 +134,3 @@ jobs:
           path: probe-results.json
           retention-days: 14
           overwrite: true
-
-      - name: Check for missing samples
-        env:
-          PROBE_RESULT: ${{ needs.probe.result }}
-        run: |
-          if [ "${PROBE_RESULT}" != success ]; then
-            echo "::error::Probe jobs did not all succeed (result: ${PROBE_RESULT}); samples are missing"
-            exit 1
-          fi
