@@ -120,6 +120,21 @@ outputs:
   cluster:
     description: 'Cluster name'
     value: ${{ steps.vars.outputs.CLUSTER_NAME }}
+  db_secret:
+    description: 'Database credentials secret name'
+    value: ${{ steps.vars.outputs.DB_SECRET }}
+  db_host:
+    description: 'Database host (pgBouncer service)'
+    value: ${{ steps.vars.outputs.DB_HOST }}
+  db_port:
+    description: 'Database port'
+    value: ${{ steps.vars.outputs.DB_PORT }}
+  db_user:
+    description: 'Database user'
+    value: ${{ steps.vars.outputs.DB_USER }}
+  db_name:
+    description: 'Database name'
+    value: ${{ steps.vars.outputs.DB_NAME }}
 
 runs:
   using: "composite"
@@ -129,6 +144,8 @@ runs:
       env:
         INPUT_RELEASE_NAME: ${{ inputs.release_name }}
         REPO_NAME: ${{ github.event.repository.name }}
+        EVENT_NAME: ${{ github.event_name }}
+        EVENT_NUMBER: ${{ github.event.number }}
       run: |
         # Variables and Inputs
 
@@ -141,8 +158,18 @@ runs:
         fi
         CLUSTER_NAME="${RELEASE_NAME}-crunchy"
 
+        DB_USER="app"
+        DB_NAME="app"
+        if [ -n "${EVENT_NUMBER}" ] && [ "${EVENT_NAME}" = "pull_request" ]; then
+          DB_USER="app-${EVENT_NUMBER}"
+          DB_NAME="app-${EVENT_NUMBER}"
+        fi
+        DB_SECRET="${CLUSTER_NAME}-pguser-${DB_USER}"
+        DB_HOST="${CLUSTER_NAME}-pgbouncer"
+        DB_PORT="5432"
+
         # Process vars and send to GITHUB_ENV (local vars) and GITHUB_OUTPUT (outputs)
-        for var in RELEASE_NAME CLUSTER_NAME; do
+        for var in RELEASE_NAME CLUSTER_NAME DB_SECRET DB_HOST DB_PORT DB_USER DB_NAME; do
           if [ -n "${!var}" ]; then
             echo "${var}=${!var}"
             echo "${var}=${!var}" >> $GITHUB_ENV

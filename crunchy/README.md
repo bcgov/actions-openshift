@@ -161,6 +161,11 @@ The action accepts the following inputs:
 |--------|-------------|
 | `release` | The provided or generated release name |
 | `cluster` | The name of the deployed cluster |
+| `db_secret` | The secret name containing generated database credentials (`<cluster>-pguser-app[-<pr>]`) |
+| `db_host` | The pgBouncer database hostname (`<cluster>-pgbouncer`) |
+| `db_port` | The database port (`5432`) |
+| `db_user` | The database user name (`app[-<pr>]`) |
+| `db_name` | The database name (`app[-<pr>]`) |
 
 ### Overrides
 
@@ -270,6 +275,40 @@ jobs:
           s3_bucket: ${{ secrets.S3_BUCKET }}
           s3_endpoint: ${{ secrets.S3_ENDPOINT }}
 ```
+
+### Consuming Database Credentials in Application Deployments
+
+The action exports `db_secret` containing the operator-generated Secret name (`<cluster>-pguser-app[-<pr>]`). Application pods (e.g. backend, migrations) can consume this secret directly:
+
+```yaml
+      - name: Deploy Crunchy Database
+        uses: bcgov/actions-openshift/crunchy@<sha> # <tag>
+        id: crunchy
+        with:
+          oc_namespace: ${{ secrets.OC_NAMESPACE }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Deploy Application
+        # Pass the secret name to your application manifests or deployment action
+        env:
+          DB_SECRET: ${{ steps.crunchy.outputs.db_secret }}
+```
+
+Inside your Kubernetes or OpenShift Deployment / StatefulSet manifest:
+
+```yaml
+envFrom:
+  - secretRef:
+      name: ${DB_SECRET}
+```
+
+The operator-managed secret provides the following keys:
+- `host`: pgBouncer hostname (`<cluster>-pgbouncer`)
+- `port`: database port (`5432`)
+- `dbname`: target database name (`app[-<pr>]`)
+- `user`: database user (`app[-<pr>]`)
+- `password`: database password
+- `pgbouncer-uri` / `uri`: full connection URI for ORMs (Prisma, TypeORM)
 
 ## Use with private repositories
 

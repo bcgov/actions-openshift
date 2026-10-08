@@ -128,7 +128,14 @@ elif [ "$COMMAND" == "remove" ]; then
     patch_postgres_cluster "${CLUSTER}" "${UPDATED_USERS}"
 
     # Get primary crunchy pod and remove the role and database
-    CRUNCHY_PG_PRIMARY_POD_NAME=$(oc get pods -l postgres-operator.crunchydata.com/cluster="${CLUSTER}",postgres-operator.crunchydata.com/role=master -o json | jq -r '.items[0].metadata.name')
+    CRUNCHY_PG_PRIMARY_POD_NAME=$(oc get pods -l postgres-operator.crunchydata.com/cluster="${CLUSTER}",postgres-operator.crunchydata.com/role=master -o json | jq -r '.items[0].metadata.name // empty')
+    if [ -z "${CRUNCHY_PG_PRIMARY_POD_NAME}" ]; then
+      CRUNCHY_PG_PRIMARY_POD_NAME=$(oc get pods -l postgres-operator.crunchydata.com/cluster="${CLUSTER}",postgres-operator.crunchydata.com/role=primary -o json | jq -r '.items[0].metadata.name // empty')
+    fi
+    if [ -z "${CRUNCHY_PG_PRIMARY_POD_NAME}" ]; then
+      echo "Error: No primary Crunchy pod found for cluster ${CLUSTER}." >&2
+      exit 1
+    fi
     echo "${CRUNCHY_PG_PRIMARY_POD_NAME}"
 
     if ! retry 5 2 oc exec "${CRUNCHY_PG_PRIMARY_POD_NAME}" -- bash -c "
