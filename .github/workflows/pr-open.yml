@@ -333,6 +333,8 @@ jobs:
   test-route-tls-logs:
     name: Test Route TLS logs
     needs: [test-route-tls]
+    # Failed runs are the likeliest to have printed PEM data
+    if: ${{ !cancelled() }}
     permissions:
       actions: read
     runs-on: ubuntu-26.04
@@ -347,10 +349,11 @@ jobs:
           job_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" --paginate \
             --jq '.jobs[] | select(.name == "Test Route TLS") | .id')"
           [ -n "$job_id" ] || { echo "::error::Test Route TLS job not found"; exit 1; }
-          gh api "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" > "${RUNNER_TEMP}/route-tls.log"
+          # Raw logs hold ANSI colour codes; the log is only scanned, never printed
+          gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" > "${RUNNER_TEMP}/route-tls.log"
           [ -s "${RUNNER_TEMP}/route-tls.log" ] || { echo "::error::Test Route TLS log is empty"; exit 1; }
           # A PEM body line is 64 base64 characters. Count only; never print a match.
-          leaks="$(sed -E 's/^[0-9T:.-]+Z //' "${RUNNER_TEMP}/route-tls.log" | grep -cE '^[[:space:]]*[A-Za-z0-9+/]{64}[[:space:]]*$' || true)"
+          leaks="$(sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9T:.-]+Z //' "${RUNNER_TEMP}/route-tls.log" | grep -cE '^[[:space:]]*[A-Za-z0-9+/]{64}[[:space:]]*$' || true)"
           if [ "$leaks" -ne 0 ]; then
             echo "::error::Test Route TLS log holds ${leaks} PEM body line(s)"
             exit 1
