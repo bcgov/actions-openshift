@@ -42,7 +42,7 @@ patch_postgres_cluster() {
     local updated_users="$2"
     local patch_json
     patch_json=$(jq -n --argjson users "${updated_users}" '{"spec": {"users": $users}}')
-    oc patch PostgresCluster/"${CLUSTER}" --type=merge -p "${patch_json}"
+    oc patch PostgresCluster/"${cluster}" --type=merge -p "${patch_json}"
 }
 
 # Function to wait for a secret to be created
@@ -119,18 +119,27 @@ elif [ "$COMMAND" == "add" ]; then
     wait_for_secret "${CLUSTER}-pguser-app-${PR_NO}" || exit 1
 
 elif [ "$COMMAND" == "remove" ]; then
-    if [ "$USER_EXISTS" -eq 0 ]; then
-      echo "User does not exist to remove. Exiting."
-      exit 0
+    # Resolve primary crunchy pod first before mutating cluster spec
+    CRUNCHY_PG_PRIMARY_POD_NAME=""
+    for i in $(seq 1 "$MAX_USER_ADD_RETRIES"); do
+      CRUNCHY_PG_PRIMARY_POD_NAME=$(oc get pods -l postgres-operator.crunchydata.com/cluster="${CLUSTER}",postgres-operator.crunchydata.com/role=master -o json 2>/dev/null | jq -r '.items[0].metadata.name // empty')
+      if [ -z "${CRUNCHY_PG_PRIMARY_POD_NAME}" ]; then
+        CRUNCHY_PG_PRIMARY_POD_NAME=$(oc get pods -l postgres-operator.crunchydata.com/cluster="${CLUSTER}",postgres-operator.crunchydata.com/role=primary -o json 2>/dev/null | jq -r '.items[0].metadata.name // empty')
+      fi
+      if [ -n "${CRUNCHY_PG_PRIMARY_POD_NAME}" ]; then
+        break
+      fi
+      echo "Waiting for primary Crunchy pod (attempt $i)..."
+      sleep "$USER_ADD_SLEEP_SECONDS"
+    done
+
+    if [ -z "${CRUNCHY_PG_PRIMARY_POD_NAME}" ]; then
+      echo "Error: No primary Crunchy pod found for cluster ${CLUSTER} after retries." >&2
+      exit 1
     fi
+    echo "Primary Crunchy Pod: ${CRUNCHY_PG_PRIMARY_POD_NAME}"
 
-    UPDATED_USERS=$(echo "${CURRENT_USERS}" | jq --argjson user "${TARGET_USER}" 'map(select(. != $user))')
-    patch_postgres_cluster "${CLUSTER}" "${UPDATED_USERS}"
-
-    # Get primary crunchy pod and remove the role and database
-    CRUNCHY_PG_PRIMARY_POD_NAME=$(oc get pods -l postgres-operator.crunchydata.com/cluster="${CLUSTER}",postgres-operator.crunchydata.com/role=master -o json | jq -r '.items[0].metadata.name')
-    echo "${CRUNCHY_PG_PRIMARY_POD_NAME}"
-
+    # Always perform SQL cleanup (idempotent: IF EXISTS)
     if ! retry 5 2 oc exec "${CRUNCHY_PG_PRIMARY_POD_NAME}" -- bash -c "
         psql -U postgres -d postgres <<-SQL
             SELECT pg_terminate_backend(pg_stat_activity.pid)
@@ -144,6 +153,14 @@ elif [ "$COMMAND" == "remove" ]; then
         "; then
         echo "Failed to cleanup database and role for app-${PR_NO}" >&2
         exit 1
+    fi
+
+    # Unpatch spec.users if the user still exists in the PostgresCluster spec
+    if [ "$USER_EXISTS" -eq 1 ]; then
+      UPDATED_USERS=$(echo "${CURRENT_USERS}" | jq --argjson user "${TARGET_USER}" 'map(select(. != $user))')
+      patch_postgres_cluster "${CLUSTER}" "${UPDATED_USERS}"
+    else
+      echo "User app-${PR_NO} was already absent from PostgresCluster spec."
     fi
 else
     echo "Invalid command: $COMMAND. Use 'add', 'remove' or 'check'."

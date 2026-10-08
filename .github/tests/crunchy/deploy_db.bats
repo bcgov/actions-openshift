@@ -101,3 +101,18 @@ refute_call() {
   [ "$status" -eq 1 ]
   refute_call "^oc "
 }
+
+@test "readiness check succeeds when instance name is not db" {
+  cat > "${BATS_TEST_TMPDIR}/bin/oc" <<'STUB'
+#!/bin/bash
+echo "oc $*" >> "${STUB_LOG}"
+if [ "$1" = "get" ]; then
+  echo '{"status":{"instances":[{"name":"primary","readyReplicas":1}]}}'
+fi
+STUB
+  chmod +x "${BATS_TEST_TMPDIR}/bin/oc"
+  deploy
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Crunchy DB instance is ready."* ]]
+}
+

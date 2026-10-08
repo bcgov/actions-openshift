@@ -161,6 +161,11 @@ The action accepts the following inputs:
 |--------|-------------|
 | `release` | The provided or generated release name |
 | `cluster` | The name of the deployed cluster |
+| `db_secret` | The secret name containing generated database credentials (`<cluster>-pguser-app[-<pr>]`) |
+| `db_host` | The pgBouncer database hostname (`<cluster>-pgbouncer`) |
+| `db_port` | The database port (`5432`) |
+| `db_user` | The database user name (`app[-<pr>]`) |
+| `db_name` | The database name (`app[-<pr>]`) |
 
 ### Overrides
 
@@ -270,6 +275,43 @@ jobs:
           s3_bucket: ${{ secrets.S3_BUCKET }}
           s3_endpoint: ${{ secrets.S3_ENDPOINT }}
 ```
+
+### Consuming Database Credentials in Application Deployments
+
+The action exports `db_secret` containing the operator-generated Secret name (`<cluster>-pguser-app[-<pr>]`). Application pods (e.g. backend, migrations) can consume this secret directly:
+
+```yaml
+      - name: Deploy Crunchy Database
+        uses: bcgov/actions-openshift/crunchy@<sha> # <tag>
+        id: crunchy
+        with:
+          oc_namespace: ${{ secrets.OC_NAMESPACE }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Deploy Application
+        uses: bcgov/actions-openshift/deployer@<sha> # <tag>
+        with:
+          file: backend/openshift.deploy.yml
+          oc_namespace: ${{ secrets.OC_NAMESPACE }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          oc_server: ${{ vars.OC_SERVER }}
+          parameters: -p DB_SECRET="${{ steps.crunchy.outputs.db_secret }}"
+```
+
+Inside your OpenShift template or Kubernetes manifest:
+
+```yaml
+envFrom:
+  - secretRef:
+      name: ${DB_SECRET}
+```
+
+The operator-managed secret provides the following keys:
+- `pgbouncer-host` / `pgbouncer-port` / `pgbouncer-uri`: pooled connection details via pgBouncer (recommended for applications/ORMs)
+- `host` / `port` / `uri`: direct connection details to the primary PostgreSQL pod (bypasses pgBouncer)
+- `dbname`: target database name (`app[-<pr>]`)
+- `user`: database user (`app[-<pr>]`)
+- `password`: database password
 
 ## Use with private repositories
 

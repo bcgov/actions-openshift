@@ -34,7 +34,7 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
     dataVolumeClaimSpec:
       storage: 210Mi
       storageClassName: netapp-block-standard
-      walStorage: 255Mi
+      walStorage: 420Mi
 
     requests:
       cpu: 50m
@@ -64,7 +64,7 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
       retention: 1 # one day hot active backup in pvc
       retentionFullType: count
       fullBackupSchedule: 0 8 * * *
-      incrementalBackupSchedule: 0 0,12 * * * # every 12 hour incremental
+      incrementalBackupSchedule: 0 0-7,9-23 * * * # every hour incremental
       volume:
         accessModes: "ReadWriteOnce"
         storage: 100Mi
@@ -90,8 +90,8 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
   patroni:
     postgresql:
       pg_hba:
-        - "host all all 0.0.0.0/0 md5"
-        - "host all all ::1/128 md5"
+        - "host all all 0.0.0.0/0 scram-sha-256"
+        - "host all all ::1/128 scram-sha-256"
       parameters:
         shared_buffers: 16MB # default is 128MB; a good tuned default for shared_buffers is 25% of the memory allocated to the pod
         wal_buffers: "64kB" # this can be set to -1 to automatically set as 1/32 of shared_buffers or 64kB, whichever is larger
@@ -99,6 +99,7 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
         max_wal_size: 64MB # default is 1GB
         max_slot_wal_keep_size: 128MB # default is -1, allowing unlimited wal growth when replicas fall behind
         work_mem: 2MB # a work_mem value of 2 MB
+        max_connections: 100 # keep aggregate pgbouncer connections below this
         log_min_duration_statement: 1000ms # log queries taking more than 1 second to respond.
         effective_io_concurrency: 20 #If the underlying disk can handle multiple simultaneous requests, then you should increase the effective_io_concurrency value and test what value provides the best application performance. All BCGov clusters have SSD.
 
@@ -106,11 +107,12 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
     enabled: true
     pgBouncer:
       image: # it's not necessary to specify an image as the images specified in the Crunchy Postgres Operator will be pulled by default
-      replicas: 1
+      replicas: 2
       requests:
         cpu: 5m
         memory: 32Mi
-      maxConnections: 10 # make sure less than postgres max connections
+      maxConnections: 40 # 2 replicas * 40 = 80 aggregate slots, leaving headroom under PostgreSQL max_connections (100)
+      poolMode: 'transaction'
 
   # Postgres Cluster resource values:
   pgmonitor:

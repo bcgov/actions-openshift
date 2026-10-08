@@ -110,9 +110,9 @@ fi
 helm upgrade --install --wait "$RELEASE_NAME" --values ./values.yml ./$APP_NAME-$CHART_VERSION.tgz $SET_STRINGS
 # Verify successful db deployment; wait retry 10 times with 60 seconds interval
 for i in $(seq 1 "$MAX_DB_READY_RETRIES"); do
-  # Check if the 'db' instance has at least 1 ready replica
-  if oc get PostgresCluster/"$RELEASE_NAME"-crunchy -o json | jq -e '.status.instances[] | select(.name=="db") | .readyReplicas > 0' > /dev/null 2>&1; then
-    echo "Crunchy DB instance 'db' is ready."
+  # Check if any database instance has at least 1 ready replica
+  if oc get PostgresCluster/"$RELEASE_NAME"-crunchy -o json | jq -e '([.status.instances[].readyReplicas // 0] | add // 0) > 0' > /dev/null 2>&1; then
+    echo "Crunchy DB instance is ready."
     READY=true
     exit 0
   else
