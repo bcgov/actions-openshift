@@ -200,24 +200,40 @@ jobs:
           done
           echo "All sibling action references verified to use '$/'."
 
-      - name: Generate dummy certificates
+      - name: Generate test CA chain
         run: |
           set -euo pipefail
-          openssl req -x509 -newkey rsa:2048 -keyout /tmp/key.pem -out /tmp/cert.pem \
-            -days 30 -nodes -subj "/CN=myapp.bcgov.ca" \
-            -addext "subjectAltName=DNS:myapp.bcgov.ca"
-          openssl req -x509 -newkey rsa:2048 -keyout /tmp/other-key.pem -out /tmp/other.pem \
-            -days 30 -nodes -subj "/CN=other.example"
-          cp /tmp/cert.pem /tmp/ca.pem
+          # Throwaway root CA -> issuing CA -> leaf, plus failing variants. Nothing is committed.
+          d="${RUNNER_TEMP}/tls"
+          mkdir -p "$d"
+          cd "$d"
+          printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' > ca.cnf
+          printf 'subjectAltName=DNS:myapp.bcgov.ca\n' > leaf.cnf
+          expired=(-not_before 20200101000000Z -not_after 20210101000000Z)
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout root.key -out root.pem -days 30 -subj "/CN=Test Root CA"
+          openssl req -newkey rsa:2048 -nodes -keyout int.key -out int.csr -subj "/CN=Test Issuing CA"
+          openssl x509 -req -in int.csr -CA root.pem -CAkey root.key -CAcreateserial -extfile ca.cnf -days 30 -out int.pem
+          openssl x509 -req -in int.csr -CA root.pem -CAkey root.key -CAcreateserial -extfile ca.cnf "${expired[@]}" -out int-expired.pem
+          openssl req -newkey rsa:2048 -nodes -keyout leaf.key -out leaf.csr -subj "/CN=myapp.bcgov.ca"
+          openssl x509 -req -in leaf.csr -CA int.pem -CAkey int.key -CAcreateserial -extfile leaf.cnf -days 30 -out leaf.pem
+          openssl x509 -req -in leaf.csr -CA int.pem -CAkey int.key -CAcreateserial -extfile leaf.cnf "${expired[@]}" -out leaf-expired.pem
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out other.key
+          cat int.pem root.pem > ca.pem
+          cat root.pem int.pem > ca-reversed.pem
+          cat leaf.pem int.pem > fullchain.pem
+          # Mask every PEM body line, so env and input displays show *** instead
+          for f in *.pem *.key; do
+            grep -v -e '-----' "$f" | while IFS= read -r line; do echo "::add-mask::${line}"; done
+          done
           {
             echo "DUMMY_CERT<<EOF"
-            cat /tmp/cert.pem
+            cat leaf.pem
             echo "EOF"
             echo "DUMMY_KEY<<EOF"
-            cat /tmp/key.pem
+            cat leaf.key
             echo "EOF"
             echo "DUMMY_CA<<EOF"
-            cat /tmp/ca.pem
+            cat ca.pem
             echo "EOF"
           } >> "$GITHUB_ENV"
 
@@ -226,9 +242,9 @@ jobs:
           ROUTE_HOST: myapp.bcgov.ca
           ROUTE_NAME: my-test-route
           TARGET_SERVICE: my-test-service
-          TLS_CERTIFICATE_FILE: /tmp/cert.pem
-          TLS_PRIVATE_KEY_FILE: /tmp/key.pem
-          TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
+          TLS_CERTIFICATE_FILE: ${{ runner.temp }}/tls/leaf.pem
+          TLS_PRIVATE_KEY_FILE: ${{ runner.temp }}/tls/leaf.key
+          TLS_CA_CERTIFICATE_FILE: ${{ runner.temp }}/tls/ca.pem
           OC_NAMESPACE: ${{ vars.OC_NAMESPACE }}
           OC_SERVER: ${{ vars.OC_SERVER }}
           OC_TOKEN: ${{ secrets.OC_TOKEN }}
@@ -246,6 +262,7 @@ jobs:
             echo "provision.sh leaked a private key to stdout/stderr"
             exit 1
           fi
+          grep -qF 'PASS: CA chain (2 certificate(s)) issued the certificate, in order, none expired' <<< "$output"
           grep -q '^    caCertificate: |' /tmp/route.yml
           grep -q '^    certificate: |' /tmp/route.yml
           grep -q '^    key: |' /tmp/route.yml
@@ -254,53 +271,44 @@ jobs:
             exit 1
           fi
 
-      - name: Script rejects mismatched key
-        env:
-          ROUTE_HOST: myapp.bcgov.ca
-          ROUTE_NAME: my-test-route
-          TARGET_SERVICE: my-test-service
-          TLS_CERTIFICATE_FILE: /tmp/cert.pem
-          TLS_PRIVATE_KEY_FILE: /tmp/other-key.pem
-          TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
-          DRY_RUN: "true"
-          ROUTE_OUT: /tmp/route-mismatch.yml
+      - name: Script rejects bad TLS material
         run: |
-          if ./fixture/route-tls/provision.sh; then
-            echo "expected cert/key mismatch to fail"
-            exit 1
-          fi
-
-      - name: Script rejects wrong CA
-        env:
-          ROUTE_HOST: myapp.bcgov.ca
-          ROUTE_NAME: my-test-route
-          TARGET_SERVICE: my-test-service
-          TLS_CERTIFICATE_FILE: /tmp/cert.pem
-          TLS_PRIVATE_KEY_FILE: /tmp/key.pem
-          TLS_CA_CERTIFICATE_FILE: /tmp/other.pem
-          DRY_RUN: "true"
-          ROUTE_OUT: /tmp/route-ca.yml
-        run: |
-          if ./fixture/route-tls/provision.sh; then
-            echo "expected CA mismatch to fail"
-            exit 1
-          fi
-
-      - name: Script rejects host mismatch
-        env:
-          ROUTE_HOST: wrong.example
-          ROUTE_NAME: my-test-route
-          TARGET_SERVICE: my-test-service
-          TLS_CERTIFICATE_FILE: /tmp/cert.pem
-          TLS_PRIVATE_KEY_FILE: /tmp/key.pem
-          TLS_CA_CERTIFICATE_FILE: /tmp/ca.pem
-          DRY_RUN: "true"
-          ROUTE_OUT: /tmp/route-host.yml
-        run: |
-          if ./fixture/route-tls/provision.sh; then
-            echo "expected host mismatch to fail"
-            exit 1
-          fi
+          set -euo pipefail
+          d="${RUNNER_TEMP}/tls"
+          # $1 name, $2 error, $3 start of the Fix line, then VAR=value overrides
+          expect_fail() {
+            local name="$1" error="$2" fix="$3" output line f
+            shift 3
+            if output="$(env ROUTE_HOST=myapp.bcgov.ca ROUTE_NAME=my-test-route TARGET_SERVICE=my-test-service \
+              TLS_CERTIFICATE_FILE="${d}/leaf.pem" TLS_PRIVATE_KEY_FILE="${d}/leaf.key" TLS_CA_CERTIFICATE_FILE="${d}/ca.pem" \
+              DRY_RUN=true ROUTE_OUT="${d}/route-${name}.yml" "$@" ./fixture/route-tls/provision.sh 2>&1)"; then
+              echo "::error::${name}: expected a failure"
+              exit 1
+            fi
+            grep -qF -- "$error" <<< "$output" || { echo "::error::${name}: missing error '${error}'"; exit 1; }
+            grep -qF -- "Fix: ${fix}" <<< "$output" || { echo "::error::${name}: missing 'Fix: ${fix}'"; exit 1; }
+            for f in "$d"/*.pem "$d"/*.key; do
+              while IFS= read -r line; do
+                if grep -qF -- "$line" <<< "$output"; then
+                  echo "::error::${name}: output contains a line of $(basename "$f")"
+                  exit 1
+                fi
+              done < <(grep -v -e '-----' "$f")
+            done
+            echo "PASS: ${name}"
+          }
+          expect_fail expired-leaf "Certificate has expired." "Renew the certificate" \
+            TLS_CERTIFICATE_FILE="${d}/leaf-expired.pem"
+          expect_fail expired-ca "TLS_CA_CERTIFICATE certificate 1 has expired." "Replace certificate 1 with the current CA" \
+            TLS_CA_CERTIFICATE_FILE="${d}/int-expired.pem"
+          expect_fail wrong-ca-order "TLS_CA_CERTIFICATE certificate 1 did not issue TLS_CERTIFICATE." "Reorder TLS_CA_CERTIFICATE so the issuer of the leaf comes first" \
+            TLS_CA_CERTIFICATE_FILE="${d}/ca-reversed.pem"
+          expect_fail mismatched-key "TLS certificate and private key do not match." "Use the key that made this certificate's CSR" \
+            TLS_PRIVATE_KEY_FILE="${d}/other.key"
+          expect_fail host-not-covered "Certificate does not cover host 'wrong.example'" "Set hostname to a name the certificate covers" \
+            ROUTE_HOST=wrong.example
+          expect_fail full-chain "TLS_CERTIFICATE must hold only the leaf certificate (found 2)." "Put only the leaf (first block) in TLS_CERTIFICATE" \
+            TLS_CERTIFICATE_FILE="${d}/fullchain.pem"
 
       - name: Quarantine root workspace
         run: |
@@ -321,6 +329,43 @@ jobs:
           oc_server: ${{ vars.OC_SERVER }}
           oc_token: ${{ secrets.OC_TOKEN }}
           dry_run: "true"
+
+  test-route-tls-logs:
+    name: Test Route TLS logs
+    needs: [test-route-tls, test-fork-token-degradation]
+    # Failed runs are the likeliest to have printed PEM data
+    if: ${{ !cancelled() }}
+    permissions:
+      actions: read
+    runs-on: ubuntu-26.04
+    steps:
+      - name: No PEM contents in the route-tls job logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" --paginate \
+            --jq '.jobs[] | "\(.id)\t\(.name)"')"
+          failed=0
+          for name in "Test Route TLS" "Fork Token Degradation Matrix (route-tls-isolated)"; do
+            job_id="$(awk -F'\t' -v n="$name" '$2 == n { print $1 }' <<< "$jobs")"
+            [ -n "$job_id" ] || { echo "::error::${name} job not found"; exit 1; }
+            log="${RUNNER_TEMP}/${job_id}.log"
+            # Raw logs hold ANSI colour codes; the log is only scanned, never printed
+            gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" > "$log"
+            [ -s "$log" ] || { echo "::error::${name} log is empty"; exit 1; }
+            # A PEM body line is 64 base64 characters. Count only; never print a match.
+            leaks="$(sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9T:.-]+Z //' "$log" | grep -cE '^[[:space:]]*[A-Za-z0-9+/]{64}[[:space:]]*$' || true)"
+            if [ "$leaks" -ne 0 ]; then
+              echo "::error::${name} log holds ${leaks} PEM body line(s)"
+              failed=1
+            else
+              echo "PASS: ${name}: no PEM body lines in $(wc -l < "$log") log lines"
+            fi
+          done
+          exit "$failed"
 
   test-fork-token-degradation:
     name: Fork Token Degradation Matrix (${{ matrix.scenario.name }})
@@ -415,6 +460,10 @@ jobs:
           openssl req -x509 -newkey rsa:2048 -keyout /tmp/fork-other-key.pem -out /tmp/fork-other.pem \
             -days 30 -nodes -subj "/CN=other.example"
           cp /tmp/fork-cert.pem /tmp/fork-ca.pem
+          # Mask every PEM body line, so env and input displays show *** instead
+          for f in /tmp/fork-*.pem; do
+            grep -v -e '-----' "$f" | while IFS= read -r line; do echo "::add-mask::${line}"; done
+          done
           {
             echo "FORK_CERT<<EOF"
             cat /tmp/fork-cert.pem
