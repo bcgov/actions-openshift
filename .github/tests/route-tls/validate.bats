@@ -144,6 +144,7 @@ provision() {
   : > "$GITHUB_STEP_SUMMARY"
   ROUTE_HOST_OVERRIDE=other.example.gov.bc.ca provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/int.pem"
   [ "$status" -eq 1 ]
+  [[ "$output" == *"Certificate does not cover host 'other.example.gov.bc.ca' (CN/SAN mismatch)."* ]]
   [[ "$output" == *"Fix: Set hostname to a name the certificate covers"* ]]
   grep -F -- "- Fix: Set hostname to a name the certificate covers" "$GITHUB_STEP_SUMMARY"
   ! grep -F "$(sed -n 2p "${D}/leaf.pem")" "$GITHUB_STEP_SUMMARY"
