@@ -7,7 +7,9 @@ on:
       - main
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Keyed by event and PR number, not ref: a merged PR's close event runs with
+  # ref refs/heads/main and would otherwise cancel the push-to-main run
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number }}
   cancel-in-progress: true
 
 permissions: {}
