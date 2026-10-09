@@ -12,7 +12,20 @@ GitHub Action that applies an OpenShift Route with a custom TLS certificate (ope
 * See [route-tls/README.md](./route-tls/README.md) for secrets, inputs, and usage.
 
 
-### 3. [oc-runner](./oc-runner) (Composite Action)
+### 3. [Image Import](./image-import) (Composite Action)
+Imports one GHCR image into a namespace ImageStream (`referencePolicy: Local`, `importMode: PreserveOriginal`).
+* See [image-import/README.md](./image-import/README.md) for the reference format and pull spec.
+
+```yaml
+- uses: bcgov/actions-openshift/image-import@vX.Y.Z
+  with:
+    image: ${{ steps.build.outputs.registry_host }}${{ steps.build.outputs.image_path }}
+    oc_namespace: ${{ vars.OC_NAMESPACE }}
+    oc_server: ${{ vars.OC_SERVER }}
+    oc_token: ${{ secrets.OC_TOKEN }}
+```
+
+### 4. [oc-runner](./oc-runner) (Composite Action)
 Login and run `oc` commands (and optional cronjobs) on OpenShift.
 * See [oc-runner/README.md](./oc-runner/README.md) for inputs and usage.
 
@@ -26,7 +39,7 @@ Login and run `oc` commands (and optional cronjobs) on OpenShift.
 ```
 
 
-### 4. [crunchy](./crunchy) (Composite Action)
+### 5. [crunchy](./crunchy) (Composite Action)
 Deploy Crunchy Postgres on OpenShift (PR pipelines and cleanup).
 * See [crunchy/README.md](./crunchy/README.md).
 
@@ -34,7 +47,7 @@ Deploy Crunchy Postgres on OpenShift (PR pipelines and cleanup).
 - uses: bcgov/actions-openshift/crunchy@vX.Y.Z
 ```
 
-### 5. [deployer](./deployer) (Composite Action)
+### 6. [deployer](./deployer) (Composite Action)
 Deploy to OpenShift using templates. Verification or penetration tests.
 * See [deployer/README.md](./deployer/README.md).
 
@@ -42,7 +55,7 @@ Deploy to OpenShift using templates. Verification or penetration tests.
 - uses: bcgov/actions-openshift/deployer@vX.Y.Z
 ```
 
-### 6. SchemaSpy (`.github/workflows/.schema-spy.yml`)
+### 7. SchemaSpy (`.github/workflows/.schema-spy.yml`)
 A reusable workflow that spins up a Postgres/PostGIS service, runs migrations using Flyway, generates interactive database documentation with SchemaSpy, and automatically publishes the results to GitHub Pages.
 
 #### Example Usage:
@@ -57,7 +70,7 @@ jobs:
       deploy_dir: docs/schema
 ```
 
-### 7. Runner reachability records (`.github/workflows/probe-runner-*.yml`)
+### 8. Runner reachability records (`.github/workflows/probe-runner-*.yml`)
 Internal records of whether GitHub-hosted runner IPs can reach the OpenShift APIs (background: #49). Nothing alerts on blocked runners; the runs stay green.
 * `probe-runner-reachability.yml` runs every 6 hours, probes the gold and silver APIs (:6443) and the silver router (:443) from 20 runners, writes a table to the run summary and uploads a `probe-results` JSON artifact (kept 14 days). A blocked runner is a warning; the run fails only when samples are missing, and then skips the upload so an earlier, complete record is kept.
 * `probe-runner-report.yml` runs weekly and summarizes the past 14 days of `probe-results`: this week vs last week, block rate per /24 runner IP range (always, sometimes or never blocked), and the gold vs silver split.

@@ -1,0 +1,33 @@
+name: "Image Import"
+description: "Import one GHCR image into the namespace ImageStream so workloads can pull it from the internal registry."
+inputs:
+  image:
+    description: "Full GHCR reference. ghcr.io/owner/name:tag, ghcr.io/owner/name@sha256:<hex>, or ghcr.io/owner/name:tag@sha256:<hex>."
+    required: true
+  oc_namespace:
+    description: "OpenShift namespace."
+    required: true
+  oc_server:
+    description: "OpenShift API URL."
+    required: true
+  oc_token:
+    description: "OpenShift token."
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: OpenShift CLI
+      uses: $/oc-runner
+      with:
+        oc_namespace: ${{ inputs.oc_namespace }}
+        oc_server: ${{ inputs.oc_server }}
+        oc_token: ${{ inputs.oc_token }}
+
+    - name: Import image
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        IMAGE: ${{ inputs.image }}
+        OC_NAMESPACE: ${{ inputs.oc_namespace }}
+      run: bash "${ACTION_PATH}/import.sh"
