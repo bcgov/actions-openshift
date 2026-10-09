@@ -6,7 +6,7 @@ on:
 
 concurrency:
   # Shares the PR workflow's group so cleanup cancels any running test deploy
-  group: PR-${{ github.ref }}
+  group: PR-${{ github.event_name }}-${{ github.event.number }}
   cancel-in-progress: true
 
 permissions: {}
