@@ -500,3 +500,101 @@ jobs:
           grep -q '^apiVersion: route.openshift.io/v1' route.yml
           grep -q '^kind: Route' route.yml
           echo "Route TLS composite action executed cleanly under fork token degradation."
+
+  test-image-import:
+    name: Test Image Import
+    # Needs OpenShift credentials and a GHCR push: same-repo PRs only
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Publish image tag for this pull request
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ghcr.io/${{ github.repository }}/image-import:${{ github.event.number }}
+        run: |
+          set -euo pipefail
+          printf 'FROM scratch\nCOPY README.md /README.md\n' > Dockerfile.image-import
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker build -f Dockerfile.image-import -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Register GHCR pull secret
+        uses: $/oc-runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.number }}
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            oc create secret docker-registry "image-import-${PR}" \
+              --docker-server=ghcr.io \
+              --docker-username=image-import \
+              --docker-password="${GH_TOKEN}" \
+              --dry-run=client -o yaml | oc apply -f -
+
+      - name: Import into OpenShift
+        uses: $/image-import
+        with:
+          image: ghcr.io/${{ github.repository }}/image-import:${{ github.event.number }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Confirm the pull-request tag
+        uses: $/oc-runner
+        env:
+          PR: ${{ github.event.number }}
+          IMAGE: ghcr.io/${{ github.repository }}/image-import:${{ github.event.number }}
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            from="$(oc get imagestreamtag "image-import:${PR}" -o jsonpath='{.tag.from.name}')"
+            if [ "$from" != "$IMAGE" ]; then
+              echo "::error::ImageStream tag image-import:${PR} points at '${from}', expected '${IMAGE}'."
+              exit 1
+            fi
+
+      - name: Delete the pull-request tag
+        if: always() && steps.publish.outcome == 'success'
+        uses: $/oc-runner
+        env:
+          PR: ${{ github.event.number }}
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            oc delete imagestreamtag "image-import:${PR}" --ignore-not-found
+            oc delete secret "image-import-${PR}" --ignore-not-found
+
+      - name: Delete the pull-request package version
+        if: always() && steps.publish.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          PACKAGE: ${{ github.event.repository.name }}%2Fimage-import
+          PR: ${{ github.event.number }}
+        run: |
+          set -euo pipefail
+          ids="$(gh api --paginate "/orgs/${OWNER}/packages/container/${PACKAGE}/versions" \
+            --jq ".[] | select((.metadata.container.tags // []) | index(\"${PR}\")) | .id")"
+          if [ -z "$ids" ]; then
+            echo "::error::No GHCR package version tagged ${PR}."
+            exit 1
+          fi
+          for id in $ids; do
+            gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE}/versions/${id}"
+          done

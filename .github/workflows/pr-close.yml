@@ -17,6 +17,7 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
+      packages: write
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
@@ -25,3 +26,36 @@ jobs:
           oc_namespace: ${{ vars.OC_NAMESPACE }}
           oc_server: ${{ vars.OC_SERVER }}
           oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Delete image-import pull-request tag
+        uses: $/oc-runner
+        env:
+          PR: ${{ github.event.number }}
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            oc delete imagestreamtag "image-import:${PR}" --ignore-not-found
+            oc delete secret "image-import-${PR}" --ignore-not-found
+
+      - name: Delete image-import package version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          PACKAGE: ${{ github.event.repository.name }}%2Fimage-import
+          PR: ${{ github.event.number }}
+        run: |
+          set -euo pipefail
+          err="$(mktemp)"
+          if ! ids="$(gh api --paginate "/orgs/${OWNER}/packages/container/${PACKAGE}/versions" \
+            --jq ".[] | select((.metadata.container.tags // []) | index(\"${PR}\")) | .id" 2>"$err")"; then
+            if grep -q 'HTTP 404' "$err"; then
+              exit 0
+            fi
+            cat "$err" >&2
+            exit 1
+          fi
+          for id in $ids; do
+            gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE}/versions/${id}"
+          done
