@@ -76,3 +76,25 @@ import_image() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"DNS-1123"* ]]
 }
+
+@test "repeated hyphens and a double underscore are valid repository components" {
+  import_image "ghcr.io/acme/team--images/backend:tag"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "${OC_LOG}")" == import-image\ backend:tag\ --from=ghcr.io/acme/team--images/backend:tag\ * ]]
+  : > "${OC_LOG}"
+  import_image "ghcr.io/acme/team__images/backend:tag"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "${OC_LOG}")" == import-image\ backend:tag\ --from=ghcr.io/acme/team__images/backend:tag\ * ]]
+}
+
+@test "repeated hyphens are a valid ImageStream name" {
+  import_image "ghcr.io/acme/my--backend:tag"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "${OC_LOG}")" == import-image\ my--backend:tag\ * ]]
+}
+
+@test "three underscores in a repository component fails" {
+  import_image "ghcr.io/acme/team___images/backend:tag"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ghcr.io/<owner>/<name>"* ]]
+}

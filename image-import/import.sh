@@ -47,13 +47,15 @@ if [ -n "${tag}" ] && [[ ! "${tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; t
   echo "::error::tag '${tag}' is not a valid ImageStream tag."
   exit 1
 fi
-if [[ ! "${path}" =~ ^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)+$ ]]; then
+# OCI name component: alphanumerics, separated by ".", "_", "__", or one or more "-".
+if [[ ! "${path}" =~ ^[a-z0-9]+(([.]|_{1,2}|-+)[a-z0-9]+)*(/[a-z0-9]+(([.]|_{1,2}|-+)[a-z0-9]+)*)+$ ]]; then
   echo "::error::image path must be ghcr.io/<owner>/<name> in lowercase."
   exit 1
 fi
 
 stream="${path##*/}"
-if [[ ! "${stream}" =~ ^[a-z0-9]+([.-][a-z0-9]+)*$ ]] || [ "${#stream}" -gt 253 ]; then
+# DNS-1123 subdomain, which allows repeated internal hyphens.
+if [[ ! "${stream}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$ ]] || [ "${#stream}" -gt 253 ]; then
   echo "::error::ImageStream name '${stream}' must be a DNS-1123 name."
   exit 1
 fi

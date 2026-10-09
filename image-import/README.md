@@ -1,8 +1,8 @@
 # Image Import
 
-Imports one GHCR image into an ImageStream in the target namespace. The ImageStream tag uses `referencePolicy: Local` and `importMode: PreserveOriginal`, so a Deployment that points at the internal registry keeps the manifest list and can pull after GHCR is unreachable.
+Imports one GHCR image into an ImageStream in the target namespace. `importMode: PreserveOriginal` keeps the manifest list. `referencePolicy: Local` makes workloads pull through the integrated registry, which stores a blob the first time it serves that blob.
 
-The cluster pulls GHCR at import time. This action does not copy blobs through the GitHub runner.
+Import stores the manifest. It does not copy layer blobs. A platform that has not been pulled yet still needs GHCR.
 
 Point the workload at the printed in-cluster pull spec. Deployments that still use `ghcr.io/...` are unchanged by a successful import.
 
