@@ -61,7 +61,7 @@ Provide as few as zero commands to login only.  There is a separate parameter fo
     # Override branch, tag or SHA to clone; omit to use the default branch
     ref: ''
 
-    # Timeout for command or cronjob; e.g. 10m
+    # Time limit for the commands block, and separately for the cronjob wait; e.g. 10m
     timeout: 10m
 
     # Enable verbose command tracing with bash xtrace (set -x)
@@ -178,6 +178,7 @@ The `commands` block runs in strict shell mode. A command failure (including opt
 
 - For optional matches, use guards like `grep ... || true`
 - Prefer explicit conditional checks when an empty result is valid
+- `commands exceeded timeout <timeout>` means the `timeout` input stopped the `commands` block. A command inside the block that exits 124 on its own, such as one wrapped in its own `timeout`, is reported as `commands block failed with exit code 124` instead
 - Set `verbose: true` to enable `set -x` tracing for the `commands` block and internal output processing; enable it temporarily and only when you are confident sensitive values will not be printed
 
 ## Safe Debugging

@@ -40,13 +40,27 @@ if [ "$ENABLE_VERBOSE" = "true" ]; then
   VERBOSE_ARGS=(-x)
 fi
 
+# timeout exits 124 when it stops the block, and also when the block itself exits 124
+# (for example a command wrapped in its own `timeout`). Only the first happens after
+# the full limit has passed, so elapsed time tells them apart.
+case "$COMMANDS_TIMEOUT" in
+  *h) TIMEOUT_SECONDS=$(( ${COMMANDS_TIMEOUT%h} * 3600 )) ;;
+  *m) TIMEOUT_SECONDS=$(( ${COMMANDS_TIMEOUT%m} * 60 )) ;;
+  *s) TIMEOUT_SECONDS=${COMMANDS_TIMEOUT%s} ;;
+esac
+START_NS="$(date +%s%N)"
+
 if timeout --foreground "$COMMANDS_TIMEOUT" bash -euo pipefail "${VERBOSE_ARGS[@]}" "$COMMANDS_FILE"; then
   :
 else
   cmd_rc=$?
-  if [ "$cmd_rc" -eq 124 ]; then
+  ELAPSED_NS=$(( $(date +%s%N) - START_NS ))
+  if [ "$cmd_rc" -eq 124 ] && [ "$ELAPSED_NS" -ge $(( TIMEOUT_SECONDS * 1000000000 )) ]; then
     echo "::error title=${ACTION_SOURCE}: commands timed out::[${ACTION_SOURCE}] commands exceeded timeout ${COMMANDS_TIMEOUT}."
     exit 124
+  fi
+  if [ "$cmd_rc" -eq 124 ]; then
+    echo "::error::[${ACTION_SOURCE}] Exit code 124 came from a command inside the commands block (for example its own 'timeout'), not from the ${COMMANDS_TIMEOUT} timeout input."
   fi
   on_commands_error "$cmd_rc"
 fi

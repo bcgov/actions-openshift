@@ -34,3 +34,22 @@ run_script() {
   [[ "$output" == *"echo hello-from-commands"* ]]
   [[ "$output" == *"+"*"echo hello-from-commands"* ]]
 }
+
+@test "timeout input firing reports the timeout" {
+  export COMMANDS_TIMEOUT=1s
+  export COMMANDS='sleep 5'
+  run_script
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"::error title=bcgov/actions-openshift/oc-runner: commands timed out::"* ]]
+  [[ "$output" == *"commands exceeded timeout 1s."* ]]
+}
+
+@test "a command exiting 124 by itself is not reported as the timeout input" {
+  export COMMANDS='timeout 1s sleep 5'
+  run_script
+  [ "$status" -eq 124 ]
+  [[ "$output" != *"commands exceeded timeout"* ]]
+  [[ "$output" == *"Exit code 124 came from a command inside the commands block"* ]]
+  [[ "$output" == *"commands block failed with exit code 124."* ]]
+  grep -q 'Exit code: 124' "$GITHUB_STEP_SUMMARY"
+}
