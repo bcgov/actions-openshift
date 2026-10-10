@@ -9,7 +9,7 @@ set -eo pipefail
 
 GITHUB_OUTPUT="${GITHUB_OUTPUT:-/dev/null}"
 GITHUB_STEP_SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
-BLOCKED_TITLE="IP blocked from OpenShift by network firewall (not a code problem)"
+BLOCKED_TITLE="IP blocked (not a code problem)"
 UNREACHABLE_TITLE="OpenShift unreachable (outage, not a code problem)"
 
 {
@@ -65,12 +65,12 @@ report_no_api() {
     exit 1
   fi
   if curl -sS -4 -o /dev/null --connect-timeout 10 --max-time 10 "https://console.apps.${cluster}.devops.gov.bc.ca/" 2>/dev/null; then
-    msg="This runner's IP (${ip}) is blocked from the OpenShift API (${SERVER_URL}) by the network firewall. This is not a code problem. Re-run this job, then ask your network administrators to allow GitHub's published Actions IP ranges (https://api.github.com/meta) through to the OpenShift API."
+    msg="IP blocked: this runner's IP (${ip}) can't reach the OpenShift API (${SERVER_URL}). Re-run this job. Ask your network admins to put GitHub runner IPs on their allow list: https://api.github.com/meta"
     echo "::error title=${BLOCKED_TITLE}::${msg}"
     echo "blocked=true" >> "$GITHUB_OUTPUT"
     # shellcheck disable=SC2016 # backticks are Markdown, not command substitution
-    printf '### %s\n\n%s\n\n- Runner IP: `%s`\n- API: `%s`\n- The %s router answered, so the cluster is up\n- The block is on the network side; report repeat failures to your network administrators with the runner IP (`%s`)\n' \
-      "${BLOCKED_TITLE}" "${msg}" "${ip}" "${SERVER_URL}" "${cluster}" "${ip}" >> "$GITHUB_STEP_SUMMARY"
+    printf '### %s\n\n%s\n\n- Runner IP: `%s`\n- API: `%s`\n- The %s router answered, so the cluster is up\n' \
+      "${BLOCKED_TITLE}" "${msg}" "${ip}" "${SERVER_URL}" "${cluster}" >> "$GITHUB_STEP_SUMMARY"
   else
     msg="Neither the OpenShift API (${SERVER_URL}) nor the ${cluster} router answered this runner (IP ${ip}). OpenShift or the network looks down. Re-run this job once OpenShift is back."
     echo "::error title=${UNREACHABLE_TITLE}::${msg}"

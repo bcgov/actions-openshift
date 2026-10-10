@@ -131,7 +131,7 @@ This action returns:
 
 - `triggered`: boolean (`'true'` or `'false'`) indicating whether trigger paths changed
 - `commands`: generic command output channel from the `commands` step (usually empty unless explicitly set)
-- `blocked`: `'true'` when login failed because this runner's IP is blocked from the OpenShift API by the network firewall; not a code problem, re-run the job and ask your network administrators to allow GitHub's Actions IP ranges
+- `blocked`: `'true'` when login failed because this runner's IP can't reach the OpenShift API (IP blocked, not a code problem); re-run the job and ask your network admins to put GitHub runner IPs on their allow list
 - `unreachable`: `'true'` when login failed because neither the OpenShift API nor the cluster router answered (outage)
 
 `blocked` and `unreachable` are set even though the step fails, so a later step can react with `if: failure() && steps.<id>.outputs.blocked == 'true'`.
@@ -169,7 +169,7 @@ jobs:
 
 To handle transient network drops, cluster API restarts, or runner configuration mistakes, the action implements validation gates and retry logic:
 - **Pre-flight Reachability Check:** Before downloading `oc`, logging in or running any commands, the action sends an unauthenticated request to the API's `/version` (10-second timeout, TLS verified). Any HTTP response, including `401`/`403`, means the API is reachable and the job continues. If the connection is refused or times out, the action probes the same cluster's router (`api.<cluster>.devops.gov.bc.ca` maps to `console.apps.<cluster>.devops.gov.bc.ca`, e.g. gold, silver, golddr), logs the runner's public IP and fails immediately with one of the messages below. If `oc_server` doesn't match that pattern, there is no router to compare with, so it fails with a plain error that the API did not answer, and sets neither output:
-  - **`IP blocked from OpenShift by network firewall (not a code problem)`**: `This runner's IP (x.x.x.x) is blocked from the OpenShift API (...) by the network firewall. This is not a code problem. Re-run this job, then ask your network administrators to allow GitHub's published Actions IP ranges (https://api.github.com/meta) through to the OpenShift API.` The router answered, so the cluster is up but this GitHub-hosted runner's IP is blocked by the network firewall. Re-running the job usually lands on a runner with a different IP; report repeat failures to your network administrators with the runner IP. Sets the `blocked` output to `true`.
+  - **`IP blocked (not a code problem)`**: `IP blocked: this runner's IP (x.x.x.x) can't reach the OpenShift API (...). Re-run this job. Ask your network admins to put GitHub runner IPs on their allow list: https://api.github.com/meta` The router answered, so the cluster is up but this GitHub-hosted runner's IP is blocked. Re-running the job usually lands on a runner with a different IP. Sets the `blocked` output to `true`.
   - **`OpenShift unreachable (outage, not a code problem)`**: `Neither the OpenShift API (...) nor the <cluster> router answered this runner (IP x.x.x.x). OpenShift or the network looks down. Re-run this job once OpenShift is back.` Sets the `unreachable` output to `true`.
 
   Both are titled error annotations, so they show on the pull request's checks summary, and both are also written to the job's step summary.

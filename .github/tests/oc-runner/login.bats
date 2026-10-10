@@ -67,14 +67,14 @@ run_script() {
   export STUB_API=timeout
   run_script
   [ "$status" -eq 1 ]
-  [[ "$output" == *"::error title=IP blocked from OpenShift by network firewall (not a code problem)::This runner's IP (203.0.113.7) is blocked from the OpenShift API (https://api.silver.devops.gov.bc.ca:6443) by the network firewall. This is not a code problem. Re-run this job, then ask your network administrators to allow GitHub's published Actions IP ranges (https://api.github.com/meta) through to the OpenShift API."* ]]
+  [[ "$output" == *"::error title=IP blocked (not a code problem)::IP blocked: this runner's IP (203.0.113.7) can't reach the OpenShift API (https://api.silver.devops.gov.bc.ca:6443). Re-run this job. Ask your network admins to put GitHub runner IPs on their allow list: https://api.github.com/meta"* ]]
   [[ "$output" != *"Failed to log in"* ]]
   grep -qx 'blocked=true' "$GITHUB_OUTPUT"
   grep -qx 'unreachable=false' "$GITHUB_OUTPUT"
-  grep -q '^### IP blocked from OpenShift by network firewall (not a code problem)$' "$GITHUB_STEP_SUMMARY"
+  grep -q '^### IP blocked (not a code problem)$' "$GITHUB_STEP_SUMMARY"
   grep -q 'Runner IP: `203.0.113.7`' "$GITHUB_STEP_SUMMARY"
   grep -q 'Re-run this job' "$GITHUB_STEP_SUMMARY"
-  grep -q 'The block is on the network side; report repeat failures to your network administrators with the runner IP (`203.0.113.7`)' "$GITHUB_STEP_SUMMARY"
+  grep -qF "Ask your network admins to put GitHub runner IPs on their allow list: https://api.github.com/meta" "$GITHUB_STEP_SUMMARY"
 }
 
 @test "outage at pre-flight: outage annotation and unreachable output" {
@@ -92,7 +92,7 @@ run_script() {
   export STUB_API="answer timeout" STUB_TOKEN=000
   run_script
   [ "$status" -eq 1 ]
-  [[ "$output" == *"::error title=IP blocked from OpenShift by network firewall (not a code problem)::"* ]]
+  [[ "$output" == *"::error title=IP blocked (not a code problem)::"* ]]
   [[ "$output" != *"Failed to log in"* ]]
   [ "$(grep -c '^::error' <<< "$output")" -eq 1 ]
   grep -qx 'blocked=true' "$GITHUB_OUTPUT"
