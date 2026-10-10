@@ -174,8 +174,44 @@ jobs:
           fi
           grep -q 'has no templates/route.yaml' <<< "$output"
 
+  # Composite dry-run logs into the cluster. An unrelated diff must not fail on the runner allowlist.
+  route-tls-changes:
+    name: Route TLS path filter
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    outputs:
+      triggered: ${{ steps.diff.outputs.triggered }}
+    steps:
+      # diff-triggers compares against the base branch tip. The merge base keeps a
+      # newer main change out of this pull request's diff. Push events use HEAD^.
+      - name: Find the pull request merge base
+        id: base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No merge base for ${BASE_SHA}...${HEAD_SHA}"; exit 1; }
+          echo "Merge base: ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - id: diff
+        uses: bcgov/actions/diff-triggers@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
+        with:
+          ref: ${{ steps.base.outputs.sha }}
+          triggers: |
+            route-tls/
+            oc-runner/
+            .github/workflows/pr-open.yml
+
   test-route-tls:
     name: Test Route TLS
+    needs: route-tls-changes
+    if: needs.route-tls-changes.outputs.triggered == 'true'
     permissions: {}
     runs-on: ubuntu-26.04
     steps:
@@ -349,11 +385,16 @@ jobs:
         run: |
           set -euo pipefail
           jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" --paginate \
-            --jq '.jobs[] | "\(.id)\t\(.name)"')"
+            --jq '.jobs[] | "\(.id)\t\(.name)\t\(.conclusion)"')"
           failed=0
           for name in "Test Route TLS" "Fork Token Degradation Matrix (route-tls-isolated)"; do
             job_id="$(awk -F'\t' -v n="$name" '$2 == n { print $1 }' <<< "$jobs")"
+            conclusion="$(awk -F'\t' -v n="$name" '$2 == n { print $3 }' <<< "$jobs")"
             [ -n "$job_id" ] || { echo "::error::${name} job not found"; exit 1; }
+            if [ "$conclusion" = "skipped" ]; then
+              echo "${name} skipped; not scanning its log"
+              continue
+            fi
             log="${RUNNER_TEMP}/${job_id}.log"
             # Raw logs hold ANSI colour codes; the log is only scanned, never printed
             gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" > "$log"
@@ -371,6 +412,7 @@ jobs:
 
   test-fork-token-degradation:
     name: Fork Token Degradation Matrix (${{ matrix.scenario.name }})
+    needs: route-tls-changes
     permissions: read-all
     runs-on: ubuntu-26.04
     strategy:
@@ -453,7 +495,7 @@ jobs:
           fi
 
       - name: Generate dummy certificates
-        if: matrix.scenario.type == 'composite-action'
+        if: matrix.scenario.type == 'composite-action' && needs.route-tls-changes.outputs.triggered == 'true'
         run: |
           set -euo pipefail
           openssl req -x509 -newkey rsa:2048 -keyout /tmp/fork-key.pem -out /tmp/fork-cert.pem \
@@ -479,7 +521,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Composite action dry-run (quarantined workspace)
-        if: matrix.scenario.type == 'composite-action'
+        if: matrix.scenario.type == 'composite-action' && needs.route-tls-changes.outputs.triggered == 'true'
         uses: $/route-tls
         with:
           hostname: myapp.bcgov.ca
@@ -493,7 +535,7 @@ jobs:
           dry_run: "true"
 
       - name: Validate generated route output
-        if: matrix.scenario.type == 'composite-action'
+        if: matrix.scenario.type == 'composite-action' && needs.route-tls-changes.outputs.triggered == 'true'
         run: |
           set -euo pipefail
           [ -f route.yml ] || { echo "::error::route.yml was not created"; exit 1; }
