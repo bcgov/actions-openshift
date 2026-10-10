@@ -4,7 +4,7 @@ GitHub Action that applies an OpenShift Route with your TLS certificate, key, an
 
 The Route uses `termination: edge` and `insecureEdgeTerminationPolicy: Redirect`.
 
-Pin a tag or commit SHA, not `@main`. This action does not use `GITHUB_TOKEN` itself. Non-dry-run jobs use `bcgov/action-oc-runner`, which checkouts the caller repo (that step needs `contents: read` if the repository is private).
+Pin a tag or commit SHA, not `@main`. This action does not use `GITHUB_TOKEN` itself. Every run, `dry_run` included, logs in through the sibling [`oc-runner`](../oc-runner/README.md) action, which checks out the caller repo (that step needs `contents: read` if the repository is private).
 
 ## GitHub secrets
 
@@ -125,7 +125,7 @@ A finished run records `dry_run=true` or `dry_run=false` on the workflow summary
 1. Fail if `tls_certificate` holds anything but the leaf PEM, `tls_ca_certificate` holds anything but certificate PEMs, the key is encrypted or does not match the cert, the cert or a CA is expired, the CAs are out of order (the first must have issued the leaf, and each later one the CA before it), or the cert does not cover `hostname` (CN or SAN, including wildcards). Each check prints `PASS`, or the error and a `Fix:` line (see [Common fixes](#common-fixes)). The log shows only names, dates and results, never PEM contents.
 2. Log in and read the route. Fail if another route already has `hostname` (OpenShift would create this name and then Reject it). `dry_run=true` stops here. It does not create a Secret and does not apply.
 3. Unless `dry_run`, snapshot the live Route's TLS (cert, key, CA) into a Secret named `<route>-backup-<sha256-prefix>`, labeled `backup-type=route-tls` (no `app` label). Re-applying the same cert is a no-op on that Secret. Restore from that Secret if an apply goes wrong. A Route with no inline key has nothing to back up, and the log says so.
-4. Unless `dry_run`, `oc apply` the Route (GitHub installs `oc` via `bcgov/action-oc-runner`), then read the live certificate and fail unless its public key matches the certificate that was applied. Private keys are never printed.
+4. Unless `dry_run`, `oc apply` the Route (the sibling `oc-runner` action installs `oc`), then read the live certificate and fail unless its public key matches the certificate that was applied. Private keys are never printed.
 
 ## Common fixes
 
