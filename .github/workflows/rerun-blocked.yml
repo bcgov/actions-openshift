@@ -1,0 +1,53 @@
+name: Rerun Blocked Runners
+
+# Re-runs failed jobs when the only failures are a GitHub runner IP blocked from the
+# OpenShift API (oc-runner's "IP blocked from OpenShift (not a code problem)" annotation).
+# Any other failure annotation leaves the run alone. At most two re-runs per run (run_attempt).
+# Copy pattern for other repos: oc-runner/README.md, "Re-run jobs on blocked runners".
+
+on:
+  workflow_run:
+    workflows: [PR, oc-runner commands, PG Upgrade]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  rerun:
+    name: Rerun blocked jobs
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt < 3
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      actions: write # gh run rerun
+      checks: read # job annotations
+    steps:
+      - name: Re-run if only blocked-runner failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          set -euo pipefail
+          jobs=$(gh api --paginate "repos/${REPO}/actions/runs/${RUN_ID}/attempts/${ATTEMPT}/jobs" \
+            --jq '.jobs[] | select(.conclusion == "failure") | "\(.id)\t\(.name)"')
+          if [ -z "${jobs}" ]; then
+            echo "No failed jobs in attempt ${ATTEMPT}; nothing to do"
+            exit 0
+          fi
+          while IFS=$'\t' read -r id name; do
+            # Failure annotations other than the blocked signature and the step's exit code
+            notes=$(gh api --paginate "repos/${REPO}/check-runs/${id}/annotations" \
+              --jq '.[] | select(.annotation_level == "failure") | "\(.title // "")\t\(.message)"')
+            blocked=$(grep -cE 'IP blocked from OpenShift \(not a code problem\)|is blocked from the OpenShift API' <<< "${notes}" || true)
+            other=$(grep -vE 'IP blocked from OpenShift \(not a code problem\)|is blocked from the OpenShift API|^[[:space:]]*Process completed with exit code [0-9]+\.$' <<< "${notes}" | grep -c . || true)
+            echo "${name}: ${blocked} blocked, ${other} other failure annotation(s)"
+            if [ "${blocked}" -eq 0 ] || [ "${other}" -ne 0 ]; then
+              echo "::notice title=Not re-run::${name} failed for a reason other than a blocked runner IP"
+              exit 0
+            fi
+          done <<< "${jobs}"
+          echo "::notice title=Re-running blocked jobs::Attempt ${ATTEMPT} failed only on runners blocked from OpenShift; re-running failed jobs"
+          gh run rerun "${RUN_ID}" --repo "${REPO}" --failed
+          echo "Re-ran failed jobs of run ${RUN_ID} (attempt ${ATTEMPT})" >> "$GITHUB_STEP_SUMMARY"
