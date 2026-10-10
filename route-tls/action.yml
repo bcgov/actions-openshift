@@ -1,4 +1,3 @@
-# Stay bash: openssl + oc. Do not convert to JavaScript.
 name: "Route TLS"
 description: "Applies an OpenShift Route with custom TLS (cert/key/CA), openssl checks, and archival backups."
 inputs:

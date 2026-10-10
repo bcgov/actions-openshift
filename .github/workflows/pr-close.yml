@@ -25,3 +25,14 @@ jobs:
           oc_namespace: ${{ vars.OC_NAMESPACE }}
           oc_server: ${{ vars.OC_SERVER }}
           oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Delete image-import pull-request tag
+        uses: $/oc-runner
+        env:
+          PR: ${{ github.event.number }}
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            oc delete imagestreamtag "image-import:${PR}" --ignore-not-found
