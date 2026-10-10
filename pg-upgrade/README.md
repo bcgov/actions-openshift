@@ -1,5 +1,7 @@
 # pg-upgrade
 
+> **Experimental.** Inputs and behaviour may change until [bcgov/nr-old-growth](https://github.com/bcgov/nr-old-growth) has completed a PROD upgrade with this action. Follow the [adoption pattern](#adoption-pattern): rehearse on TEST data before TEST and PROD upgrade.
+
 Moves a PostgreSQL or PostGIS database to a newer major version during a deploy. The new major runs as a separate, empty database next to the old one. This action copies the data across, checks every table's row count, and pauses writes on the old database so no rows are lost in the switch. Nothing changes for repos that don't call it.
 
 It runs whenever a workflow calls it and the old database's Service still exists, whoever bumped the image tag. Once an upgrade has finished, later runs report `already-upgraded` and do nothing.
@@ -16,7 +18,13 @@ The work runs in a short-lived Job in the namespace, using the image you pass (o
 
 ### Rehearsal
 
-`mode: rehearse` copies the source into a throwaway server inside the Job pod and runs the same checks. It never pauses writes and changes nothing, so it is safe against TEST or PROD at any time. Use it in pull requests against the TEST database, so the upgrade is proven on real-shaped data before it reaches TEST and PROD. The TEST deploy then runs the real upgrade before the PROD deploy does.
+`mode: rehearse` copies the source into a throwaway server of the new major inside the Job pod and runs the same checks. It never pauses writes and changes nothing, so it is safe against TEST or PROD at any time.
+
+### Adoption pattern
+
+1. **Pull request: rehearse against a copy of TEST data.** The PR workflow rehearses with TEST's database as the source. The Job restores a copy of TEST data into the new major and verifies it; TEST itself is only read. A failure here blocks the PR before anything is deployed. The PR environment's own database is new, so its deploy reports `skipped`.
+2. **TEST: rehearse, then upgrade.** After merge, the TEST deploy rehearses once more against TEST's current data, then runs the real upgrade, and the backend switches to the new database.
+3. **PROD: upgrade.** The PROD deploy runs the upgrade only after TEST has upgraded and the app has been checked there. Each run's job summary shows the copy time (how long writes were paused) and the Job's peak memory; use TEST's numbers to set `timeout` and `memory_limit` for PROD.
 
 ## Usage
 
@@ -51,6 +59,19 @@ The upgrade must finish before the backend points at the new database, so the da
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
+      # Adoption step 2: TEST rehearses again before its real upgrade
+      - if: inputs.target == 'test'
+        uses: bcgov/actions-openshift/pg-upgrade@vX.Y.Z
+        with:
+          mode: rehearse
+          source: ${{ github.event.repository.name }}-${{ inputs.target }}-database
+          secret: ${{ github.event.repository.name }}-${{ inputs.target }}-database
+          image: postgres:18
+          app_label: ${{ github.event.repository.name }}-${{ inputs.target }}
+          oc_namespace: ${{ secrets.oc_namespace }}
+          oc_server: ${{ vars.oc_server }}
+          oc_token: ${{ secrets.oc_token }}
+
       - uses: bcgov/actions-openshift/pg-upgrade@vX.Y.Z
         with:
           source: ${{ github.event.repository.name }}-${{ inputs.target }}-database
@@ -75,7 +96,9 @@ The upgrade must finish before the backend points at the new database, so the da
 
 A new PR environment has no old database, so the step reports `skipped` and the new database starts empty.
 
-### Rehearsal on TEST data: `.github/workflows/pr-open.yml`
+### Rehearsal on a copy of TEST data: `.github/workflows/pr-open.yml`
+
+Adoption step 1:
 
 ```yaml
   database-rehearsal:
@@ -95,7 +118,7 @@ A new PR environment has no old database, so the step reports `skipped` and the 
           oc_token: ${{ secrets.oc_token }}
 ```
 
-Add `database-rehearsal` to the `needs` of `results` (PR Results). The `test` environment must allow pull request runs. In `merge.yml` nothing changes: `deploy-test` runs the upgrade on TEST, then `deploy-prod` runs it on PROD.
+Add `database-rehearsal` to the `needs` of `results` (PR Results). The `test` environment must allow pull request runs. In `merge.yml` nothing changes: `deploy-test` rehearses and upgrades TEST (step 2), then `deploy-prod` upgrades PROD (step 3).
 
 ### Deployments
 
@@ -131,6 +154,20 @@ The source user must own the source database (or be a superuser) to pause writes
 | Output | Values |
 | --- | --- |
 | `result` | `upgraded`, `already-upgraded`, `rehearsed`, `rolled-back`, or `skipped` (no source Service) |
+| `copy_seconds` | Seconds from the start of the copy to the verified commit. For `upgrade` this is how long writes were paused |
+| `peak_memory_mib` | The Job container's peak memory, page cache included, for sizing `memory_limit` |
+| `rows` | Rows copied and verified across all tables |
+
+The last three are empty when nothing was copied. The same numbers, with the source and dump sizes, go in the job summary.
+
+## Tested versions
+
+CI in this repo, on every pull request and nightly (3:17 AM PDT, 2:17 AM PST):
+
+* **Containers:** every source major from 13 to 17 upgraded to quickstart-openshift's major (17) and to the newest `postgres` major on Docker Hub, found from its tags on each run, so a new release is tested the night it appears. Each pair runs the full set of checks, with `postgis/postgis` pairs at the newest PostGIS for each major. A brand-new major is tested for PostGIS once `postgis/postgis` publishes it.
+* **Cluster:** PostgreSQL 13 to 17 through rehearse, upgrade, repeat and rollback; and a PostGIS 13 to newest-major upgrade of a large dataset (points, polygons and lines with GiST indexes, a million-row table and 512 KB values), sized to the namespace quota, with counts, content hashes and spatial queries compared on both sides.
+
+The action also accepts sources from PostgreSQL 10 to 12, which CI doesn't test.
 
 ## Rollback
 
