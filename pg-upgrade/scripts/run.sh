@@ -126,12 +126,19 @@ trap 'exit 143' TERM INT
 
 if [ "$MODE" = upgrade ]; then
   # Lock and record: oc create fails if another run already holds it
+  lock_err="$(mktemp)"
   jq -n --arg n "$MARKER" --argjson l "$(labels_json)" --arg s "$SOURCE" --arg t "$TARGET" --arg j "$JOB" \
     --arg run "${GITHUB_SERVER_URL:-}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-}" \
     '{apiVersion: "v1", kind: "ConfigMap", metadata: {name: $n, labels: $l},
       data: {status: "running", source: $s, target: $t, job: $j, run: $run}}' \
-    | oc create -f - > /dev/null || fail "Could not create ConfigMap ${MARKER} to lock the upgrade." "Another run may have started; re-run when it finishes."
+    | oc create -f - > /dev/null 2> "$lock_err" || {
+    if grep -q AlreadyExists "$lock_err"; then
+      fail "ConfigMap ${MARKER} already exists, so another run holds the upgrade lock." "Re-run when that run finishes."
+    fi
+    fail "Could not create ConfigMap ${MARKER} to lock the upgrade: $(head -c 300 "$lock_err")" "Check the OpenShift API is reachable from this runner, then re-run."
+  }
   CREATED_MARKER=1
+  rm -f "$lock_err"
 fi
 
 RUN_KEY="$JOB"

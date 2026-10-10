@@ -26,7 +26,12 @@ case "$1 $2" in
     done ;;
   "get configmap") [ -f "${STATE}/marker" ] && cat "${STATE}/marker"; true ;;
   "create -f")
-    obj="$(cat)"; kind="$(jq -r .kind <<< "$obj")"; name="$(jq -r .metadata.name <<< "$obj")"
+    obj="$(cat)"
+    case "${OC_FAIL_CREATE:-}" in
+      exists) echo 'Error from server (AlreadyExists): configmaps "x" already exists' >&2; exit 1 ;;
+      api) echo 'dial tcp 1.2.3.4:6443: connect: connection refused' >&2; exit 1 ;;
+    esac
+    kind="$(jq -r .kind <<< "$obj")"; name="$(jq -r .metadata.name <<< "$obj")"
     echo "$obj" > "${STATE}/${kind}-${name}.json"
     [ "$kind" = ConfigMap ] && jq -r .data.status <<< "$obj" > "${STATE}/marker"; true ;;
   "get pods")
@@ -229,4 +234,18 @@ job_json() { cat "${STATE}"/Job-*.json; }
     run_script
     [ "$status" -eq 0 ] || { echo "image ${img}: ${output}"; return 1; }
   done
+}
+
+@test "lock that already exists says another run holds it" {
+  OC_FAIL_CREATE=exists run_script
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"another run holds the upgrade lock"* ]]
+}
+
+@test "API error creating the lock is reported as an API error" {
+  OC_FAIL_CREATE=api run_script
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"connection refused"* ]]
+  [[ "$output" == *"API is reachable"* ]]
+  [[ "$output" != *"another run"* ]]
 }
