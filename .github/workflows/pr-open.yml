@@ -531,17 +531,25 @@ jobs:
         uses: $/oc-runner
         env:
           GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
           PR: ${{ github.event.number }}
         with:
           oc_namespace: ${{ vars.OC_NAMESPACE }}
           oc_server: ${{ vars.OC_SERVER }}
           oc_token: ${{ secrets.OC_TOKEN }}
           commands: |
-            oc create secret docker-registry "image-import-${PR}" \
-              --docker-server=ghcr.io \
-              --docker-username=image-import \
-              --docker-password="${GH_TOKEN}" \
-              --dry-run=client -o yaml | oc apply -f -
+            auth=$(printf '%s:%s' "$ACTOR" "$GH_TOKEN" | base64 -w0)
+            config=$(printf '{"auths":{"ghcr.io":{"username":"%s","password":"%s","auth":"%s"},"https://ghcr.io":{"username":"%s","password":"%s","auth":"%s"}}}' \
+              "$ACTOR" "$GH_TOKEN" "$auth" "$ACTOR" "$GH_TOKEN" "$auth")
+            oc apply -f - <<EOF
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: image-import-${PR}
+            type: kubernetes.io/dockerconfigjson
+            stringData:
+              .dockerconfigjson: '$config'
+            EOF
 
       - name: Import into OpenShift
         uses: $/image-import
@@ -596,5 +604,14 @@ jobs:
             exit 1
           fi
           for id in $ids; do
-            gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE}/versions/${id}"
+            err="$(mktemp)"
+            if gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE}/versions/${id}" 2>"$err"; then
+              continue
+            fi
+            if grep -q 'last tagged version' "$err"; then
+              gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE}"
+              continue
+            fi
+            cat "$err" >&2
+            exit 1
           done

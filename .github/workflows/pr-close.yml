@@ -57,5 +57,17 @@ jobs:
             exit 1
           fi
           for id in $ids; do
-            gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE}/versions/${id}"
+            if gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE}/versions/${id}" 2>"$err"; then
+              continue
+            fi
+            if grep -q 'last tagged version' "$err"; then
+              if gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE}" 2>"$err"; then
+                continue
+              fi
+              if grep -q 'HTTP 404' "$err"; then
+                continue
+              fi
+            fi
+            cat "$err" >&2
+            exit 1
           done
