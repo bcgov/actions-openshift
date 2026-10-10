@@ -29,20 +29,17 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: OpenShift CLI
-      uses: $/oc-runner
-      with:
-        oc_namespace: ${{ inputs.oc_namespace }}
-        oc_server: ${{ inputs.oc_server }}
-        oc_token: ${{ inputs.oc_token }}
-
     - name: Import image
-      shell: bash
+      uses: $/oc-runner
       env:
-        ACTION_PATH: ${{ github.action_path }}
+        IMPORT_SCRIPT: ${{ github.action_path }}/import.sh
         IMAGE: ${{ inputs.image }}
         NAME: ${{ inputs.name }}
         TAG: ${{ inputs.tag }}
         TOKEN: ${{ inputs.github_token }}
         OC_NAMESPACE: ${{ inputs.oc_namespace }}
-      run: bash "${ACTION_PATH}/import.sh"
+      with:
+        oc_namespace: ${{ inputs.oc_namespace }}
+        oc_server: ${{ inputs.oc_server }}
+        oc_token: ${{ inputs.oc_token }}
+        commands: bash "$IMPORT_SCRIPT"
