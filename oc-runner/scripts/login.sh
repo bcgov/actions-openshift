@@ -60,8 +60,9 @@ report_no_api() {
   if [[ "${SERVER_URL}" =~ ^https://api\.([a-z0-9-]+)\.devops\.gov\.bc\.ca(:[0-9]+)?/?$ ]]; then
     cluster="${BASH_REMATCH[1]}"
   else
-    cluster=silver
-    echo "::notice::Could not derive the cluster from ${SERVER_URL}; using the silver router for the reachability check"
+    # No router to compare with, so a blocked IP can't be told apart from a down API
+    echo "::error::The OpenShift API (${SERVER_URL}) did not answer this runner (IP ${ip}). Its cluster router can't be derived from that URL, so a blocked runner IP can't be told apart from an outage."
+    exit 1
   fi
   if curl -sS -4 -o /dev/null --connect-timeout 10 --max-time 10 "https://console.apps.${cluster}.devops.gov.bc.ca/" 2>/dev/null; then
     msg="This runner's IP (${ip}) is blocked from the OpenShift API (${SERVER_URL}). Re-run this job, and speak with your network administrators if it keeps happening."

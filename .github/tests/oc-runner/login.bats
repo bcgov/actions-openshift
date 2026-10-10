@@ -125,10 +125,12 @@ run_script() {
   [ ! -s "$GITHUB_STEP_SUMMARY" ]
 }
 
-@test "unrecognised server falls back to the silver router" {
+@test "unrecognised server: generic error, neither blocked nor unreachable" {
   export SERVER_URL=https://api.example.test:6443 STUB_API=timeout
   run_script
   [ "$status" -eq 1 ]
-  [[ "$output" == *"using the silver router"* ]]
-  [[ "$output" == *"title=IP blocked from OpenShift (not a code problem)"* ]]
+  [[ "$output" == *"::error::The OpenShift API (https://api.example.test:6443) did not answer this runner (IP 203.0.113.7)."* ]]
+  [[ "$output" != *"title="* ]]
+  grep -qx 'blocked=false' "$GITHUB_OUTPUT"
+  grep -qx 'unreachable=false' "$GITHUB_OUTPUT"
 }
