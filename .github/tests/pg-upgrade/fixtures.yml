@@ -13,6 +13,9 @@ parameters:
     value: postgres:13
   - name: NEW_IMAGE
     value: postgres:17
+  - name: DB_MEMORY
+    description: memory limit of each database pod
+    value: 512Mi
   - name: DB_PASSWORD
     from: "[a-zA-Z0-9]{24}"
     generate: expression
@@ -21,7 +24,7 @@ objects:
     kind: Secret
     metadata:
       name: ${NAME}
-      labels: {app: "${APP}", test: pg-upgrade}
+      labels: {app: "${APP}", test: pg-upgrade, pgup: "${NAME}"}
     stringData:
       database-name: app
       database-user: app
@@ -30,7 +33,7 @@ objects:
     kind: Deployment
     metadata:
       name: ${NAME}-old
-      labels: {app: "${APP}", test: pg-upgrade}
+      labels: {app: "${APP}", test: pg-upgrade, pgup: "${NAME}"}
     spec:
       replicas: 1
       strategy: {type: Recreate}
@@ -38,7 +41,7 @@ objects:
         matchLabels: {deployment: "${NAME}-old"}
       template:
         metadata:
-          labels: {app: "${APP}", test: pg-upgrade, deployment: "${NAME}-old"}
+          labels: {app: "${APP}", test: pg-upgrade, pgup: "${NAME}", deployment: "${NAME}-old"}
         spec:
           containers:
             - name: postgres
@@ -54,7 +57,7 @@ objects:
                 periodSeconds: 5
               resources:
                 requests: {cpu: 25m, memory: 128Mi}
-                limits: {memory: 512Mi}
+                limits: {memory: "${DB_MEMORY}"}
               securityContext:
                 allowPrivilegeEscalation: false
                 runAsNonRoot: true
@@ -70,7 +73,7 @@ objects:
     kind: Service
     metadata:
       name: ${NAME}-old
-      labels: {app: "${APP}", test: pg-upgrade}
+      labels: {app: "${APP}", test: pg-upgrade, pgup: "${NAME}"}
     spec:
       ports: [{name: postgresql, port: 5432, targetPort: 5432}]
       selector: {deployment: "${NAME}-old"}
@@ -78,7 +81,7 @@ objects:
     kind: StatefulSet
     metadata:
       name: ${NAME}-new
-      labels: {app: "${APP}", test: pg-upgrade}
+      labels: {app: "${APP}", test: pg-upgrade, pgup: "${NAME}"}
     spec:
       serviceName: ${NAME}-new
       replicas: 1
@@ -86,7 +89,7 @@ objects:
         matchLabels: {deployment: "${NAME}-new"}
       template:
         metadata:
-          labels: {app: "${APP}", test: pg-upgrade, deployment: "${NAME}-new"}
+          labels: {app: "${APP}", test: pg-upgrade, pgup: "${NAME}", deployment: "${NAME}-new"}
         spec:
           containers:
             - name: postgres
@@ -102,7 +105,7 @@ objects:
                 periodSeconds: 5
               resources:
                 requests: {cpu: 25m, memory: 128Mi}
-                limits: {memory: 512Mi}
+                limits: {memory: "${DB_MEMORY}"}
               securityContext:
                 allowPrivilegeEscalation: false
                 runAsNonRoot: true
@@ -118,7 +121,7 @@ objects:
     kind: Service
     metadata:
       name: ${NAME}-new
-      labels: {app: "${APP}", test: pg-upgrade}
+      labels: {app: "${APP}", test: pg-upgrade, pgup: "${NAME}"}
     spec:
       ports: [{name: postgresql, port: 5432, targetPort: 5432}]
       selector: {deployment: "${NAME}-new"}
