@@ -1,0 +1,309 @@
+name: PG Upgrade
+
+# pg-upgrade's own self-test. Pull requests and the nightly run test every supported source
+# major to quickstart-openshift's major and to the newest postgres major on Docker Hub (versions.sh),
+# in containers, plus a representative pair on the cluster: the full rehearse, upgrade and
+# rollback cycle on small data, and a large PostGIS dataset.
+on:
+  pull_request:
+    paths:
+      - pg-upgrade/**
+      - oc-runner/**
+      - .github/tests/pg-upgrade/**
+      - .github/workflows/pg-upgrade.yml
+  push:
+    branches:
+      - main
+    paths:
+      - pg-upgrade/**
+      - oc-runner/**
+      - .github/tests/pg-upgrade/**
+      - .github/workflows/pg-upgrade.yml
+  schedule:
+    # 3:17 AM PDT (2:17 AM PST): new postgres releases get tested overnight, when the shared namespace is quiet
+    - cron: "17 10 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  versions:
+    name: PG Upgrade (versions)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      containers: ${{ steps.versions.outputs.containers }}
+      cluster: ${{ steps.versions.outputs.cluster }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Supported sources, golden path and newest major
+        id: versions
+        run: .github/tests/pg-upgrade/versions.sh
+
+  unit:
+    name: PG Upgrade (unit)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Shellcheck
+        run: shellcheck pg-upgrade/scripts/*.sh .github/tests/pg-upgrade/*.sh
+
+      - name: Unit tests (bats, 2 workers)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats parallel
+          bats --jobs 2 .github/tests/pg-upgrade
+
+  containers:
+    name: PG Upgrade (containers, ${{ matrix.name }})
+    needs: versions
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.versions.outputs.containers) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Upgrade, rehearsal, rollback and failure paths, for postgres and (where it exists) PostGIS
+      - name: Run job.sh against real databases
+        env:
+          ENGINE: docker
+          PG_OLD: ${{ matrix.pg_old }}
+          PG_NEW: ${{ matrix.pg_new }}
+          GIS_OLD: ${{ matrix.gis_old }}
+          GIS_NEW: ${{ matrix.gis_new }}
+        run: .github/tests/pg-upgrade/container_test.sh
+
+  cluster:
+    name: PG Upgrade (cluster, ${{ matrix.name }})
+    needs: versions
+    # Needs OpenShift credentials: same-repo PRs, the nightly run and manual runs (forks and pushes get none)
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      # One at a time: the namespace is shared
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.versions.outputs.cluster) }}
+    env:
+      APP: actions-openshift-${{ github.event.number || 'nightly' }}
+      DB: actions-openshift-${{ github.event.number || 'nightly' }}-pgup-${{ matrix.id }}
+      OLD: ${{ matrix.old }}
+      NEW: ${{ matrix.new }}
+      DATA: ${{ matrix.data }}
+    steps:
+      - name: Size to the quota, deploy and seed an old (Deployment) and a new (StatefulSet) database
+        uses: $/oc-runner
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          timeout: 30m
+          commands: |
+            source pg-upgrade/scripts/oc_retry.sh
+            oc delete deploy,sts,svc,secret -l "pgup=${DB}" --ignore-not-found
+            oc delete jobs,networkpolicy,configmap -l "pg-upgrade/target in (${DB}-old,${DB}-new)" --ignore-not-found
+            SCALE=0
+            if [ "$DATA" = large ]; then
+              oc get resourcequota -o json > "${RUNNER_TEMP}/quota.json"
+              oc get limitrange -o json > "${RUNNER_TEMP}/limits.json"
+              SCALE="$(DB_MEMORY_MI=1024 .github/tests/pg-upgrade/quota.sh "${RUNNER_TEMP}/quota.json" "${RUNNER_TEMP}/limits.json")"
+            fi
+            DB_MEMORY=512Mi
+            [ "$DATA" != large ] || DB_MEMORY=1Gi
+            oc process -f .github/tests/pg-upgrade/fixtures.yml -p NAME="${DB}" -p APP="${APP}" \
+              -p OLD_IMAGE="${OLD}" -p NEW_IMAGE="${NEW}" -p DB_MEMORY="${DB_MEMORY}" | oc create -f -
+            oc rollout status "deployment/${DB}-old" --timeout=5m
+            oc rollout status "statefulset/${DB}-new" --timeout=5m
+            if [ "$DATA" = small ]; then
+              oc exec "deployment/${DB}-old" -- bash -c 'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+                CREATE TABLE users (id serial PRIMARY KEY, name text NOT NULL);
+                CREATE TABLE flyway_schema_history (installed_rank int PRIMARY KEY, version int);
+                INSERT INTO users (name) SELECT \$\$user \$\$ || g FROM generate_series(1, 1000) g;
+                INSERT INTO flyway_schema_history VALUES (1, 1), (2, 2);"'
+            else
+              start=$SECONDS
+              oc exec -i "deployment/${DB}-old" -- bash -c 'psql -X -q -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v scale='"${SCALE}"' -f -' \
+                < .github/tests/pg-upgrade/large.sql
+              echo "Seeded scale ${SCALE} in $((SECONDS - start))s"
+              {
+                echo "### Large dataset: ${OLD} → ${NEW}"
+                echo
+                echo "Scale ${SCALE}, sized to the namespace quota; seeded in $((SECONDS - start))s. Copy time and Job peak memory are in the pg-upgrade tables below."
+                echo
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+
+      - name: Rehearse
+        id: rehearse
+        uses: $/pg-upgrade
+        with:
+          mode: rehearse
+          source: ${{ env.DB }}-old
+          secret: ${{ env.DB }}
+          image: ${{ matrix.new }}
+          app_label: ${{ env.APP }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Upgrade
+        id: upgrade
+        uses: $/pg-upgrade
+        with:
+          source: ${{ env.DB }}-old
+          target: ${{ env.DB }}-new
+          secret: ${{ env.DB }}
+          image: ${{ matrix.new }}
+          app_label: ${{ env.APP }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Upgrade again (already done)
+        id: again
+        uses: $/pg-upgrade
+        with:
+          source: ${{ env.DB }}-old
+          target: ${{ env.DB }}-new
+          secret: ${{ env.DB }}
+          image: ${{ matrix.new }}
+          app_label: ${{ env.APP }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Check results, copied rows and the write pause
+        uses: $/oc-runner
+        env:
+          REHEARSE: ${{ steps.rehearse.outputs.result }}
+          UPGRADE: ${{ steps.upgrade.outputs.result }}
+          AGAIN: ${{ steps.again.outputs.result }}
+          ROWS: ${{ steps.upgrade.outputs.rows }}
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          timeout: 20m
+          commands: |
+            source pg-upgrade/scripts/oc_retry.sh
+            [ "$REHEARSE" = rehearsed ] || { echo "::error::rehearse result '${REHEARSE}'"; exit 1; }
+            [ "$UPGRADE" = upgraded ] || { echo "::error::upgrade result '${UPGRADE}'"; exit 1; }
+            [ "$AGAIN" = already-upgraded ] || { echo "::error::second upgrade result '${AGAIN}'"; exit 1; }
+            [ -n "$ROWS" ] && [ "$ROWS" -gt 0 ] || { echo "::error::upgrade reported no rows"; exit 1; }
+            q() { oc exec "$1" -- bash -c "psql -X -q -At -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$2\""; }
+            WANT="$(sed -E 's/^[^:]+:([0-9]+).*/\1/' <<< "$NEW")"
+            [ "$(q "statefulset/${DB}-new" 'SHOW server_version_num' | cut -c1-2)" = "$WANT" ] || { echo "::error::target is not PostgreSQL ${WANT}"; exit 1; }
+            if [ "$DATA" = small ]; then
+              [ "$(q "statefulset/${DB}-new" 'SELECT count(*) FROM users')" = 1000 ] || { echo "::error::users not copied"; exit 1; }
+              [ "$(q "statefulset/${DB}-new" "SELECT nextval('users_id_seq')")" = 1001 ] || { echo "::error::sequence not copied"; exit 1; }
+            else
+              # Same counts, content, spatial results and GiST indexes on both sides
+              check() { oc exec -i "$1" -- bash -c 'psql -X -q -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f -' < .github/tests/pg-upgrade/large_check.sql; }
+              SRC="$(check "deployment/${DB}-old")"
+              TGT="$(check "statefulset/${DB}-new")"
+              echo "Source: ${SRC}"
+              echo "Target: ${TGT}"
+              [ "$SRC" = "$TGT" ] || { echo "::error::large dataset differs between source and target"; exit 1; }
+              grep -q 'gist_indexes=3$' <<< "$TGT" || { echo "::error::GiST indexes missing on the target"; exit 1; }
+            fi
+            if q "deployment/${DB}-old" "INSERT INTO flyway_schema_history VALUES (99, 99)" 2> /dev/null; then
+              echo "::error::source still accepts writes after the upgrade"
+              exit 1
+            fi
+            echo "Rehearse, upgrade and repeat behaved; target has every row; source is read-only"
+
+      - name: Rollback
+        id: rollback
+        uses: $/pg-upgrade
+        with:
+          mode: rollback
+          source: ${{ env.DB }}-old
+          target: ${{ env.DB }}-new
+          secret: ${{ env.DB }}
+          image: ${{ matrix.new }}
+          app_label: ${{ env.APP }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Check the source is writable again
+        uses: $/oc-runner
+        env:
+          ROLLBACK: ${{ steps.rollback.outputs.result }}
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            source pg-upgrade/scripts/oc_retry.sh
+            [ "$ROLLBACK" = rolled-back ] || { echo "::error::rollback result '${ROLLBACK}'"; exit 1; }
+            oc exec "deployment/${DB}-old" -- bash -c 'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO flyway_schema_history VALUES (99, 99)"'
+            if oc get configmap "${DB}-new-pg-upgrade" -o name 2> /dev/null; then
+              echo "::error::rollback left the upgrade record"
+              exit 1
+            fi
+
+      - name: Clean up
+        if: always()
+        uses: $/oc-runner
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            source pg-upgrade/scripts/oc_retry.sh
+            oc delete deploy,sts,svc,secret -l "pgup=${DB}" --ignore-not-found
+            oc delete jobs,networkpolicy,configmap -l "pg-upgrade/target in (${DB}-old,${DB}-new)" --ignore-not-found
+
+  notify:
+    name: PG Upgrade (notify)
+    needs: [versions, unit, containers, cluster]
+    # Nightly failures open (or comment on) an issue for the CODEOWNERS
+    if: always() && github.event_name == 'schedule' && contains(needs.*.result, 'failure')
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      # The notifier reads CODEOWNERS from the workspace
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/CODEOWNERS
+          sparse-checkout-cone-mode: false
+
+      - uses: bcgov/actions/workflow-notifier@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
+        with:
+          title: "PG Upgrade nightly self-test failed"
+          body: |
+            The nightly pg-upgrade self-test failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            It tests every supported source major to quickstart-openshift's major and to the newest postgres major on Docker Hub. A failure that appeared with a new postgres or postgis/postgis release means the action needs a fix before repos use that major.
