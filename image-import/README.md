@@ -32,12 +32,11 @@ name: image-import
 tag: ${{ github.event.number }}
 ```
 
-A private package needs `token` and `username`. OpenShift presents that pair to GHCR. Omit both when the package is public. The pull secret is limited to that repository and deleted after the import.
+OpenShift needs `oc_namespace`, `oc_server`, and `oc_token`. A private package also needs `github_token`. Omit `github_token` for a public package. The pull secret is limited to that repository and deleted after the import.
 
 ```yaml
 image: ghcr.io/bcgov/private-app/backend:1.2.3
-token: ${{ secrets.GHCR_TOKEN }}
-username: ${{ github.actor }}
+github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 Delete that tag when the pull request closes. Deleting the ImageStream removes every pull request's tag.
