@@ -38,7 +38,7 @@ inputs:
     description: |
       Docker Hub image for the new major, same as the target's: postgres or postgis/postgis with a tag
       Example: postgres:18.0, postgis/postgis:18-3.6
-    default: ""
+    required: true
   mode:
     description: |
       upgrade: copy, verify and pause writes on the source
@@ -56,7 +56,7 @@ inputs:
     description: Secret for the target, when it differs from secret (same keys)
     default: ""
   memory_limit:
-    description: Memory limit for the Job pod (the rehearsal server runs in it)
+    description: Memory limit for the Job pod, at least 256Mi (the rehearsal server runs in it)
     default: 1Gi
   timeout:
     description: Time allowed for the whole step, e.g. 30m, 1h

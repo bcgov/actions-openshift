@@ -35,10 +35,12 @@ src_admin() { PGOPTIONS='-c default_transaction_read_only=off' src_psql "$@"; }
 tgt_psql() { PGPASSWORD="$TGT_PASSWORD" psql -X -q -v ON_ERROR_STOP=1 -h "$TARGET_HOST" -p "$PORT" -U "$TGT_USER" -d "$TGT_DB" "$@"; }
 
 wait_ready() { # host user label
+  local deadline=$((SECONDS + READY_SECONDS))
   # -U: OpenShift's random UID has no passwd entry for libpq to take a default user from
-  if ! pg_isready -q -h "$1" -p "$PORT" -U "$2" -t "$READY_SECONDS"; then
-    fail "The ${3} database (${1}) did not accept connections within ${READY_SECONDS}s." "Make sure its pod is running and Ready, then re-run."
-  fi
+  until pg_isready -q -h "$1" -p "$PORT" -U "$2" -t 10; do
+    [ "$SECONDS" -lt "$deadline" ] || fail "The ${3} database (${1}) did not accept connections within ${READY_SECONDS}s." "Make sure its pod is running and Ready, then re-run."
+    sleep 5
+  done
 }
 
 major_of() { # psql function -> server major
@@ -50,6 +52,8 @@ major_of() { # psql function -> server major
 # User relations, functions and schemas that no extension owns. pg_catalog is searched implicitly.
 USER_NS="n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\_toast%' AND n.nspname NOT LIKE 'pg\_temp\_%'"
 NOT_EXT_CLASS="NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass AND d.objid = c.oid AND d.deptype = 'e')"
+# Rows inserted, updated or deleted in user tables, from the statistics views
+WRITES_SQL="SELECT coalesce(pg_catalog.sum(n_tup_ins + n_tup_upd + n_tup_del), 0) FROM pg_catalog.pg_stat_user_tables"
 TABLES_SQL="SELECT pg_catalog.format('%I.%I', n.nspname, c.relname) AS t FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'r' AND ${USER_NS} AND ${NOT_EXT_CLASS}"
 SEQS_SQL="SELECT pg_catalog.format('%I.%I', s.schemaname, s.sequencename) AS q, s.last_value FROM pg_catalog.pg_sequences s JOIN pg_catalog.pg_namespace n ON n.nspname = s.schemaname JOIN pg_catalog.pg_class c ON c.relnamespace = n.oid AND c.relname = s.sequencename WHERE ${USER_NS} AND ${NOT_EXT_CLASS}"
 
@@ -145,6 +149,7 @@ FROZEN=0
 on_exit() {
   rc=$?
   if [ -n "${SNAP_PID:-}" ]; then kill "${SNAP_PID}" 2> /dev/null || true; fi
+  if [ -n "${PSQL_PID:-}" ]; then kill "${PSQL_PID}" 2> /dev/null || true; fi
   stop_rehearsal
   if [ "$rc" -ne 0 ] && [ "$FROZEN" = 1 ]; then
     if unfreeze_source; then
@@ -160,11 +165,12 @@ trap on_exit EXIT
 if [ "$MODE" = upgrade ]; then
   # Write pause: new sessions on the source database start read-only, then existing sessions are ended.
   # Clients reconnect read-only; reads keep working, writes fail until the app moves to the target.
-  PAUSED_AT="$(src_admin -At -c 'SELECT pg_catalog.now()')"
   src_admin -v db="$SRC_DB" <<'SQL' || fail "Could not pause writes on ${SOURCE_HOST}." "The source database user must own the database or be a superuser."
 ALTER DATABASE :"db" SET default_transaction_read_only = on;
 SQL
   FROZEN=1
+  # Sessions that start from here on get the read-only default; every older one must go
+  PAUSED_AT="$(src_admin -At -c 'SELECT pg_catalog.now()')"
   echo "Writes paused on ${SOURCE_HOST} (default_transaction_read_only=on)"
   src_admin -At -o /dev/null -c "SELECT pg_catalog.pg_terminate_backend(pid) FROM pg_catalog.pg_stat_activity
     WHERE datname = pg_catalog.current_database() AND pid <> pg_catalog.pg_backend_pid() AND backend_type = 'client backend'
@@ -181,6 +187,11 @@ SQL
     sleep 2
   done
   [ -z "$LEFT" ] || fail "Sessions opened before the write pause are still connected (roles: ${LEFT}) and could still write." "Stop those clients, or use a source user that can end their sessions, then re-run."
+  # Committed rows reach the statistics views within about 10s (a backend reports when it
+  # goes idle); wait that out before taking the baseline the final write check compares with
+  [ "$(src_admin -At -c 'SHOW track_counts')" = on ] || fail "track_counts is off on ${SOURCE_HOST}, so writes during the copy can't be detected." "Turn track_counts on (the PostgreSQL default) and re-run."
+  sleep "${STATS_SETTLE_SECONDS:-11}"
+  WRITES_BASE="$(src_admin -At -c "$WRITES_SQL")"
 fi
 
 # One snapshot for the dump and the expected counts, so they describe the same data
@@ -189,6 +200,19 @@ echo "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SELECT pg_catalog.pg_expo
 SNAPSHOT=""
 read -r -t 60 SNAPSHOT <&"${SNAP[0]}" || true
 [[ "$SNAPSHOT" =~ ^[0-9A-F]+-[0-9A-F]+(-[0-9]+)?$ ]] || fail "Could not take a snapshot of ${SOURCE_HOST}." "Check the source database logs; nothing was copied."
+
+# Prints why the source may have changed since the write pause, or nothing. The pause is a
+# default that a client can override, so this check is what proves no row was missed.
+source_writes() {
+  local now open
+  sleep "${STATS_SETTLE_SECONDS:-11}"
+  now="$(src_admin -At -c "$WRITES_SQL")" || return 1
+  open="$(src_admin -At -c "SELECT pg_catalog.count(*) FROM pg_catalog.pg_stat_activity
+    WHERE datname = pg_catalog.current_database() AND backend_type = 'client backend'
+      AND backend_xid IS NOT NULL AND pid <> pg_catalog.pg_backend_pid()")" || return 1
+  if [ "$now" != "$WRITES_BASE" ]; then echo "$((now - WRITES_BASE)) row(s) inserted, updated or deleted"; fi
+  if [ "$open" != 0 ]; then echo "${open} write transaction(s) still open"; fi
+}
 
 {
   echo "CREATE TEMP TABLE pgup_rows (tbl text PRIMARY KEY, n bigint NOT NULL);"
@@ -264,15 +288,49 @@ pg_restore --list "$DUMP" | awk 'NR == FNR { have[$0] = 1; next }
   $4 == "SCHEMA" && $5 == "-" && ($6 in have) { print ";" $0; next } { print }' "${WORK}/schemas" - > "$LIST"
 
 echo "Restoring into PostgreSQL ${CLIENT_MAJOR} and verifying in one transaction"
-# BEGIN ... COMMIT around restore and checks: any error, a failed check or a truncated stream
-# ends the session without COMMIT, so the server rolls everything back.
-if ! {
-  echo 'BEGIN;'
-  # exit, not set -e: errexit is off inside an if condition, and a failed restore must never reach COMMIT
-  pg_restore --use-list="$LIST" --no-owner --no-privileges --file=- "$DUMP" || exit 1
-  cat "$VERIFY" || exit 1
-  echo 'COMMIT;'
-} | dest_psql -o /dev/null 2>&1 | sed -E 's/^psql:[^ ]+ //'; then
+# psql reads from a FIFO so COMMIT is sent only after the restore and checks have run and the
+# source is re-checked for writes. Any error or failed check ends the session without COMMIT,
+# so the server rolls everything back.
+FIFO="${WORK}/restore.fifo"
+SYNC="${WORK}/restore.sync"
+PSQL_LOG="${WORK}/restore.log"
+rm -f "$FIFO" "$SYNC"
+mkfifo "$FIFO"
+dest_psql -o /dev/null < "$FIFO" > "$PSQL_LOG" 2>&1 &
+PSQL_PID=$!
+exec 3> "$FIFO"
+restore_ok() {
+  # Subshell with its own exit codes: errexit doesn't apply inside a condition
+  (
+    echo 'BEGIN;'
+    pg_restore --use-list="$LIST" --no-owner --no-privileges --file=- "$DUMP" || exit 1
+    cat "$VERIFY" || exit 1
+    # Tell this script when psql has run everything above (restricted mode ends with the dump)
+    printf '%s\n' "\\o ${SYNC}" "\\qecho synced" "\\o /dev/null"
+  ) >&3 || return 1
+  until grep -qx synced "$SYNC" 2> /dev/null; do
+    kill -0 "$PSQL_PID" 2> /dev/null || return 1
+    sleep 1
+  done
+  if [ "$MODE" = upgrade ]; then
+    local writes
+    writes="$(source_writes)" || { echo "::error::Could not check the source for writes during the copy."; return 1; }
+    if [ -n "$writes" ]; then
+      echo "::error::The source changed during the copy: $(echo "$writes" | paste -sd';' | sed 's/;/; /g')."
+      echo "Fix: stop clients that turn off default_transaction_read_only or write as another role, then re-run."
+      return 1
+    fi
+    echo "No writes on the source during the copy"
+  fi
+  echo 'COMMIT;' >&3
+}
+RESTORED=0
+if restore_ok; then RESTORED=1; fi
+exec 3>&-
+PSQL_RC=0
+wait "$PSQL_PID" || PSQL_RC=$?
+sed -E 's/^psql:[^ ]+ //' "$PSQL_LOG"
+if [ "$RESTORED" != 1 ] || [ "$PSQL_RC" -ne 0 ]; then
   if [ "$MODE" = upgrade ]; then
     fail "Copy or verification failed; nothing was committed to ${TARGET_HOST}." "Read the messages above. The source is writable again; fix the cause and re-run."
   fi
@@ -280,6 +338,8 @@ if ! {
 fi
 
 if [ "$MODE" = upgrade ]; then
+  # pg_restore doesn't gather planner statistics; without them the first queries plan badly
+  PGOPTIONS='-c client_min_messages=error' tgt_psql -c 'ANALYZE' || echo "::warning::ANALYZE on ${TARGET_HOST} failed; run it before heavy use."
   echo "Upgrade complete: ${TARGET_HOST} holds a verified copy. ${SOURCE_HOST} stays read-only as the rollback copy."
 else
   echo "Rehearsal passed: ${SOURCE_HOST} restores into PostgreSQL ${CLIENT_MAJOR} with matching row counts. Nothing was changed."

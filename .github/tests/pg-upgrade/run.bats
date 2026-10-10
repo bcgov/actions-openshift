@@ -29,14 +29,23 @@ case "$1 $2" in
     obj="$(cat)"; kind="$(jq -r .kind <<< "$obj")"; name="$(jq -r .metadata.name <<< "$obj")"
     echo "$obj" > "${STATE}/${kind}-${name}.json"
     [ "$kind" = ConfigMap ] && jq -r .data.status <<< "$obj" > "${STATE}/marker"; true ;;
-  "get pods") echo "pod/job-pod" ;;
+  "get pods")
+    if [ "$3" = "-l" ] && [[ "$4" == job-name=* ]]; then echo "pod/job-pod"
+    else echo '{"items":[{"metadata":{"labels":{"deployment":"x","app":"app-test"}}}]}'; fi ;;
+  "get networkpolicy")
+    if [ "${ISOLATED:-yes}" = yes ]; then echo '{"items":[{"spec":{"podSelector":{"matchLabels":{"app":"app-test"}}}}]}'
+    else echo '{"items":[{"spec":{"podSelector":{"matchLabels":{"app":"other"}}}},{"spec":{"podSelector":{},"policyTypes":["Egress"]}}]}'; fi ;;
   "get pod/job-pod")
     case "$4" in *phase*) echo Running ;; *waiting*) echo "${WAITING:-}" ;; esac ;;
   "logs -f") echo "job log line" ;;
   "get job")
+    result="$JOB_RESULT"
+    if [ "$JOB_RESULT" = upgrade-failed ]; then
+      if [[ "$3" == *-rb ]]; then result=succeeded; else result=failed; fi
+    fi
     case "$5" in
-      *succeeded*) [ "$JOB_RESULT" = succeeded ] && echo 1; true ;;
-      *failed*) [ "$JOB_RESULT" = failed ] && echo 1; true ;;
+      *succeeded*) [ "$result" = succeeded ] && echo 1; true ;;
+      *failed*) [ "$result" = failed ] && echo 1; true ;;
       *conditions*) echo "BackoffLimitExceeded" ;;
     esac ;;
   "patch configmap") echo done > "${STATE}/marker" ;;
@@ -108,6 +117,41 @@ job_json() { cat "${STATE}"/Job-*.json; }
   [ "$(wc -l < "${STATE}/deleted-np")" -eq 2 ]
 }
 
+@test "after a failed upgrade Job the runner lifts the write pause itself" {
+  export JOB_RESULT=upgrade-failed
+  run_script
+  [ "$status" -eq 1 ]
+  ls "${STATE}"/Job-*-rb.json
+  [ "$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "MODE") | .value' "${STATE}"/Job-*-rb.json)" = rollback ]
+  [[ "$output" == *"accepts writes."* ]]
+  [ ! -f "${STATE}/marker" ]
+}
+
+@test "if lifting the write pause also fails, the step says to run rollback" {
+  export JOB_RESULT=failed
+  run_script
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"may still be read-only."* ]]
+  [[ "$output" == *"Fix: Run this action with mode: rollback"* ]]
+}
+
+@test "no network policy is added to a database pod that no policy isolates" {
+  export ISOLATED=no
+  run_script
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no NetworkPolicy found that isolates its pods (no); adding none"* ]]
+  ! ls "${STATE}"/NetworkPolicy-*.json 2> /dev/null
+}
+
+@test "rollback waits for a running upgrade" {
+  export MODE=rollback
+  echo running > "${STATE}/marker"
+  run_script
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"already running or was interrupted"* ]]
+  ! ls "${STATE}"/Job-*.json 2> /dev/null
+}
+
 @test "an image pull error fails fast, removes the Job and releases the lock" {
   export WAITING=ImagePullBackOff
   run_script
@@ -144,7 +188,7 @@ job_json() { cat "${STATE}"/Job-*.json; }
 }
 
 @test "rollback clears the record" {
-  export MODE=rollback IMAGE=""
+  export MODE=rollback
   echo done > "${STATE}/marker"
   run_script
   [ "$status" -eq 0 ]
@@ -158,16 +202,19 @@ job_json() { cat "${STATE}"/Job-*.json; }
     "IMAGE=image-registry.openshift-image-registry.svc:5000/openshift/postgresql:12|Unsupported image"
     "IMAGE=postgres|Unsupported image 'postgres'."
     "IMAGE=bitnami/postgresql:17|Unsupported image"
-    "IMAGE=|image is required for mode upgrade."
+    "IMAGE=|image is required."
+    "MODE=rollback IMAGE=docker.io/evil/postgres:17|Unsupported image"
     "TARGET=|Invalid target ''."
     "TARGET=app-test-database|source and target are both"
     "SOURCE=Bad_Name|Invalid source"
     "TIMEOUT=30|Invalid timeout '30'."
     "TIMEOUT=1m|timeout 1m is too short."
     "MEMORY_LIMIT=1G|Invalid memory_limit"
+    "MEMORY_LIMIT=128Mi|memory_limit 128Mi is below"
   )
   for c in "${cases[@]}"; do
-    run env "${c%%|*}" bash -c '"$SCRIPT" 2>&1'
+    # shellcheck disable=SC2086 # a case may set two variables
+    run env ${c%%|*} bash -c '"$SCRIPT" 2>&1'
     [ "$status" -eq 1 ] || { echo "case ${c} exited ${status}"; return 1; }
     [[ "$output" == *"::error::${c#*|}"* ]] || { echo "case ${c}: ${output}"; return 1; }
     [[ "$output" == *"Fix: "* ]] || { echo "case ${c}: no Fix line"; return 1; }

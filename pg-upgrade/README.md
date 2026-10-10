@@ -6,12 +6,13 @@ It runs whenever a workflow calls it and the old database's Service still exists
 
 ## How it works
 
-1. **Checks before anything changes.** Both databases accept connections; the image's major matches the target and is newer than the source; the target is empty (no tables, views, sequences or functions outside extensions); every extension the source uses (such as `postgis`) is available on the target. A ConfigMap `<target>-pg-upgrade` records the upgrade and stops a second run from starting at the same time.
-2. **Write pause.** The action sets `default_transaction_read_only = on` on the source database and ends that database's open sessions. Clients reconnect read-only: reads keep working, writes fail, until the app is switched to the new database. This covers every writer (backend pods, CronJobs, other apps) without scaling anything down. The source stays read-only afterwards as the rollback copy.
-3. **Copy and verify in one transaction.** `pg_dump` (custom format, from the new major's client) reads the source at a single snapshot; the same snapshot gives the exact row count of every table (`count(*)`, not estimates) and each sequence's value. The restore and the checks run inside one transaction on the target, with `ON_ERROR_STOP`. Any error, a table missing or extra, a row count or sequence that differs, or a truncated stream ends the transaction without `COMMIT`, so the target stays empty and the write pause is lifted.
-4. **Result.** On success the ConfigMap says `done` and the step outputs `upgraded`. On failure the step fails with an `::error::` line and a `Fix:` line.
+1. **Checks before anything changes.** Both databases accept connections; the image's major matches the target and is newer than the source; the target is empty (no tables, views, sequences or functions outside extensions); every extension the source uses (such as `postgis`) is available on the target. A ConfigMap `<target>-pg-upgrade` records the upgrade and stops a second upgrade or a rollback from starting at the same time. If the runner loses track of a running Job, the record stays until someone checks that Job.
+2. **Write pause.** The action sets `default_transaction_read_only = on` on the source database and ends that database's open sessions. Clients reconnect read-only: reads keep working and writes fail until the app is switched to the new database. This covers every writer (backend pods, CronJobs, other apps) without scaling anything down. The source stays read-only afterwards as the rollback copy. Sessions the source user can't end (other roles) fail the step before anything is copied.
+3. **Copy and verify in one transaction.** `pg_dump` (custom format, from the new major's client) reads the source at a single snapshot; the same snapshot gives the exact row count of every table (`count(*)`, not estimates) and each sequence's value. The restore and the checks run inside one transaction on the target, with `ON_ERROR_STOP`. Any error, a table missing or extra, or a row count or sequence that differs ends the transaction without `COMMIT`, so the target stays empty and the write pause is lifted.
+4. **No writes during the copy.** A client can still turn the read-only default off for its own session. So before `COMMIT`, the action checks the source's table statistics: if any row was inserted, updated or deleted since the pause, or a write transaction is still open, nothing is committed. This waits about 10 seconds before and after the copy, because PostgreSQL reports finished writes to its statistics with that delay. Open write transactions of other roles are only visible when the source user is a superuser.
+5. **Result.** On success the ConfigMap says `done`, the step outputs `upgraded`, and the target gets `ANALYZE` so its planner has statistics. On failure the step fails with an `::error::` line and a `Fix:` line. If the Job itself was killed (for example out of memory), the runner starts a short rollback Job to lift the write pause.
 
-The work runs in a short-lived Job in the namespace, using the image you pass (official `postgres` or `postgis/postgis` from Docker Hub). The Job reads the credentials from the namespace Secret; the action never sees or prints them. Two temporary NetworkPolicies let only that Job reach the two database pods, and are removed afterwards. The Job and its log are kept for a day.
+The work runs in a short-lived Job in the namespace, using the image you pass (official `postgres` or `postgis/postgis` from Docker Hub). The Job reads the credentials from the namespace Secret, so the action never sees or prints them. If a NetworkPolicy already isolates a database pod, the action adds a temporary one that lets this run's Job pods connect, and removes it afterwards. It adds none to a pod that no policy isolates, because the first policy on a pod would block its other clients. The Job and its log are kept for a day.
 
 ### Rehearsal
 
@@ -116,11 +117,11 @@ The image tag in these workflows is the one to bump. A Renovate major bump only 
 | `secret` | yes | | Secret with `database-name`, `database-user`, `database-password` |
 | `oc_namespace`, `oc_server`, `oc_token` | yes | | OpenShift login, as for [oc-runner](../oc-runner) |
 | `target` | for `upgrade` | `""` | Service of the new, empty database |
-| `image` | for `upgrade`, `rehearse` | `""` | `postgres:<tag>` or `postgis/postgis:<tag>` from Docker Hub, matching the target's major |
+| `image` | yes | | `postgres:<tag>` or `postgis/postgis:<tag>` from Docker Hub, matching the target's major |
 | `mode` | | `upgrade` | `upgrade`, `rehearse` or `rollback` |
 | `app_label` | | `""` | `app` label for the Job, NetworkPolicies and ConfigMap, so PR cleanup removes them |
 | `target_secret` | | `secret` | Secret for the target, if different (same keys) |
-| `memory_limit` | | `1Gi` | Memory limit of the Job pod |
+| `memory_limit` | | `1Gi` | Memory limit of the Job pod, at least `256Mi` |
 | `timeout` | | `30m` | Time for the whole step; the Job gets one minute less |
 
 The source user must own the source database (or be a superuser) to pause writes, and the target user must be able to create the source's extensions (the official images' `POSTGRES_USER` is a superuser). Objects are restored with `--no-owner --no-privileges`, owned by the target user. The Job keeps the compressed dump on its `emptyDir` volume, and a rehearsal also keeps a full copy there.
@@ -134,7 +135,7 @@ The source user must own the source database (or be a superuser) to pause writes
 ## Rollback
 
 1. Revert the pull request that switched the app, so the backend points at the old database again.
-2. Run the action with `mode: rollback` (same `source`, `target`, `secret`), e.g. from a `workflow_dispatch` workflow. It makes the old database writable again and removes the `<target>-pg-upgrade` record.
+2. Run the action with `mode: rollback` (same `source`, `target`, `secret` and `image`), e.g. from a `workflow_dispatch` workflow. It waits for no upgrade to be running. It makes the old database writable again and removes the `<target>-pg-upgrade` record.
 
 The old database holds the data as it was when writes were paused. Rows written to the new database after the switch exist only there. Before upgrading again, delete the new database's StatefulSet and PVC, because the action only copies into an empty database. Remove the old database in a later cleanup, once the upgrade has run in PROD.
 

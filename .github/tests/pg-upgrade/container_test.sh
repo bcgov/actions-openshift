@@ -87,6 +87,7 @@ for c in src tgt gsrc gtgt; do wait_db "$c"; done
 sql src "CREATE SCHEMA sales;
   CREATE TABLE public.users (id serial PRIMARY KEY, name text NOT NULL);
   CREATE TABLE sales.\"Orders\" (id bigserial PRIMARY KEY, user_id int REFERENCES public.users(id), note text);
+  CREATE TABLE public.audit (id bigserial PRIMARY KEY, at timestamptz DEFAULT now());
   CREATE TABLE public.flyway_schema_history (installed_rank int PRIMARY KEY, version text);
   CREATE VIEW public.user_orders AS SELECT u.name, o.id FROM public.users u JOIN sales.\"Orders\" o ON o.user_id = u.id;
   INSERT INTO public.users (name) SELECT 'user ' || g FROM generate_series(1, 500) g;
@@ -102,6 +103,18 @@ equals "rehearse: source still writable" "$(sql src "INSERT INTO public.users (n
 check "same major fails" fail "Fix: Set image to the new major" -- run_job "$PG_OLD" rehearse src
 check "missing PostGIS in a plain image fails" fail "Extension\\(s\\) postgis.*not available" -- run_job "$PG_NEW" rehearse gsrc
 check "image major must match the target" fail "Target runs PostgreSQL 17 but the image is 16" -- run_job "${PG_MID:-postgres:16}" upgrade src tgt
+
+# A client that overrides the write pause and keeps writing must fail the upgrade, not lose rows
+"$ENGINE" exec -d src bash -c 'while [ ! -f /tmp/stop-writer ]; do
+  PGOPTIONS="-c default_transaction_read_only=off" psql -X -q -U app -d app -c "INSERT INTO public.audit DEFAULT VALUES" > /dev/null 2>&1
+  sleep 0.2
+done' > /dev/null
+sleep 1
+check "writes during the copy fail the upgrade" fail "The source changed during the copy" -- run_job "$PG_NEW" upgrade src tgt
+"$ENGINE" exec src touch /tmp/stop-writer
+sleep 1
+equals "writes during the copy: target still empty" "$(sql tgt "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema')")" 0
+equals "writes during the copy: source writable again" "$(sql src "INSERT INTO public.audit DEFAULT VALUES RETURNING 'ok'")" ok
 
 check "upgrade: copies and verifies" pass "Upgrade complete" -- run_job "$PG_NEW" upgrade src tgt
 if grep -q 'sales."Orders": 2000 rows' "$LOG"; then echo "PASS: upgrade: per-table counts printed"; else echo "FAIL: per-table counts missing"; sed "s/^/    /" "$LOG"; FAILED=1; fi
