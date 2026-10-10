@@ -1,0 +1,47 @@
+# Stay bash: openssl only. Do not convert to JavaScript.
+name: "Cert Expiry"
+description: "Read-only TLS expiry check: reads each host's public certificate with openssl s_client and reports any that expire within a number of days."
+inputs:
+  hosts:
+    description: "Hostnames to check, one per line (commas or spaces also work). host or host:port, no scheme. Port defaults to 443. Lines starting with # are ignored."
+    required: false
+    default: ""
+  hosts_file:
+    description: "Path to a file listing hostnames in the same format as hosts, relative to the workspace. Combined with hosts."
+    required: false
+    default: ""
+  days:
+    description: "Warn when a certificate expires within this many days (whole number, 1 to 3650)."
+    required: false
+    default: "30"
+  timeout:
+    description: "Seconds to wait for each TLS handshake (whole number, 1 to 120)."
+    required: false
+    default: "10"
+  fail_on_findings:
+    description: "If true, fail the step when any certificate is expiring, expired or unreadable. Outputs are written either way."
+    required: false
+    default: "true"
+
+outputs:
+  findings:
+    description: 'JSON array of hosts that need attention: [{"host","status","not_after","days_left"}]. status is expiring, expired or unreadable. [] when all are fine.'
+    value: ${{ steps.check.outputs.findings }}
+  checked:
+    description: "Number of hosts checked."
+    value: ${{ steps.check.outputs.checked }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check certificate expiry
+      id: check
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUT_HOSTS: ${{ inputs.hosts }}
+        INPUT_HOSTS_FILE: ${{ inputs.hosts_file }}
+        INPUT_DAYS: ${{ inputs.days }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_FAIL_ON_FINDINGS: ${{ inputs.fail_on_findings }}
+      run: bash "${ACTION_PATH}/check.sh"

@@ -1,0 +1,140 @@
+name: Cert Expiry
+
+# Read-only TLS expiry warning. Weekly, reads the public certificate of each
+# host in .github/cert-expiry/hosts.txt and opens or updates one issue per host
+# (bcgov/actions/workflow-notifier, assigned via CODEOWNERS) when a certificate
+# expires within the window, has expired, or can't be read. No cluster
+# credentials. Pull requests run the unit tests and a check of a known host.
+# Background: #107.
+
+on:
+  schedule:
+    - cron: "23 15 * * 1" # Mondays 15:23 UTC (08:23 PDT)
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Warn when a certificate expires within this many days"
+        type: string
+        default: "30"
+  pull_request:
+    paths:
+      - .github/cert-expiry/**
+      - .github/tests/cert-expiry/**
+      - .github/workflows/cert-expiry.yml
+      - cert-expiry/**
+  push:
+    branches:
+      - main
+    paths:
+      - .github/cert-expiry/**
+      - .github/tests/cert-expiry/**
+      - .github/workflows/cert-expiry.yml
+      - cert-expiry/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  tests:
+    name: Test cert-expiry
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    permissions: {}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Unit tests (bats, 2 workers)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats parallel openssl
+          bats --jobs 2 .github/tests/cert-expiry
+
+      # Known host: github.com always answers. Thresholds are chosen so the
+      # results don't depend on when its certificate was last renewed.
+      - name: Known host, inside window (days 1)
+        id: known_ok
+        uses: $/cert-expiry
+        with:
+          hosts: github.com
+          days: "1"
+
+      - name: Known host, outside window (days 3650)
+        id: known_warn
+        uses: $/cert-expiry
+        with:
+          hosts: github.com
+          days: "3650"
+          fail_on_findings: "false"
+
+      - name: Check known-host results
+        env:
+          OK_FINDINGS: ${{ steps.known_ok.outputs.findings }}
+          WARN_FINDINGS: ${{ steps.known_warn.outputs.findings }}
+          WARN_CHECKED: ${{ steps.known_warn.outputs.checked }}
+        run: |
+          set -euo pipefail
+          [ "$OK_FINDINGS" = "[]" ] || { echo "::error::Expected no findings with days 1, got ${OK_FINDINGS}"; exit 1; }
+          [ "$WARN_CHECKED" = "1" ] || { echo "::error::Expected checked=1, got ${WARN_CHECKED}"; exit 1; }
+          jq -e 'length == 1 and .[0].host == "github.com" and .[0].status == "expiring"' <<< "$WARN_FINDINGS" > /dev/null \
+            || { echo "::error::Expected github.com as expiring with days 3650, got ${WARN_FINDINGS}"; exit 1; }
+          echo "Known-host checks passed"
+
+  check:
+    name: Check certificates
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    outputs:
+      findings: ${{ steps.check.outputs.findings }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check certificate expiry
+        id: check
+        uses: $/cert-expiry
+        with:
+          hosts_file: .github/cert-expiry/hosts.txt
+          days: ${{ inputs.days || '30' }}
+
+  notify:
+    name: Notify (${{ matrix.host }})
+    needs: check
+    if: always() && needs.check.outputs.findings != '' && needs.check.outputs.findings != '[]'
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.check.outputs.findings) }}
+    steps:
+      - name: Open or update the issue for this host
+        uses: bcgov/actions/workflow-notifier@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
+        with:
+          title: "TLS certificate needs attention: ${{ matrix.host }}"
+          body: |
+            The weekly certificate check found a problem with `${{ matrix.host }}`.
+
+            - Status: ${{ matrix.status }}
+            - Expires (UTC): ${{ matrix.not_after || 'unknown' }}
+            - Days left: ${{ matrix.days_left || 'unknown' }}
+
+            Renew the certificate and install it with route-tls, or remove the host from `.github/cert-expiry/hosts.txt` if it is retired.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          labels: ""
+          notify_author: "false"
+          notify_codeowners: "true"
