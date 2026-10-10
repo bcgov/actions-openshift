@@ -6,7 +6,7 @@ setup() {
   export ACTION_PATH="${BATS_TEST_DIRNAME}/../../../pg-upgrade"
   export STATE="${BATS_TEST_TMPDIR}/state"
   mkdir -p "$STATE" "${BATS_TEST_TMPDIR}/bin"
-  export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/output"
+  export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/output" GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary"
   : > "$GITHUB_OUTPUT"
   export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
   export MODE=upgrade SOURCE=app-test-database TARGET=app-test-database-17 SECRET=app-test-database
@@ -46,7 +46,9 @@ case "$1 $2" in
     else echo '{"items":[{"spec":{"podSelector":{"matchLabels":{"app":"other"}}}},{"spec":{"podSelector":{},"policyTypes":["Egress"]}}]}'; fi ;;
   "get pod/job-pod")
     case "$4" in *phase*) echo Running ;; *waiting*) echo "${WAITING:-}" ;; esac ;;
-  "logs -f") echo "job log line" ;;
+  "logs -f")
+    echo "job log line"
+    [ -z "${STATS_LINE:-}" ] || echo "$STATS_LINE" ;;
   "get job")
     result="$JOB_RESULT"
     if [ "$JOB_RESULT" = upgrade-failed ]; then
@@ -265,4 +267,21 @@ job_json() { cat "${STATE}"/Job-*.json; }
   OC_FLAKY=99 OC_RETRIES=3 run_script
   [ "$status" -ne 0 ]
   [ "$(grep -c 'get service' "${STATE}/calls")" -eq 3 ]
+}
+
+@test "Job stats become outputs and a job summary" {
+  STATS_LINE="pg-upgrade stats: mode=upgrade rows=1234 source_bytes=10485760 dump_bytes=2097152 copy_seconds=42 peak_memory_bytes=314572800" run_script
+  [ "$status" -eq 0 ]
+  grep -qx 'copy_seconds=42' "$GITHUB_OUTPUT"
+  grep -qx 'peak_memory_mib=300' "$GITHUB_OUTPUT"
+  grep -qx 'rows=1234' "$GITHUB_OUTPUT"
+  grep -q 'Copy time (writes paused)' "$GITHUB_STEP_SUMMARY"
+  grep -qF '| 1234 | 10 MiB | 2 MiB | 42s | 300 MiB | 1Gi |' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "no stats line, no summary" {
+  run_script
+  [ "$status" -eq 0 ]
+  ! grep -q copy_seconds "$GITHUB_OUTPUT"
+  [ ! -s "$GITHUB_STEP_SUMMARY" ]
 }

@@ -102,6 +102,25 @@ EXTS="$(src_psql -At -c "$EXT_SQL")"
 [ -z "$EXTS" ] || echo "Source extensions: $(echo "$EXTS" | paste -sd' ')"
 
 mkdir -p "$WORK"
+# Peak memory of this container, for sizing memory_limit: the kernel's own peak where the cgroup
+# has one, else a once-a-second sample. Includes page cache, as the memory limit does.
+CGROUP=/sys/fs/cgroup
+mem_now() { cat "${CGROUP}/memory.current" 2> /dev/null || cat "${CGROUP}/memory/memory.usage_in_bytes" 2> /dev/null; }
+(
+  max=0
+  while v="$(mem_now)"; do
+    if [ "$v" -gt "$max" ]; then max="$v" && echo "$max" > "${WORK}/mem.sampled"; fi
+    sleep 1
+  done
+) &
+MEM_PID=$!
+mem_peak() {
+  local kernel sampled
+  kernel="$(cat "${CGROUP}/memory.peak" 2> /dev/null || cat "${CGROUP}/memory/memory.max_usage_in_bytes" 2> /dev/null || echo 0)"
+  sampled="$(cat "${WORK}/mem.sampled" 2> /dev/null || echo 0)"
+  [[ "$kernel" =~ ^[0-9]+$ ]] || kernel=0
+  if [ "$kernel" -gt "$sampled" ]; then echo "$kernel"; else echo "$sampled"; fi
+}
 EXPECTED="${WORK}/expected.sql"
 VERIFY="${WORK}/verify.sql"
 
@@ -148,6 +167,7 @@ fi
 FROZEN=0
 on_exit() {
   rc=$?
+  kill "$MEM_PID" 2> /dev/null || true
   if [ -n "${SNAP_PID:-}" ]; then kill "${SNAP_PID}" 2> /dev/null || true; fi
   if [ -n "${PSQL_PID:-}" ]; then kill "${PSQL_PID}" 2> /dev/null || true; fi
   stop_rehearsal
@@ -169,6 +189,7 @@ if [ "$MODE" = upgrade ]; then
 ALTER DATABASE :"db" SET default_transaction_read_only = on;
 SQL
   FROZEN=1
+  COPY_START=$SECONDS
   # Sessions that start from here on get the read-only default; every older one must go
   PAUSED_AT="$(src_admin -At -c 'SELECT pg_catalog.now()')"
   echo "Writes paused on ${SOURCE_HOST} (default_transaction_read_only=on)"
@@ -194,6 +215,7 @@ SQL
   WRITES_BASE="$(src_admin -At -c "$WRITES_SQL")"
 fi
 
+COPY_START="${COPY_START:-$SECONDS}"
 # One snapshot for the dump and the expected counts, so they describe the same data
 coproc SNAP { src_psql -At; }
 echo "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SELECT pg_catalog.pg_export_snapshot();" >&"${SNAP[1]}"
@@ -336,6 +358,12 @@ if [ "$RESTORED" != 1 ] || [ "$PSQL_RC" -ne 0 ]; then
   fi
   fail "Rehearsal failed: the copy of ${SOURCE_HOST} into PostgreSQL ${CLIENT_MAJOR} did not restore or verify." "Read the messages above and fix the cause before the real upgrade runs."
 fi
+
+COPY_SECONDS=$((SECONDS - COPY_START))
+ROWS="$(sed -nE "s/^INSERT INTO pg_temp\.pgup_rows VALUES \(.*, ([0-9]+)\);$/\1/p" "$EXPECTED" | awk '{ n += $1 } END { print n + 0 }')"
+SOURCE_BYTES="$(src_psql -At -c 'SELECT pg_catalog.pg_database_size(pg_catalog.current_database())')" || SOURCE_BYTES=0
+# One line for the runner to read into outputs and the job summary
+echo "pg-upgrade stats: mode=${MODE} rows=${ROWS} source_bytes=${SOURCE_BYTES} dump_bytes=$(stat -c %s "$DUMP") copy_seconds=${COPY_SECONDS} peak_memory_bytes=$(mem_peak)"
 
 if [ "$MODE" = upgrade ]; then
   # pg_restore doesn't gather planner statistics; without them the first queries plan badly

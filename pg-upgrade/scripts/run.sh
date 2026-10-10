@@ -263,7 +263,9 @@ run_job() { # mode name deadline-seconds
     sleep "$POLL"
   done
 
-  command oc logs -f "$pod" || true
+  JOB_LOG="$(mktemp)"
+  TMPFILES+=("$JOB_LOG")
+  command oc logs -f "$pod" | tee "$JOB_LOG" || true
 
   while :; do
     succeeded="$(oc get job "$name" -o jsonpath='{.status.succeeded}' 2> /dev/null)" || succeeded=""
@@ -297,6 +299,29 @@ if ! run_job "$MODE" "$JOB" "$JOB_DEADLINE"; then
     fail "Upgrade failed and ${SOURCE} may still be read-only." "Run this action with mode: rollback, then fix the cause in the log above and re-run."
   fi
   fail "${MODE^} failed." "Fix the cause in the log above and re-run. The log stays available for a day: oc logs job/${JOB}"
+fi
+
+# Copy time and peak memory, from the Job's stats line, for sizing timeout and memory_limit
+mib() { echo $((($1 + 1048575) / 1048576)); }
+STATS="$(grep -E '^pg-upgrade stats: ' "${JOB_LOG:-/dev/null}" | tail -n 1)" || STATS=""
+if [ -n "$STATS" ]; then
+  stat_of() { sed -nE "s/.* ${1}=([0-9]+).*/\1/p" <<< "$STATS"; }
+  ROWS="$(stat_of rows)" SRC_BYTES="$(stat_of source_bytes)" DUMP_BYTES="$(stat_of dump_bytes)"
+  COPY_SECONDS="$(stat_of copy_seconds)" PEAK="$(stat_of peak_memory_bytes)"
+  {
+    echo "copy_seconds=${COPY_SECONDS}"
+    echo "peak_memory_mib=$(mib "${PEAK:-0}")"
+    echo "rows=${ROWS}"
+  } >> "${GITHUB_OUTPUT:-/dev/null}"
+  if [ "$MODE" = upgrade ]; then COPY_LABEL="Copy time (writes paused)"; else COPY_LABEL="Copy time"; fi
+  {
+    echo "### pg-upgrade ${MODE}: ${SOURCE}${TARGET:+ → ${TARGET}}"
+    echo
+    echo "| Rows | Source size | Dump size | ${COPY_LABEL} | Job peak memory | Memory limit |"
+    echo "| ---: | ---: | ---: | ---: | ---: | ---: |"
+    echo "| ${ROWS} | $(mib "${SRC_BYTES:-0}") MiB | $(mib "${DUMP_BYTES:-0}") MiB | ${COPY_SECONDS}s | $(mib "${PEAK:-0}") MiB | ${MEMORY_LIMIT} |"
+    echo
+  } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 fi
 
 case "$MODE" in
