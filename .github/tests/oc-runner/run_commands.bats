@@ -53,3 +53,19 @@ run_script() {
   [[ "$output" == *"commands block failed with exit code 124."* ]]
   grep -q 'Exit code: 124' "$GITHUB_STEP_SUMMARY"
 }
+
+@test "a command exiting 124 just before the timeout input is not reported as the timeout" {
+  export COMMANDS_TIMEOUT=2s
+  export COMMANDS='sleep 1.8; exit 124'
+  run_script
+  [ "$status" -eq 124 ]
+  [[ "$output" != *"commands exceeded timeout"* ]]
+  [[ "$output" == *"commands block failed with exit code 124."* ]]
+}
+
+@test "timeout input with a leading zero still works" {
+  export COMMANDS_TIMEOUT=08s
+  export COMMANDS='echo ok'
+  run_script
+  [ "$status" -eq 0 ]
+}

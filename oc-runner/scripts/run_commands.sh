@@ -23,8 +23,9 @@ on_commands_error() {
 REAL_GITHUB_OUTPUT="$GITHUB_OUTPUT"
 ACTION_OUTPUT_FILE="$(mktemp)"
 COMMANDS_FILE="$(mktemp)"
+TIMEOUT_MARK="${COMMANDS_FILE}.timed-out"
 export GITHUB_OUTPUT="$ACTION_OUTPUT_FILE"
-trap 'rm -f "$ACTION_OUTPUT_FILE" "$COMMANDS_FILE"' EXIT
+trap 'rm -f "$ACTION_OUTPUT_FILE" "$COMMANDS_FILE" "$TIMEOUT_MARK"' EXIT
 
 if ! [[ "$COMMANDS_TIMEOUT" =~ ^[0-9]+[mhs]$ ]]; then
   echo "::error::Invalid timeout: '${COMMANDS_TIMEOUT}'. Use e.g. 10m, 30s, 1h."
@@ -40,25 +41,32 @@ if [ "$ENABLE_VERBOSE" = "true" ]; then
   VERBOSE_ARGS=(-x)
 fi
 
-# timeout exits 124 when it stops the block, and also when the block itself exits 124
-# (for example a command wrapped in its own `timeout`). Only the first happens after
-# the full limit has passed, so elapsed time tells them apart.
-case "$COMMANDS_TIMEOUT" in
-  *h) TIMEOUT_SECONDS=$(( ${COMMANDS_TIMEOUT%h} * 3600 )) ;;
-  *m) TIMEOUT_SECONDS=$(( ${COMMANDS_TIMEOUT%m} * 60 )) ;;
-  *s) TIMEOUT_SECONDS=${COMMANDS_TIMEOUT%s} ;;
-esac
-START_NS="$(date +%s%N)"
+# Watchdog instead of coreutils timeout: timeout exits 124 both when it stops the block
+# and when the block itself exits 124 (for example a command wrapped in its own
+# `timeout`). The watchdog writes TIMEOUT_MARK before it stops the block, so only a
+# block it stopped is reported as a timeout.
+bash -euo pipefail "${VERBOSE_ARGS[@]}" "$COMMANDS_FILE" &
+cmd_pid=$!
+(
+  sleep "$COMMANDS_TIMEOUT" &
+  sleep_pid=$!
+  trap 'kill "$sleep_pid" 2>/dev/null; exit 0' TERM
+  wait "$sleep_pid"
+  touch "$TIMEOUT_MARK"
+  kill -TERM "$cmd_pid" 2>/dev/null
+) >/dev/null 2>&1 &
+watchdog_pid=$!
 
-if timeout --foreground "$COMMANDS_TIMEOUT" bash -euo pipefail "${VERBOSE_ARGS[@]}" "$COMMANDS_FILE"; then
-  :
-else
-  cmd_rc=$?
-  ELAPSED_NS=$(( $(date +%s%N) - START_NS ))
-  if [ "$cmd_rc" -eq 124 ] && [ "$ELAPSED_NS" -ge $(( TIMEOUT_SECONDS * 1000000000 )) ]; then
-    echo "::error title=${ACTION_SOURCE}: commands timed out::[${ACTION_SOURCE}] commands exceeded timeout ${COMMANDS_TIMEOUT}."
-    exit 124
-  fi
+cmd_rc=0
+wait "$cmd_pid" || cmd_rc=$?
+kill -TERM "$watchdog_pid" 2>/dev/null || true
+wait "$watchdog_pid" 2>/dev/null || true
+
+if [ -e "$TIMEOUT_MARK" ]; then
+  echo "::error title=${ACTION_SOURCE}: commands timed out::[${ACTION_SOURCE}] commands exceeded timeout ${COMMANDS_TIMEOUT}."
+  exit 124
+fi
+if [ "$cmd_rc" -ne 0 ]; then
   if [ "$cmd_rc" -eq 124 ]; then
     echo "::error::[${ACTION_SOURCE}] Exit code 124 came from a command inside the commands block (for example its own 'timeout'), not from the ${COMMANDS_TIMEOUT} timeout input."
   fi
