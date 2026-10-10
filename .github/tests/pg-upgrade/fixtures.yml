@@ -1,0 +1,124 @@
+# pg-upgrade cluster test: an old database as a Deployment (like nr-old-growth's) and a new,
+# empty one as a StatefulSet (like bcgov/quickstart-openshift common/openshift.database.yml).
+# Both use emptyDir storage so the test leaves no PVCs behind.
+apiVersion: template.openshift.io/v1
+kind: Template
+parameters:
+  - name: NAME
+    required: true
+  - name: APP
+    description: app label, so PR cleanup also removes leftovers
+    required: true
+  - name: OLD_IMAGE
+    value: postgres:13
+  - name: NEW_IMAGE
+    value: postgres:17
+  - name: DB_PASSWORD
+    from: "[a-zA-Z0-9]{24}"
+    generate: expression
+objects:
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: ${NAME}
+      labels: {app: "${APP}", test: pg-upgrade}
+    stringData:
+      database-name: app
+      database-user: app
+      database-password: ${DB_PASSWORD}
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: ${NAME}-old
+      labels: {app: "${APP}", test: pg-upgrade}
+    spec:
+      replicas: 1
+      strategy: {type: Recreate}
+      selector:
+        matchLabels: {deployment: "${NAME}-old"}
+      template:
+        metadata:
+          labels: {app: "${APP}", test: pg-upgrade, deployment: "${NAME}-old"}
+        spec:
+          containers:
+            - name: postgres
+              image: ${OLD_IMAGE}
+              ports: [{containerPort: 5432}]
+              env:
+                - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+                - {name: POSTGRES_DB, valueFrom: {secretKeyRef: {name: "${NAME}", key: database-name}}}
+                - {name: POSTGRES_USER, valueFrom: {secretKeyRef: {name: "${NAME}", key: database-user}}}
+                - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: "${NAME}", key: database-password}}}
+              readinessProbe:
+                exec: {command: [pg_isready, -d, $(POSTGRES_DB), -U, $(POSTGRES_USER)]}
+                periodSeconds: 5
+              resources:
+                requests: {cpu: 25m, memory: 128Mi}
+                limits: {memory: 512Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities: {drop: ["ALL"]}
+                seccompProfile: {type: RuntimeDefault}
+              volumeMounts:
+                - {name: data, mountPath: /var/lib/postgresql/data}
+                - {name: socket, mountPath: /var/run/postgresql}
+          volumes:
+            - {name: data, emptyDir: {}}
+            - {name: socket, emptyDir: {}}
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: ${NAME}-old
+      labels: {app: "${APP}", test: pg-upgrade}
+    spec:
+      ports: [{name: postgresql, port: 5432, targetPort: 5432}]
+      selector: {deployment: "${NAME}-old"}
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: ${NAME}-new
+      labels: {app: "${APP}", test: pg-upgrade}
+    spec:
+      serviceName: ${NAME}-new
+      replicas: 1
+      selector:
+        matchLabels: {deployment: "${NAME}-new"}
+      template:
+        metadata:
+          labels: {app: "${APP}", test: pg-upgrade, deployment: "${NAME}-new"}
+        spec:
+          containers:
+            - name: postgres
+              image: ${NEW_IMAGE}
+              ports: [{containerPort: 5432}]
+              env:
+                - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+                - {name: POSTGRES_DB, valueFrom: {secretKeyRef: {name: "${NAME}", key: database-name}}}
+                - {name: POSTGRES_USER, valueFrom: {secretKeyRef: {name: "${NAME}", key: database-user}}}
+                - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: "${NAME}", key: database-password}}}
+              readinessProbe:
+                exec: {command: [pg_isready, -d, $(POSTGRES_DB), -U, $(POSTGRES_USER)]}
+                periodSeconds: 5
+              resources:
+                requests: {cpu: 25m, memory: 128Mi}
+                limits: {memory: 512Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities: {drop: ["ALL"]}
+                seccompProfile: {type: RuntimeDefault}
+              volumeMounts:
+                - {name: data, mountPath: /var/lib/postgresql/data}
+                - {name: socket, mountPath: /var/run/postgresql}
+          volumes:
+            - {name: data, emptyDir: {}}
+            - {name: socket, emptyDir: {}}
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: ${NAME}-new
+      labels: {app: "${APP}", test: pg-upgrade}
+    spec:
+      ports: [{name: postgresql, port: 5432, targetPort: 5432}]
+      selector: {deployment: "${NAME}-new"}

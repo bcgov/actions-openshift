@@ -1,0 +1,195 @@
+name: PG Upgrade
+
+on:
+  pull_request:
+    paths:
+      - pg-upgrade/**
+      - oc-runner/**
+      - .github/tests/pg-upgrade/**
+      - .github/workflows/pg-upgrade.yml
+  push:
+    branches:
+      - main
+    paths:
+      - pg-upgrade/**
+      - oc-runner/**
+      - .github/tests/pg-upgrade/**
+      - .github/workflows/pg-upgrade.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  unit:
+    name: PG Upgrade (unit)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Shellcheck
+        run: shellcheck pg-upgrade/scripts/*.sh .github/tests/pg-upgrade/*.sh
+
+      - name: Unit tests (bats, 2 workers)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats parallel
+          bats --jobs 2 .github/tests/pg-upgrade
+
+  containers:
+    name: PG Upgrade (containers)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # PostgreSQL 13 -> 17 and PostGIS 13-3.5 -> 17-3.5: upgrade, rehearsal, rollback and failure paths
+      - name: Run job.sh against real databases
+        env:
+          ENGINE: docker
+        run: .github/tests/pg-upgrade/container_test.sh
+
+  cluster:
+    name: PG Upgrade (cluster)
+    # Needs OpenShift credentials: same-repo PRs only (fork and push events get none)
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    env:
+      APP: ${{ github.event.repository.name }}-${{ github.event.number }}
+      DB: ${{ github.event.repository.name }}-${{ github.event.number }}-pgup
+    steps:
+      - name: Deploy and seed an old (Deployment) and a new (StatefulSet) database
+        uses: $/oc-runner
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            oc delete deploy,sts,svc,secret -l "app=${APP},test=pg-upgrade" --ignore-not-found
+            oc delete configmap "${DB}-new-pg-upgrade" --ignore-not-found
+            oc process -f .github/tests/pg-upgrade/fixtures.yml -p NAME="${DB}" -p APP="${APP}" | oc create -f -
+            oc rollout status "deployment/${DB}-old" --timeout=5m
+            oc rollout status "statefulset/${DB}-new" --timeout=5m
+            oc exec "deployment/${DB}-old" -- bash -c 'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+              CREATE TABLE users (id serial PRIMARY KEY, name text NOT NULL);
+              CREATE TABLE flyway_schema_history (installed_rank int PRIMARY KEY, version int);
+              INSERT INTO users (name) SELECT \$\$user \$\$ || g FROM generate_series(1, 1000) g;
+              INSERT INTO flyway_schema_history VALUES (1, 1), (2, 2);"'
+
+      - name: Rehearse
+        id: rehearse
+        uses: $/pg-upgrade
+        with:
+          mode: rehearse
+          source: ${{ env.DB }}-old
+          secret: ${{ env.DB }}
+          image: postgres:17
+          app_label: ${{ env.APP }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Upgrade
+        id: upgrade
+        uses: $/pg-upgrade
+        with:
+          source: ${{ env.DB }}-old
+          target: ${{ env.DB }}-new
+          secret: ${{ env.DB }}
+          image: postgres:17
+          app_label: ${{ env.APP }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Upgrade again (already done)
+        id: again
+        uses: $/pg-upgrade
+        with:
+          source: ${{ env.DB }}-old
+          target: ${{ env.DB }}-new
+          secret: ${{ env.DB }}
+          image: postgres:17
+          app_label: ${{ env.APP }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Check results, copied rows and the write pause
+        uses: $/oc-runner
+        env:
+          REHEARSE: ${{ steps.rehearse.outputs.result }}
+          UPGRADE: ${{ steps.upgrade.outputs.result }}
+          AGAIN: ${{ steps.again.outputs.result }}
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            [ "$REHEARSE" = rehearsed ] || { echo "::error::rehearse result '${REHEARSE}'"; exit 1; }
+            [ "$UPGRADE" = upgraded ] || { echo "::error::upgrade result '${UPGRADE}'"; exit 1; }
+            [ "$AGAIN" = already-upgraded ] || { echo "::error::second upgrade result '${AGAIN}'"; exit 1; }
+            q() { oc exec "$1" -- bash -c "psql -X -q -At -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$2\""; }
+            [ "$(q "statefulset/${DB}-new" 'SHOW server_version_num' | cut -c1-2)" = 17 ] || { echo "::error::target is not PostgreSQL 17"; exit 1; }
+            [ "$(q "statefulset/${DB}-new" 'SELECT count(*) FROM users')" = 1000 ] || { echo "::error::users not copied"; exit 1; }
+            [ "$(q "statefulset/${DB}-new" "SELECT nextval('users_id_seq')")" = 1001 ] || { echo "::error::sequence not copied"; exit 1; }
+            if q "deployment/${DB}-old" "INSERT INTO users (name) VALUES ('late')" 2> /dev/null; then
+              echo "::error::source still accepts writes after the upgrade"
+              exit 1
+            fi
+            echo "Rehearse, upgrade and repeat behaved; target has every row; source is read-only"
+
+      - name: Rollback
+        id: rollback
+        uses: $/pg-upgrade
+        with:
+          mode: rollback
+          source: ${{ env.DB }}-old
+          target: ${{ env.DB }}-new
+          secret: ${{ env.DB }}
+          app_label: ${{ env.APP }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+
+      - name: Check the source is writable again
+        uses: $/oc-runner
+        env:
+          ROLLBACK: ${{ steps.rollback.outputs.result }}
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            [ "$ROLLBACK" = rolled-back ] || { echo "::error::rollback result '${ROLLBACK}'"; exit 1; }
+            oc exec "deployment/${DB}-old" -- bash -c 'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO users (name) VALUES (\$\$after rollback\$\$)"'
+            if oc get configmap "${DB}-new-pg-upgrade" -o name 2> /dev/null; then
+              echo "::error::rollback left the upgrade record"
+              exit 1
+            fi
+
+      - name: Clean up
+        if: always()
+        uses: $/oc-runner
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            oc delete deploy,sts,svc,secret -l "app=${APP},test=pg-upgrade" --ignore-not-found
+            oc delete jobs,networkpolicy,configmap -l "pg-upgrade/target in (${DB}-old,${DB}-new)" --ignore-not-found
