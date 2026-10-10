@@ -126,6 +126,7 @@ jobs:
           oc_token: ${{ secrets.OC_TOKEN }}
           timeout: 30m
           commands: |
+            source pg-upgrade/scripts/oc_retry.sh
             oc delete deploy,sts,svc,secret -l "pgup=${DB}" --ignore-not-found
             oc delete jobs,networkpolicy,configmap -l "pg-upgrade/target in (${DB}-old,${DB}-new)" --ignore-not-found
             SCALE=0
@@ -211,6 +212,7 @@ jobs:
           oc_token: ${{ secrets.OC_TOKEN }}
           timeout: 20m
           commands: |
+            source pg-upgrade/scripts/oc_retry.sh
             [ "$REHEARSE" = rehearsed ] || { echo "::error::rehearse result '${REHEARSE}'"; exit 1; }
             [ "$UPGRADE" = upgraded ] || { echo "::error::upgrade result '${UPGRADE}'"; exit 1; }
             [ "$AGAIN" = already-upgraded ] || { echo "::error::second upgrade result '${AGAIN}'"; exit 1; }
@@ -260,6 +262,7 @@ jobs:
           oc_server: ${{ vars.OC_SERVER }}
           oc_token: ${{ secrets.OC_TOKEN }}
           commands: |
+            source pg-upgrade/scripts/oc_retry.sh
             [ "$ROLLBACK" = rolled-back ] || { echo "::error::rollback result '${ROLLBACK}'"; exit 1; }
             oc exec "deployment/${DB}-old" -- bash -c 'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO flyway_schema_history VALUES (99, 99)"'
             if oc get configmap "${DB}-new-pg-upgrade" -o name 2> /dev/null; then
@@ -275,6 +278,7 @@ jobs:
           oc_server: ${{ vars.OC_SERVER }}
           oc_token: ${{ secrets.OC_TOKEN }}
           commands: |
+            source pg-upgrade/scripts/oc_retry.sh
             oc delete deploy,sts,svc,secret -l "pgup=${DB}" --ignore-not-found
             oc delete jobs,networkpolicy,configmap -l "pg-upgrade/target in (${DB}-old,${DB}-new)" --ignore-not-found
 
