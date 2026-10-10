@@ -10,7 +10,7 @@ setup() {
   : > "$GITHUB_OUTPUT"
   export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
   export MODE=upgrade SOURCE=app-test-database TARGET=app-test-database-17 SECRET=app-test-database
-  export IMAGE=postgres:17.6 APP_LABEL=app-test POLL=0 GITHUB_RUN_ID=42 GITHUB_RUN_ATTEMPT=1
+  export IMAGE=postgres:17.6 APP_LABEL=app-test POLL=0 OC_RETRY_DELAY=0 GITHUB_RUN_ID=42 GITHUB_RUN_ATTEMPT=1
   export SERVICES="app-test-database app-test-database-17" JOB_RESULT=succeeded
   # Stub oc: services from $SERVICES, created objects saved as JSON in $STATE, logs every call
   cat > "${BATS_TEST_TMPDIR}/bin/oc" <<'STUB'
@@ -18,6 +18,10 @@ setup() {
 echo "oc $*" >> "${STATE}/calls"
 case "$1 $2" in
   "get service")
+    if [ -n "${OC_FLAKY:-}" ]; then
+      n=$(($(cat "${STATE}/flaky" 2> /dev/null || echo 0) + 1)); echo "$n" > "${STATE}/flaky"
+      [ "$n" -gt "$OC_FLAKY" ] || { echo 'dial tcp 1.2.3.4:6443: i/o timeout' >&2; exit 1; }
+    fi
     [ -z "${OC_FAIL_SERVICE:-}" ] || { echo "Unable to connect to the server" >&2; exit 1; }
     for s in $SERVICES; do
       if [ "$s" = "$3" ]; then
@@ -248,4 +252,17 @@ job_json() { cat "${STATE}"/Job-*.json; }
   [[ "$output" == *"connection refused"* ]]
   [[ "$output" == *"API is reachable"* ]]
   [[ "$output" != *"another run"* ]]
+}
+
+@test "dial errors are retried, then the run carries on" {
+  OC_FLAKY=2 run_script
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"retrying"* ]]
+  grep -q "result=upgraded" "$GITHUB_OUTPUT"
+}
+
+@test "dial errors that don't clear fail after the retries" {
+  OC_FLAKY=99 OC_RETRIES=3 run_script
+  [ "$status" -ne 0 ]
+  [ "$(grep -c 'get service' "${STATE}/calls")" -eq 3 ]
 }

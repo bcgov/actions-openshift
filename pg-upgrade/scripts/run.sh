@@ -11,6 +11,29 @@ fail() {
 }
 result() { echo "result=$1" >> "${GITHUB_OUTPUT:-/dev/null}"; }
 
+# GitHub runners sometimes can't reach the OpenShift API for a few seconds (bcgov/actions-openshift#49).
+# Retry a call only when the connection was never made (dial errors), so no request reached the
+# server and even a create or patch is safe to repeat. stdin is kept for "-f -"; output is printed once.
+OC_RETRIES="${OC_RETRIES:-6}"
+OC_RETRY_DELAY="${OC_RETRY_DELAY:-10}"
+oc() {
+  local in out err try=1 rc
+  in="$(mktemp)" out="$(mktemp)" err="$(mktemp)"
+  if [[ " $* " == *" -f - "* ]]; then cat > "$in"; else : > "$in"; fi
+  while :; do
+    rc=0
+    command oc "$@" < "$in" > "$out" 2> "$err" || rc=$?
+    if [ "$rc" = 0 ] || [ "$try" -ge "$OC_RETRIES" ] || ! grep -qE 'dial tcp|connection refused|no route to host' "$err"; then break; fi
+    echo "OpenShift API unreachable (attempt ${try}/${OC_RETRIES}), retrying in ${OC_RETRY_DELAY}s..." >&2
+    try=$((try + 1))
+    sleep "$OC_RETRY_DELAY"
+  done
+  cat "$out"
+  cat "$err" >&2
+  rm -f "$in" "$out" "$err"
+  return "$rc"
+}
+
 MODE="${MODE:-upgrade}"
 TARGET="${TARGET:-}"
 TARGET_SECRET="${TARGET_SECRET:-}"
@@ -135,7 +158,7 @@ if [ "$MODE" = upgrade ]; then
     if grep -q AlreadyExists "$lock_err"; then
       fail "ConfigMap ${MARKER} already exists, so another run holds the upgrade lock." "Re-run when that run finishes."
     fi
-    fail "Could not create ConfigMap ${MARKER} to lock the upgrade: $(head -c 300 "$lock_err")" "Check the OpenShift API is reachable from this runner, then re-run."
+    fail "Could not create ConfigMap ${MARKER} to lock the upgrade: $(tail -n 1 "$lock_err" | cut -c1-300)" "Check the OpenShift API is reachable from this runner, then re-run."
   }
   CREATED_MARKER=1
   rm -f "$lock_err"
@@ -240,7 +263,7 @@ run_job() { # mode name deadline-seconds
     sleep "$POLL"
   done
 
-  oc logs -f "$pod" || true
+  command oc logs -f "$pod" || true
 
   while :; do
     succeeded="$(oc get job "$name" -o jsonpath='{.status.succeeded}' 2> /dev/null)" || succeeded=""
