@@ -102,25 +102,28 @@ EXTS="$(src_psql -At -c "$EXT_SQL")"
 [ -z "$EXTS" ] || echo "Source extensions: $(echo "$EXTS" | paste -sd' ')"
 
 mkdir -p "$WORK"
-# Peak memory of this container, for sizing memory_limit: the kernel's own peak where the cgroup
-# has one, else a once-a-second sample. Includes page cache, as the memory limit does.
+# Peak memory of this container, for sizing memory_limit: the working set (usage minus inactive
+# page cache, as the kubelet and oc adm top count it), sampled every second
 CGROUP=/sys/fs/cgroup
-mem_now() { cat "${CGROUP}/memory.current" 2> /dev/null || cat "${CGROUP}/memory/memory.usage_in_bytes" 2> /dev/null; }
+mem_now() {
+  local used inactive
+  if [ -r "${CGROUP}/memory.current" ]; then
+    used="$(cat "${CGROUP}/memory.current")" && inactive="$(awk '$1 == "inactive_file" { print $2 }' "${CGROUP}/memory.stat")"
+  else
+    used="$(cat "${CGROUP}/memory/memory.usage_in_bytes")" && inactive="$(awk '$1 == "total_inactive_file" { print $2 }' "${CGROUP}/memory/memory.stat")"
+  fi || return 1
+  [ "${inactive:-0}" -lt "$used" ] || inactive=0
+  echo $((used - ${inactive:-0}))
+}
 (
   max=0
-  while v="$(mem_now)"; do
-    if [ "$v" -gt "$max" ]; then max="$v" && echo "$max" > "${WORK}/mem.sampled"; fi
+  while v="$(mem_now 2> /dev/null)"; do
+    if [ "$v" -gt "$max" ]; then max="$v" && echo "$max" > "${WORK}/mem.peak"; fi
     sleep 1
   done
 ) &
 MEM_PID=$!
-mem_peak() {
-  local kernel sampled
-  kernel="$(cat "${CGROUP}/memory.peak" 2> /dev/null || cat "${CGROUP}/memory/memory.max_usage_in_bytes" 2> /dev/null || echo 0)"
-  sampled="$(cat "${WORK}/mem.sampled" 2> /dev/null || echo 0)"
-  [[ "$kernel" =~ ^[0-9]+$ ]] || kernel=0
-  if [ "$kernel" -gt "$sampled" ]; then echo "$kernel"; else echo "$sampled"; fi
-}
+mem_peak() { cat "${WORK}/mem.peak" 2> /dev/null || echo 0; }
 EXPECTED="${WORK}/expected.sql"
 VERIFY="${WORK}/verify.sql"
 

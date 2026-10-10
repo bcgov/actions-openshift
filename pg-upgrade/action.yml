@@ -70,7 +70,7 @@ outputs:
     description: Seconds from the start of the copy to the verified commit; for upgrade, how long writes were paused. Empty when nothing was copied
     value: ${{ steps.run.outputs.copy_seconds }}
   peak_memory_mib:
-    description: Peak memory of the Job container in MiB, page cache included, for sizing memory_limit. Empty when nothing was copied
+    description: Peak working set of the Job container in MiB (as oc adm top counts it, sampled every second), for sizing memory_limit. Empty when nothing was copied
     value: ${{ steps.run.outputs.peak_memory_mib }}
   rows:
     description: Rows copied and verified across all tables. Empty when nothing was copied

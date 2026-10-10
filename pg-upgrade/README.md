@@ -155,7 +155,7 @@ The source user must own the source database (or be a superuser) to pause writes
 | --- | --- |
 | `result` | `upgraded`, `already-upgraded`, `rehearsed`, `rolled-back`, or `skipped` (no source Service) |
 | `copy_seconds` | Seconds from the start of the copy to the verified commit. For `upgrade` this is how long writes were paused |
-| `peak_memory_mib` | The Job container's peak memory, page cache included, for sizing `memory_limit` |
+| `peak_memory_mib` | The Job container's peak working set (memory in use minus reclaimable page cache, as `oc adm top` shows it), sampled every second, for sizing `memory_limit` |
 | `rows` | Rows copied and verified across all tables |
 
 The last three are empty when nothing was copied. The same numbers, with the source and dump sizes, go in the job summary.
