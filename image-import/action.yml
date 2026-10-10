@@ -12,6 +12,14 @@ inputs:
     description: "ImageStream tag. Defaults to the tag in image, or the digest hex when image has no tag."
     required: false
     default: ""
+  token:
+    description: "Token GHCR accepts for this private package. Omit when the package is public."
+    required: false
+    default: ""
+  username:
+    description: "GitHub username for token. Required when token is set."
+    required: false
+    default: ""
   oc_namespace:
     description: "OpenShift namespace."
     required: true
@@ -39,5 +47,7 @@ runs:
         IMAGE: ${{ inputs.image }}
         NAME: ${{ inputs.name }}
         TAG: ${{ inputs.tag }}
+        TOKEN: ${{ inputs.token }}
+        USERNAME: ${{ inputs.username }}
         OC_NAMESPACE: ${{ inputs.oc_namespace }}
       run: bash "${ACTION_PATH}/import.sh"

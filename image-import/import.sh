@@ -73,6 +73,26 @@ if [[ ! "${tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
   exit 1
 fi
 
+if [ -n "${TOKEN:-}" ]; then
+  if [ -z "${USERNAME:-}" ]; then
+    echo "::error::username is required when token is set."
+    exit 1
+  fi
+  if [[ "${TOKEN}" =~ [[:space:]] || "${USERNAME}" =~ [[:space:]] ]]; then
+    echo "::error::token and username must not contain whitespace."
+    exit 1
+  fi
+  # Repository path, so this token is preferred over a host-wide ghcr.io secret.
+  secret="image-import-$(printf '%s' "${path}:${tag}" | sha256sum | cut -c1-20)"
+  trap 'oc delete secret "'"${secret}"'" --ignore-not-found >/dev/null' EXIT
+  oc delete secret "${secret}" --ignore-not-found >/dev/null
+  oc create secret docker-registry "${secret}" \
+    --docker-server="ghcr.io/${path}" \
+    --docker-username="${USERNAME}" \
+    --docker-password="${TOKEN}" \
+    --docker-email=unused
+fi
+
 echo "Importing ${stream}:${tag} from ${IMAGE}"
 oc import-image "${stream}:${tag}" \
   --from="${IMAGE}" \

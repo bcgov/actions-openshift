@@ -106,6 +106,36 @@ import_image() {
   [ "$(cat "${OC_LOG}")" = "import-image image-import:100 --from=ghcr.io/bcgov/quickstart-openshift/backend:latest --confirm --import-mode=PreserveOriginal --reference-policy=local" ]
 }
 
+@test "token creates a repository pull secret and deletes it" {
+  run env \
+    PATH="${D}/bin:${PATH}" \
+    OC_LOG="${OC_LOG}" \
+    OC_NAMESPACE=abc123-prod \
+    IMAGE="ghcr.io/bcgov/private-app/backend:1.2.3" \
+    TOKEN="test-token" \
+    USERNAME="octocat" \
+    bash "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  secret="image-import-$(printf '%s' "bcgov/private-app/backend:1.2.3" | sha256sum | cut -c1-20)"
+  [ "$(sed -n '1p' "${OC_LOG}")" = "delete secret ${secret} --ignore-not-found" ]
+  [ "$(sed -n '2p' "${OC_LOG}")" = "create secret docker-registry ${secret} --docker-server=ghcr.io/bcgov/private-app/backend --docker-username=octocat --docker-password=test-token --docker-email=unused" ]
+  [ "$(sed -n '3p' "${OC_LOG}")" = "import-image backend:1.2.3 --from=ghcr.io/bcgov/private-app/backend:1.2.3 --confirm --import-mode=PreserveOriginal --reference-policy=local" ]
+  [ "$(sed -n '4p' "${OC_LOG}")" = "delete secret ${secret} --ignore-not-found" ]
+}
+
+@test "token without username fails" {
+  run env \
+    PATH="${D}/bin:${PATH}" \
+    OC_LOG="${OC_LOG}" \
+    OC_NAMESPACE=abc123-prod \
+    IMAGE="ghcr.io/bcgov/private-app/backend:1.2.3" \
+    TOKEN="test-token" \
+    bash "${SCRIPT}"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"username is required"* ]]
+  [ ! -s "${OC_LOG}" ]
+}
+
 @test "three underscores in a repository component fails" {
   import_image "ghcr.io/acme/team___images/backend:tag"
   [ "$status" -eq 1 ]
