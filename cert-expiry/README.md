@@ -10,16 +10,24 @@ Pin a tag or commit SHA, not `@main`. The runner needs `openssl`, `jq` and `time
 
 Each repository schedules its own check. On findings, that job notifies its CODEOWNERS: the action fails the check step (`fail_on_findings`, default `true`) and always sets the `findings` output, then the next step runs [`workflow-notifier`](https://github.com/bcgov/actions/tree/main/workflow-notifier) with `if: failure()`. That opens an issue, or comments on the open one with the same title, assigned to the repository's CODEOWNERS. It reads CODEOWNERS from the workspace, so the job checks out the repository first.
 
-`bcgov/quickstart-openshift` doesn't run this action today. This is how a job in its `scheduled.yml` would check its prod hosts and notify CODEOWNERS:
+`bcgov/quickstart-openshift` doesn't run this action today. This is a complete standalone workflow (`.github/workflows/cert-expiry.yml`) that would check its prod hosts and notify CODEOWNERS. It can also live as a job in an existing `scheduled.yml`.
 
 - `${{ github.event.repository.name }}-prod.apps.silver.devops.gov.bc.ca`, the prod frontend Route. quickstart's `frontend/openshift.deploy.yml` sets the Route host to `${NAME}-${ZONE}.${DOMAIN}`, quickstart deploys prod with `NAME` = the repository name and `ZONE` = `prod`, and `DOMAIN` defaults to `apps.silver.devops.gov.bc.ca`.
 - `${{ vars.ROUTE_HOST }}`, the optional vanity hostname that quickstart's `route-tls.yml` serves. When it isn't set, the line is blank and skipped.
 
 ```yaml
-# .github/workflows/scheduled.yml
-jobs:
-  # ...stale-branches, ageOutPRs and the other scheduled jobs...
+# .github/workflows/cert-expiry.yml
+name: Cert Expiry
 
+on:
+  schedule:
+    # Monday 08:17 PT (15:17 UTC)
+    - cron: "17 15 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
   cert-expiry:
     name: TLS Certificate Expiry
     runs-on: ubuntu-slim
