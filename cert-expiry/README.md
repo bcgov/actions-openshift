@@ -1,21 +1,19 @@
 # Cert Expiry
 
-GitHub Action that warns before TLS certificates expire. For each hostname it runs a read-only `openssl s_client` handshake, reads the public leaf certificate's expiry date, and reports any certificate that expires within `days` (default 30), has expired, or can't be read.
+On findings, CODEOWNERS get notified: `workflow-notifier` opens an issue. The failing check step is only the mechanism that triggers that notify step.
 
-It needs no OpenShift credentials, no `oc` login and no `GITHUB_TOKEN`, and changes nothing. It prints only hostnames, expiry dates and days left. Installing a renewed certificate is [`route-tls`](../route-tls/README.md)'s job.
+For each hostname this action runs a read-only `openssl s_client` handshake, reads the public leaf certificate's expiry date, and reports any certificate that expires within `days` (default 30), has expired, or can't be read. It needs no OpenShift credentials, no `oc` login and no `GITHUB_TOKEN`, and changes nothing. It prints only hostnames, expiry dates and days left. Installing a renewed certificate is [`route-tls`](../route-tls/README.md)'s job.
 
 Pin a tag or commit SHA, not `@main`. The runner needs `openssl`, `jq` and `timeout` (all on `ubuntu-*` runners).
 
 ## Usage
 
-Each repository schedules its own check and notifies its own CODEOWNERS. The action only reports: it fails the step when a host needs attention (and always sets the `findings` output), so the next step can notify with `if: failure()`.
+Each repository schedules its own check. On findings, that job notifies its CODEOWNERS: the action fails the check step (`fail_on_findings`, default `true`) and always sets the `findings` output, then the next step runs [`workflow-notifier`](https://github.com/bcgov/actions/tree/main/workflow-notifier) with `if: failure()`. That opens an issue, or comments on the open one with the same title, assigned to the repository's CODEOWNERS. It reads CODEOWNERS from the workspace, so the job checks out the repository first.
 
-`bcgov/quickstart-openshift` doesn't run this action today. This is how a job in its `scheduled.yml` would check its prod hosts:
+`bcgov/quickstart-openshift` doesn't run this action today. This is how a job in its `scheduled.yml` would check its prod hosts and notify CODEOWNERS:
 
 - `${{ github.event.repository.name }}-prod.apps.silver.devops.gov.bc.ca`, the prod frontend Route. quickstart's `frontend/openshift.deploy.yml` sets the Route host to `${NAME}-${ZONE}.${DOMAIN}`, quickstart deploys prod with `NAME` = the repository name and `ZONE` = `prod`, and `DOMAIN` defaults to `apps.silver.devops.gov.bc.ca`.
 - `${{ vars.ROUTE_HOST }}`, the optional vanity hostname that quickstart's `route-tls.yml` serves. When it isn't set, the line is blank and skipped.
-
-[`workflow-notifier`](https://github.com/bcgov/actions/tree/main/workflow-notifier) then opens an issue, or comments on the open one with the same title, assigned to the repository's CODEOWNERS. It reads CODEOWNERS from the workspace, so the job checks out the repository first.
 
 ```yaml
 # .github/workflows/scheduled.yml
@@ -62,7 +60,7 @@ To notify only on certificate findings (not on an input error), give the check s
 | `hosts` | required | Hostnames, one per line (commas or spaces also work). `host` or `host:port`, no scheme; port defaults to 443. Blank lines and `#` comments are skipped. |
 | `days` | `30` | Warn when a certificate expires within this many days. Whole number, 1 to 3650. |
 | `timeout` | `10` | Seconds to wait for each handshake. Whole number, 1 to 120. |
-| `fail_on_findings` | `true` | Fail the step when any host needs attention, so a later step can notify with `if: failure()`. Outputs are written either way. |
+| `fail_on_findings` | `true` | Fail the step when any host needs attention, so the next step can notify with `if: failure()`. Outputs are written either way. |
 
 Invalid inputs (a URL instead of a hostname, a bad port, `days: 0`, an empty list) fail the step with an `::error::` line and a `Fix:` line.
 
