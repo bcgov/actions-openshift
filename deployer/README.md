@@ -1,7 +1,7 @@
 <!-- Badges -->
-[![Issues](https://img.shields.io/github/issues/bcgov/action-deployer-openshift)](/../../issues)
-[![Pull Requests](https://img.shields.io/github/issues-pr/bcgov/action-deployer-openshift)](/../../pulls)
-[![Apache 2.0 License](https://img.shields.io/github/license/bcgov/action-deployer-openshift.svg)](/LICENSE)
+[![Issues](https://img.shields.io/github/issues/bcgov/actions-openshift)](/../../issues)
+[![Pull Requests](https://img.shields.io/github/issues-pr/bcgov/actions-openshift)](/../../pulls)
+[![Apache 2.0 License](https://img.shields.io/github/license/bcgov/actions-openshift.svg)](/LICENSE)
 [![Lifecycle](https://img.shields.io/badge/Lifecycle-Experimental-339999)](https://github.com/bcgov/repomountie/blob/master/doc/lifecycle-badges.md)
 
 <!-- Reference-Style link -->
@@ -224,7 +224,7 @@ The DeploymentConfig API has been [deprecated by Red Hat](https://access.redhat.
 
 ## Parameters
 
-The parameters `delete_completed` and `post_rollout` are deprecated.  This functionality is better served by our [bcgov/action-oc-runner](https://github.com/bcgov/action-oc-runner) action.
+The parameters `delete_completed` and `post_rollout` are deprecated.  This functionality is better served by the sibling [`oc-runner`](../oc-runner/README.md) action.
 
 The parameters `verification_path`, `verification_retry_attempts` and `verification_retry_seconds` are deprecated.  Please use OpenShift [health checks](https://docs.openshift.com/container-platform/4.18/applications/application-health.html) instead.
 
