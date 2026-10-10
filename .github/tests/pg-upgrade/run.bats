@@ -18,6 +18,7 @@ setup() {
 echo "oc $*" >> "${STATE}/calls"
 case "$1 $2" in
   "get service")
+    [ -z "${OC_FAIL_SERVICE:-}" ] || { echo "Unable to connect to the server" >&2; exit 1; }
     for s in $SERVICES; do
       if [ "$s" = "$3" ]; then
         if [ "${4:-}" = "-o" ] && [ "$5" = json ]; then echo "{\"spec\":{\"selector\":{\"deployment\":\"$3\"}}}"; else echo "service/$3"; fi
@@ -41,6 +42,7 @@ case "$1 $2" in
   "patch configmap") echo done > "${STATE}/marker" ;;
   "delete configmap") rm -f "${STATE}/marker" ;;
   "delete networkpolicy") echo "$3" >> "${STATE}/deleted-np" ;;
+  "delete job") echo "$3" >> "${STATE}/deleted-job" ;;
 esac
 STUB
   chmod +x "${BATS_TEST_TMPDIR}/bin/oc"
@@ -106,11 +108,21 @@ job_json() { cat "${STATE}"/Job-*.json; }
   [ "$(wc -l < "${STATE}/deleted-np")" -eq 2 ]
 }
 
-@test "an image pull error fails fast" {
+@test "an image pull error fails fast, removes the Job and releases the lock" {
   export WAITING=ImagePullBackOff
   run_script
   [ "$status" -eq 1 ]
   [[ "$output" == *"can't pull image postgres:17.6"* ]]
+  grep -q '^pgup-upgrade-42-1-' "${STATE}/deleted-job"
+  [ ! -f "${STATE}/marker" ]
+}
+
+@test "an API error looking up the source fails instead of skipping" {
+  export OC_FAIL_SERVICE=1
+  run_script
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error::Could not read Service app-test-database from OpenShift."* ]]
+  ! grep -q 'result=skipped' "$GITHUB_OUTPUT"
 }
 
 @test "missing target Service fails before anything is created" {

@@ -51,7 +51,13 @@ case "${BASH_REMATCH[2]}" in s) SECONDS_MAX="${BASH_REMATCH[1]}" ;; m) SECONDS_M
 # Leave the runner a minute after the Job's own deadline to collect logs and clean up
 JOB_DEADLINE=$((SECONDS_MAX - 60))
 
-service_exists() { [ -n "$(oc get service "$1" --ignore-not-found -o name)" ]; }
+# API errors must fail, never read as "not found": a missing source means "skip"
+service_exists() {
+  local out
+  out="$(oc get service "$1" --ignore-not-found -o name)" \
+    || fail "Could not read Service $1 from OpenShift." "Re-run the job; if it repeats, check that the runner can reach the OpenShift API."
+  [ -n "$out" ]
+}
 
 if ! service_exists "$SOURCE"; then
   if [ "$MODE" = rollback ]; then
@@ -63,10 +69,10 @@ if ! service_exists "$SOURCE"; then
 fi
 
 MARKER="${TARGET:-$SOURCE}-pg-upgrade"
-marker_status() { oc get configmap "$MARKER" --ignore-not-found -o jsonpath='{.data.status}'; }
-
 if [ "$MODE" = upgrade ]; then
-  case "$(marker_status)" in
+  STATUS="$(oc get configmap "$MARKER" --ignore-not-found -o jsonpath='{.data.status}')" \
+    || fail "Could not read ConfigMap ${MARKER} from OpenShift." "Re-run the job; if it repeats, check that the runner can reach the OpenShift API."
+  case "$STATUS" in
     done)
       echo "${TARGET} was already upgraded from ${SOURCE} (ConfigMap ${MARKER}); nothing to do."
       result already-upgraded
@@ -94,11 +100,18 @@ labels_json() { # extra key=value pairs
 
 CREATED_MARKER=0
 NETPOLS=()
-JOB_OK=0
+# none: no Job yet; running: outcome unknown; failed or ok: the Job has finished
+JOB_STATE=none
 cleanup() {
   rc=$?
+  if [ "$JOB_STATE" = running ]; then
+    # The Job may still be copying: keep its network access and the lock, so no second run starts
+    echo "::error::Lost track of Job ${JOB}; it may still be running. ConfigMap ${MARKER} keeps other runs out."
+    echo "Fix: check oc logs job/${JOB}. If it succeeded, mark it done: oc patch configmap ${MARKER} --type merge -p '{\"data\":{\"status\":\"done\"}}'; if it failed, delete ConfigMap ${MARKER} and NetworkPolicies ${JOB}-*, then re-run."
+    exit "$rc"
+  fi
   for np in "${NETPOLS[@]}"; do oc delete networkpolicy "$np" --ignore-not-found > /dev/null 2>&1 || true; done
-  if [ "$CREATED_MARKER" = 1 ] && [ "$JOB_OK" != 1 ]; then
+  if [ "$CREATED_MARKER" = 1 ] && [ "$JOB_STATE" != ok ]; then
     oc delete configmap "$MARKER" --ignore-not-found > /dev/null 2>&1 || true
   fi
   exit "$rc"
@@ -159,36 +172,44 @@ jq -n --arg n "$JOB" --argjson l "$(labels_json)" --argjson pl "$POD_LABELS" --a
           {name: "data", mountPath: "/var/lib/postgresql/data"}]}],
       volumes: [{name: "work", emptyDir: {}}, {name: "socket", emptyDir: {}}, {name: "data", emptyDir: {}}]}}}}' \
   | oc create -f - > /dev/null || fail "Could not create Job ${JOB}." "The deploy token needs permission to create Jobs in the namespace."
+JOB_STATE=running
 echo "Started Job ${JOB} (${MODE}: ${SOURCE}${TARGET:+ -> ${TARGET}}, image ${IMAGE})"
 
 # Wait for the pod to start, failing fast on image or secret problems
 START=$(date +%s)
 POD=""
 while :; do
-  POD="$(oc get pods -l "job-name=${JOB}" -o name | head -n 1)"
+  # Polls tolerate a failed API call and try again
+  POD="$(oc get pods -l "job-name=${JOB}" -o name 2> /dev/null | head -n 1)" || POD=""
   if [ -n "$POD" ]; then
-    PHASE="$(oc get "$POD" -o jsonpath='{.status.phase}')"
-    WAITING="$(oc get "$POD" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}')"
+    PHASE="$(oc get "$POD" -o jsonpath='{.status.phase}' 2> /dev/null)" || PHASE=""
+    WAITING="$(oc get "$POD" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2> /dev/null)" || WAITING=""
     case "$WAITING" in
       ErrImagePull | ImagePullBackOff | InvalidImageName)
+        oc delete job "$JOB" --wait=true > /dev/null 2>&1 && JOB_STATE=failed
         fail "The Job can't pull image ${IMAGE} (${WAITING})." "Check the image name and tag on Docker Hub." ;;
       CreateContainerConfigError)
+        oc delete job "$JOB" --wait=true > /dev/null 2>&1 && JOB_STATE=failed
         fail "The Job can't start: a Secret or key is missing." "Check that ${SECRET}${TARGET:+ and ${TARGET_SECRET}} hold database-name, database-user and database-password." ;;
     esac
     case "$PHASE" in Running | Succeeded | Failed) break ;; esac
   fi
-  [ $(($(date +%s) - START)) -lt 300 ] || fail "Job ${JOB} did not start within 5 minutes." "Check quota and events: oc describe job ${JOB}"
+  if [ $(($(date +%s) - START)) -ge 300 ]; then
+    oc delete job "$JOB" --wait=true > /dev/null 2>&1 && JOB_STATE=failed
+    fail "Job ${JOB} did not start within 5 minutes." "Check quota and events in the namespace."
+  fi
   sleep "$POLL"
 done
 
 oc logs -f "$POD" || true
 
 while :; do
-  SUCCEEDED="$(oc get job "$JOB" -o jsonpath='{.status.succeeded}')"
-  FAILED="$(oc get job "$JOB" -o jsonpath='{.status.failed}')"
+  SUCCEEDED="$(oc get job "$JOB" -o jsonpath='{.status.succeeded}' 2> /dev/null)" || SUCCEEDED=""
+  FAILED="$(oc get job "$JOB" -o jsonpath='{.status.failed}' 2> /dev/null)" || FAILED=""
   [ "${SUCCEEDED:-0}" -ge 1 ] && break
   if [ "${FAILED:-0}" -ge 1 ]; then
-    REASON="$(oc get job "$JOB" -o jsonpath='{.status.conditions[?(@.type=="Failed")].reason}')"
+    JOB_STATE=failed
+    REASON="$(oc get job "$JOB" -o jsonpath='{.status.conditions[?(@.type=="Failed")].reason}' 2> /dev/null)" || REASON=""
     if [ "$REASON" = DeadlineExceeded ]; then
       fail "Job ${JOB} hit its ${JOB_DEADLINE}s deadline." "Raise timeout. If it was an upgrade and the source stays read-only, run mode: rollback."
     fi
@@ -198,7 +219,7 @@ while :; do
   sleep "$POLL"
 done
 
-JOB_OK=1
+JOB_STATE=ok
 case "$MODE" in
   upgrade)
     oc patch configmap "$MARKER" --type merge -p '{"data":{"status":"done"}}' > /dev/null \
