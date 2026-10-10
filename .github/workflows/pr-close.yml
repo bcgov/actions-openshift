@@ -37,3 +37,6 @@ jobs:
           commands: |
             oc delete imagestreamtag "image-import:${PR}" --ignore-not-found
             oc delete secret "image-import-${PR}" --ignore-not-found
+            if oc get secret ghcr >/dev/null 2>&1; then
+              oc annotate secret ghcr openshift.io/image.excludeSecret-
+            fi
