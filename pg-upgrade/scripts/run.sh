@@ -103,10 +103,12 @@ labels_json() { # extra key=value pairs
 
 CREATED_MARKER=0
 NETPOLS=()
+TMPFILES=()
 # none: no Job yet; running: outcome unknown; failed or ok: the Job has finished
 JOB_STATE=none
 cleanup() {
   rc=$?
+  rm -f "${TMPFILES[@]}"
   if [ "$JOB_STATE" = running ]; then
     # The Job may still be copying: keep its network access and the lock, so no second run starts
     echo "::error::Lost track of Job ${JOB}; it may still be running. ConfigMap ${MARKER} keeps other runs out."
@@ -143,15 +145,19 @@ allow_job_to() { # service suffix
     || fail "Could not read Service $1 from OpenShift." "Re-run the job; if it repeats, check that the runner can reach the OpenShift API."
   [ "$selector" != "{}" ] || fail "Service $1 has no selector, so its database pods can't be found." "Point source/target at the Service in front of the database pod."
   labelsel="$(jq -r 'to_entries | map("\(.key)=\(.value)") | join(",")' <<< "$selector")"
-  pods="$(oc get pods -l "$labelsel" -o json)" || fail "Could not list the pods behind Service $1." "Re-run the job."
-  nps="$(oc get networkpolicy -o json)" || fail "Could not list NetworkPolicies." "The deploy token needs to read NetworkPolicies in the namespace."
-  isolated="$(jq -n --argjson pods "$pods" --argjson nps "$nps" '
-    ($pods.items[0].metadata.labels // null) as $l
+  # Namespace-wide lists can exceed the argument limit, so jq reads them from files
+  pods="$(mktemp)"
+  nps="$(mktemp)"
+  TMPFILES+=("$pods" "$nps")
+  oc get pods -l "$labelsel" -o json > "$pods" || fail "Could not list the pods behind Service $1." "Re-run the job."
+  oc get networkpolicy -o json > "$nps" || fail "Could not list NetworkPolicies." "The deploy token needs to read NetworkPolicies in the namespace."
+  isolated="$(jq -rn --slurpfile pods "$pods" --slurpfile nps "$nps" '
+    ($pods[0].items[0].metadata.labels // null) as $l
     | if $l == null then "unknown" else
-        [$nps.items[] | select((.spec.policyTypes // ["Ingress"]) | index("Ingress")) | .spec.podSelector
+        [$nps[0].items[] | select((.spec.policyTypes // ["Ingress"]) | index("Ingress")) | .spec.podSelector
           | select((.matchExpressions // []) == [])
           | select((.matchLabels // {}) | to_entries | all(.value == $l[.key]))] | if length > 0 then "yes" else "no" end
-      end' -r)"
+      end')"
   if [ "$isolated" != yes ]; then
     echo "Service $1: no NetworkPolicy found that isolates its pods (${isolated}); adding none"
     return 0

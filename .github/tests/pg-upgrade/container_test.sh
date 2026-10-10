@@ -110,7 +110,8 @@ check "image major must match the target" fail "Target runs PostgreSQL 17 but th
   sleep 0.2
 done' > /dev/null
 sleep 1
-check "writes during the copy fail the upgrade" fail "The source changed during the copy" -- run_job "$PG_NEW" upgrade src tgt
+# Either check may catch it first: the write check, or a sequence that moved after the snapshot
+check "writes during the copy fail the upgrade" fail "The source changed during the copy|sequence public.audit_id_seq differs" -- run_job "$PG_NEW" upgrade src tgt
 "$ENGINE" exec src touch /tmp/stop-writer
 sleep 1
 equals "writes during the copy: target still empty" "$(sql tgt "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema')")" 0
