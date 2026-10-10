@@ -510,6 +510,44 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
+      - name: List image-secret registry hosts
+        uses: $/oc-runner
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            python3 - <<'PY'
+            import base64, json, subprocess
+            secrets = json.loads(subprocess.check_output(["oc", "get", "secrets", "-o", "json"]))
+            found = 0
+            for item in secrets.get("items", []):
+                kind = item.get("type")
+                if kind not in ("kubernetes.io/dockerconfigjson", "kubernetes.io/dockercfg"):
+                    continue
+                found += 1
+                meta = item["metadata"]
+                name = meta["name"]
+                exclude = (meta.get("annotations") or {}).get("openshift.io/image.excludeSecret", "")
+                data = item.get("data") or {}
+                try:
+                    if kind == "kubernetes.io/dockerconfigjson":
+                        cfg = json.loads(base64.b64decode(data.get(".dockerconfigjson", "")))
+                        keys = sorted((cfg.get("auths") or {}).keys())
+                    else:
+                        cfg = json.loads(base64.b64decode(data.get(".dockercfg", "")))
+                        keys = sorted(key for key in cfg if key != "HttpHeaders")
+                except Exception:
+                    print(f"secret {name} exclude={exclude or 'false'} registries=<unreadable>")
+                    continue
+                print(f"secret {name} exclude={exclude or 'false'} registries={','.join(keys) or '<none>'}")
+            print(f"docker-secrets {found}")
+            accounts = json.loads(subprocess.check_output(["oc", "get", "sa", "-o", "json"]))
+            for item in accounts.get("items", []):
+                pulls = [pull.get("name", "") for pull in (item.get("imagePullSecrets") or [])]
+                print(f"sa {item['metadata']['name']} pull={','.join(pulls) or '<none>'}")
+            PY
+
       - name: Import a public image onto this pull request's tag
         uses: $/image-import
         with:
