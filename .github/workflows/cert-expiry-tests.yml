@@ -1,0 +1,98 @@
+name: Cert Expiry Tests
+
+# Tests for the cert-expiry action: bats unit tests against local openssl
+# s_server certificates, and a live read of a known host (github.com) on both
+# ubuntu-26.04 and ubuntu-slim (the runner quickstart-openshift's scheduled
+# jobs use). Scheduling and notifying belong to each calling repository.
+
+on:
+  pull_request:
+    paths:
+      - .github/tests/cert-expiry/**
+      - .github/workflows/cert-expiry-tests.yml
+      - cert-expiry/**
+  push:
+    branches:
+      - main
+    paths:
+      - .github/tests/cert-expiry/**
+      - .github/workflows/cert-expiry-tests.yml
+      - cert-expiry/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  unit:
+    name: Test cert-expiry (bats)
+    permissions: {}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Unit tests (bats, 2 workers)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats parallel openssl
+          bats --jobs 2 .github/tests/cert-expiry
+
+  known-host:
+    name: Test cert-expiry (known host, ${{ matrix.runner }})
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-26.04, ubuntu-slim]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A 3650-day window flags any real certificate, so this proves a live
+      # read without depending on when github.com renews. The no-finding path
+      # is covered by the bats tests.
+      - name: Known host (github.com)
+        id: known
+        uses: $/cert-expiry
+        with:
+          hosts: github.com
+          days: "3650"
+          fail_on_findings: "false"
+
+      - name: Check known-host result
+        env:
+          FINDINGS: ${{ steps.known.outputs.findings }}
+          CHECKED: ${{ steps.known.outputs.checked }}
+        run: |
+          set -euo pipefail
+          [ "$CHECKED" = "1" ] || { echo "::error::Expected checked=1, got ${CHECKED}"; exit 1; }
+          jq -e 'length == 1 and .[0].host == "github.com" and .[0].status == "expiring" and (.[0].not_after | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T"))' <<< "$FINDINGS" > /dev/null \
+            || { echo "::error::Expected github.com as expiring with a read expiry date, got ${FINDINGS}"; exit 1; }
+          echo "Known-host check passed: $(jq -r '.[0].not_after' <<< "$FINDINGS")"
+
+      - name: Failing check fails the step (for if failure() notify)
+        id: failing
+        continue-on-error: true
+        uses: $/cert-expiry
+        with:
+          hosts: github.com
+          days: "3650"
+
+      - name: Check failing step outcome
+        env:
+          OUTCOME: ${{ steps.failing.outcome }}
+          FINDINGS: ${{ steps.failing.outputs.findings }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::Expected the step to fail, got ${OUTCOME}"; exit 1; }
+          jq -e 'length == 1' <<< "$FINDINGS" > /dev/null || { echo "::error::Expected findings on failure, got ${FINDINGS}"; exit 1; }
+          echo "Failing step failed and still set findings"
