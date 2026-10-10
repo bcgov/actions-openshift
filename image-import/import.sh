@@ -54,13 +54,23 @@ if [[ ! "${path}" =~ ^[a-z0-9]+(([.]|_{1,2}|-+)[a-z0-9]+)*(/[a-z0-9]+(([.]|_{1,2
 fi
 
 stream="${path##*/}"
+if [ -n "${NAME:-}" ]; then
+  stream="${NAME}"
+fi
 # DNS-1123 subdomain, which allows repeated internal hyphens.
 if [[ ! "${stream}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$ ]] || [ "${#stream}" -gt 253 ]; then
   echo "::error::ImageStream name '${stream}' must be a DNS-1123 name."
   exit 1
 fi
+if [ -n "${TAG:-}" ]; then
+  tag="${TAG}"
+fi
 if [ -z "${tag}" ]; then
   tag="${digest#sha256:}"
+fi
+if [[ ! "${tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+  echo "::error::tag '${tag}' is not a valid ImageStream tag."
+  exit 1
 fi
 
 echo "Importing ${stream}:${tag} from ${IMAGE}"

@@ -93,6 +93,19 @@ import_image() {
   [[ "$(cat "${OC_LOG}")" == import-image\ my--backend:tag\ * ]]
 }
 
+@test "name and tag override the ImageStream destination" {
+  run env \
+    PATH="${D}/bin:${PATH}" \
+    OC_LOG="${OC_LOG}" \
+    OC_NAMESPACE=abc123-prod \
+    IMAGE="ghcr.io/bcgov/quickstart-openshift/backend:latest" \
+    NAME="image-import" \
+    TAG="100" \
+    bash "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${OC_LOG}")" = "import-image image-import:100 --from=ghcr.io/bcgov/quickstart-openshift/backend:latest --confirm --import-mode=PreserveOriginal --reference-policy=local" ]
+}
+
 @test "three underscores in a repository component fails" {
   import_image "ghcr.io/acme/team___images/backend:tag"
   [ "$status" -eq 1 ]

@@ -24,7 +24,15 @@ Pin a tag or commit SHA, not `@main`. `oc-runner` checks out the caller repo, so
 
 A digest pin keeps the tag and adds `@sha256:<64 hex>`: `ghcr.io/owner/name:pr-42@sha256:…`. A digest with no tag becomes an ImageStream tag of those 64 hex characters.
 
-The ImageStream name is the last path segment. That segment must be a DNS-1123 name. The tag comes from the reference, so a pull request uses its number: `ghcr.io/owner/name/backend:100` imports `backend:100`. Delete that tag when the pull request closes. Deleting the ImageStream removes every pull request's tag.
+`name` and `tag` set the ImageStream destination. They default to the last path segment and the reference tag. A pull request can import one shared image onto its own tag:
+
+```yaml
+image: ghcr.io/bcgov/quickstart-openshift/backend:latest
+name: image-import
+tag: ${{ github.event.number }}
+```
+
+Delete that tag when the pull request closes. Deleting the ImageStream removes every pull request's tag.
 
 ```yaml
 oc delete imagestreamtag backend:${{ github.event.number }} --ignore-not-found
