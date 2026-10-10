@@ -365,22 +365,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
-          ROUTE_TLS_RESULT: ${{ needs.test-route-tls.result }}
         run: |
           set -euo pipefail
           jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" --paginate \
-            --jq '.jobs[] | "\(.id)\t\(.name)"')"
+            --jq '.jobs[] | "\(.id)\t\(.name)\t\(.conclusion)"')"
           failed=0
-          names=()
-          if [ "$ROUTE_TLS_RESULT" != "skipped" ]; then
-            names+=("Test Route TLS")
-          else
-            echo "Test Route TLS skipped; not scanning its log"
-          fi
-          names+=("Fork Token Degradation Matrix (route-tls-isolated)")
-          for name in "${names[@]}"; do
+          for name in "Test Route TLS" "Fork Token Degradation Matrix (route-tls-isolated)"; do
             job_id="$(awk -F'\t' -v n="$name" '$2 == n { print $1 }' <<< "$jobs")"
+            conclusion="$(awk -F'\t' -v n="$name" '$2 == n { print $3 }' <<< "$jobs")"
             [ -n "$job_id" ] || { echo "::error::${name} job not found"; exit 1; }
+            if [ "$conclusion" = "skipped" ]; then
+              echo "${name} skipped; not scanning its log"
+              continue
+            fi
             log="${RUNNER_TEMP}/${job_id}.log"
             # Raw logs hold ANSI colour codes; the log is only scanned, never printed
             gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" > "$log"
@@ -398,6 +395,7 @@ jobs:
 
   test-fork-token-degradation:
     name: Fork Token Degradation Matrix (${{ matrix.scenario.name }})
+    needs: route-tls-changes
     permissions: read-all
     runs-on: ubuntu-26.04
     strategy:
@@ -480,7 +478,7 @@ jobs:
           fi
 
       - name: Generate dummy certificates
-        if: matrix.scenario.type == 'composite-action'
+        if: matrix.scenario.type == 'composite-action' && needs.route-tls-changes.outputs.triggered == 'true'
         run: |
           set -euo pipefail
           openssl req -x509 -newkey rsa:2048 -keyout /tmp/fork-key.pem -out /tmp/fork-cert.pem \
@@ -506,7 +504,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Composite action dry-run (quarantined workspace)
-        if: matrix.scenario.type == 'composite-action'
+        if: matrix.scenario.type == 'composite-action' && needs.route-tls-changes.outputs.triggered == 'true'
         uses: $/route-tls
         with:
           hostname: myapp.bcgov.ca
@@ -520,7 +518,7 @@ jobs:
           dry_run: "true"
 
       - name: Validate generated route output
-        if: matrix.scenario.type == 'composite-action'
+        if: matrix.scenario.type == 'composite-action' && needs.route-tls-changes.outputs.triggered == 'true'
         run: |
           set -euo pipefail
           [ -f route.yml ] || { echo "::error::route.yml was not created"; exit 1; }
