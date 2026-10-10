@@ -39,7 +39,7 @@ setup() {
   export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/output"
   export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary"
   : > "$GITHUB_OUTPUT"
-  export INPUT_HOSTS="" INPUT_HOSTS_FILE="" INPUT_DAYS=30 INPUT_TIMEOUT=5 INPUT_FAIL_ON_FINDINGS=true
+  export INPUT_HOSTS="" INPUT_DAYS=30 INPUT_TIMEOUT=5 INPUT_FAIL_ON_FINDINGS=true
 }
 
 findings() {
@@ -90,13 +90,6 @@ findings() {
   grep -qx "checked=2" "$GITHUB_OUTPUT"
 }
 
-@test "hosts_file: comments skipped, entries de-duplicated, combined with hosts" {
-  printf '# routes\nlocalhost:%s  # prod\n\nLOCALHOST:%s,localhost:%s\n' "$OK_PORT" "$OK_PORT" "$SOON_PORT" > "${BATS_TEST_TMPDIR}/hosts.txt"
-  INPUT_HOSTS="localhost:${OK_PORT}" INPUT_HOSTS_FILE="${BATS_TEST_TMPDIR}/hosts.txt" INPUT_DAYS=1 run bash "$SCRIPT"
-  [ "$status" -eq 0 ]
-  grep -qx "checked=2" "$GITHUB_OUTPUT"
-}
-
 @test "never prints certificate or key material" {
   INPUT_HOSTS="localhost:${OK_PORT} localhost:${SOON_PORT} localhost:${OLD_PORT}" run bash "$SCRIPT"
   [[ "$output" != *"BEGIN"* ]]
@@ -129,11 +122,14 @@ findings() {
   done
 }
 
-@test "empty list and missing hosts_file fail with Fix lines" {
+@test "empty host list fails with a Fix line" {
   INPUT_HOSTS=$'  \n# only a comment\n' run bash "$SCRIPT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"::error::No hostnames to check."*"Fix: "* ]]
-  INPUT_HOSTS_FILE="${BATS_TEST_TMPDIR}/missing.txt" run bash "$SCRIPT"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"::error::hosts_file"*"Fix: "* ]]
+}
+
+@test "multi-line hosts: blank lines and comments skipped, duplicates removed" {
+  INPUT_HOSTS=$'localhost:'"${OK_PORT}"$'\n\n# vanity host unset\nLOCALHOST:'"${OK_PORT}"$', localhost:'"${SOON_PORT}" INPUT_DAYS=1 run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -qx "checked=2" "$GITHUB_OUTPUT"
 }

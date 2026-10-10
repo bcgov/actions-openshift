@@ -5,7 +5,6 @@
 set -euo pipefail
 
 HOSTS="${INPUT_HOSTS:-}"
-HOSTS_FILE="${INPUT_HOSTS_FILE:-}"
 DAYS="${INPUT_DAYS-30}"
 TIMEOUT="${INPUT_TIMEOUT-10}"
 FAIL_ON_FINDINGS="${INPUT_FAIL_ON_FINDINGS-true}"
@@ -40,10 +39,6 @@ case "$FAIL_ON_FINDINGS" in
 esac
 
 LIST="$HOSTS"
-if [[ -n "$HOSTS_FILE" ]]; then
-  [[ -f "$HOSTS_FILE" ]] || fail "hosts_file '${HOSTS_FILE}' does not exist." "Check the path (relative to the workspace) and that actions/checkout ran first."
-  LIST+=$'\n'"$(< "$HOSTS_FILE")"
-fi
 
 # Parse: drop comments, split on commas and whitespace, validate, de-duplicate
 LABEL='[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
@@ -71,7 +66,7 @@ while IFS= read -r line; do
   done
 done <<< "$LIST"
 
-((${#ENTRIES[@]} > 0)) || fail "No hostnames to check." "Set hosts, or hosts_file pointing at a file with one hostname per line."
+((${#ENTRIES[@]} > 0)) || fail "No hostnames to check." "Set hosts to one or more hostnames, one per line."
 
 NOW=$(date -u +%s)
 WINDOW=$((DAYS * 86400))

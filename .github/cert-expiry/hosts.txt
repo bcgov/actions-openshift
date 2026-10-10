@@ -1,5 +1,0 @@
-# Hostnames checked weekly by .github/workflows/cert-expiry.yml
-# One per line: host or host:port (port defaults to 443), no scheme. # starts a comment.
-# Derek supplies the real list; this starter entry is quickstart-openshift's TEST
-# route (its e2e base URL), which serves the platform wildcard certificate.
-quickstart-openshift-test.apps.silver.devops.gov.bc.ca
