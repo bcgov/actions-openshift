@@ -127,3 +127,15 @@ import_image() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"ghcr.io/<owner>/<name>"* ]]
 }
+
+@test "every invalid input prints a Fix line" {
+  for image in "" "docker.io/library/nginx:1.27" "ghcr.io/bcgov/app/backend" \
+    "ghcr.io/bcgov/app/backend@sha256:abc" "ghcr.io/bcgov/app/my_backend:latest" \
+    "ghcr.io/bcgov/App/backend:latest" "ghcr.io/bcgov/app/backend:-bad"; do
+    import_image "${image}"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error::"* ]]
+    [[ "$output" == *"Fix: "* ]]
+  done
+  [ ! -s "${OC_LOG}" ]
+}

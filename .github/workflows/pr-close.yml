@@ -36,7 +36,7 @@ jobs:
           oc_token: ${{ secrets.OC_TOKEN }}
           commands: |
             oc delete imagestreamtag "image-import:${PR}" --ignore-not-found
-            oc delete secret "image-import-${PR}" --ignore-not-found
-            if oc get secret ghcr >/dev/null 2>&1; then
-              oc annotate secret ghcr openshift.io/image.excludeSecret-
+            if oc get secret ghcr >/dev/null 2>&1 \
+              && [ "$(oc get secret ghcr -o json | jq -r '.metadata.annotations["actions-openshift.bcgov/image-import-pr"] // ""')" = "${PR}" ]; then
+              oc annotate secret ghcr openshift.io/image.excludeSecret- actions-openshift.bcgov/image-import-pr-
             fi

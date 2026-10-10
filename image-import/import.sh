@@ -1,21 +1,24 @@
 #!/bin/bash
 set -euo pipefail
 
-if [ -z "${IMAGE:-}" ]; then
-  echo "::error::image is required. Pass a ghcr.io reference with a tag or sha256 digest."
+# $1 = error, $2 = fix. Never put the token in either.
+fail() {
+  echo "::error::$1"
+  echo "Fix: $2"
   exit 1
+}
+
+if [ -z "${IMAGE:-}" ]; then
+  fail "image is required. Pass a ghcr.io reference with a tag or sha256 digest." "Set image to ghcr.io/<owner>/<name>:<tag>."
 fi
 if [ -z "${OC_NAMESPACE:-}" ]; then
-  echo "::error::oc_namespace is required."
-  exit 1
+  fail "oc_namespace is required." "Set oc_namespace to the target namespace, e.g. abc123-dev."
 fi
 if [[ "${IMAGE}" =~ [[:space:]] ]]; then
-  echo "::error::image must not contain whitespace."
-  exit 1
+  fail "image must not contain whitespace." "Remove spaces and newlines from image."
 fi
 if [[ "${IMAGE}" != ghcr.io/* ]]; then
-  echo "::error::image must be a ghcr.io reference."
-  exit 1
+  fail "image must be a ghcr.io reference." "Use an image published to GHCR: ghcr.io/<owner>/<name>:<tag>."
 fi
 
 ref="${IMAGE#ghcr.io/}"
@@ -24,8 +27,7 @@ if [[ "${ref}" == *@* ]]; then
   digest="${ref#*@}"
   ref="${ref%%@*}"
   if [[ ! "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
-    echo "::error::digest must be @sha256: followed by 64 lowercase hex characters."
-    exit 1
+    fail "digest must be @sha256: followed by 64 lowercase hex characters." "Copy the full digest, e.g. @sha256:<64 hex>, from the builder digest output."
   fi
 fi
 
@@ -36,21 +38,17 @@ if [[ "${path}" == *:* ]]; then
   path="${path%%:*}"
 fi
 if [[ "${path}" == *[:@]* ]]; then
-  echo "::error::image must contain one tag, one digest, or a tag and a digest."
-  exit 1
+  fail "image must contain one tag, one digest, or a tag and a digest." "Use ghcr.io/<owner>/<name>:<tag>, @sha256:<hex>, or :<tag>@sha256:<hex>."
 fi
 if [ -z "${tag}" ] && [ -z "${digest}" ]; then
-  echo "::error::image needs a tag or a sha256 digest."
-  exit 1
+  fail "image needs a tag or a sha256 digest." "Append :<tag> or @sha256:<hex> to image."
 fi
 if [ -n "${tag}" ] && [[ ! "${tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-  echo "::error::tag '${tag}' is not a valid ImageStream tag."
-  exit 1
+  fail "tag '${tag}' is not a valid ImageStream tag." "Set tag, or the image tag, to up to 128 letters, digits, '_', '.', or '-', starting with a letter, digit, or '_'."
 fi
 # OCI name component: alphanumerics, separated by ".", "_", "__", or one or more "-".
 if [[ ! "${path}" =~ ^[a-z0-9]+(([.]|_{1,2}|-+)[a-z0-9]+)*(/[a-z0-9]+(([.]|_{1,2}|-+)[a-z0-9]+)*)+$ ]]; then
-  echo "::error::image path must be ghcr.io/<owner>/<name> in lowercase."
-  exit 1
+  fail "image path must be ghcr.io/<owner>/<name> in lowercase." "Lowercase the owner and name, and include both: ghcr.io/<owner>/<name>."
 fi
 
 stream="${path##*/}"
@@ -59,8 +57,7 @@ if [ -n "${NAME:-}" ]; then
 fi
 # DNS-1123 subdomain, which allows repeated internal hyphens.
 if [[ ! "${stream}" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$ ]] || [ "${#stream}" -gt 253 ]; then
-  echo "::error::ImageStream name '${stream}' must be a DNS-1123 name."
-  exit 1
+  fail "ImageStream name '${stream}' must be a DNS-1123 name." "Set name to lowercase letters, digits, '-', and '.', starting and ending with a letter or digit."
 fi
 if [ -n "${TAG:-}" ]; then
   tag="${TAG}"
@@ -69,14 +66,12 @@ if [ -z "${tag}" ]; then
   tag="${digest#sha256:}"
 fi
 if [[ ! "${tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-  echo "::error::tag '${tag}' is not a valid ImageStream tag."
-  exit 1
+  fail "tag '${tag}' is not a valid ImageStream tag." "Set tag, or the image tag, to up to 128 letters, digits, '_', '.', or '-', starting with a letter, digit, or '_'."
 fi
 
 if [ -n "${TOKEN:-}" ]; then
   if [[ "${TOKEN}" =~ [[:space:]] ]]; then
-    echo "::error::github_token must not contain whitespace."
-    exit 1
+    fail "github_token must not contain whitespace." "Pass the token unchanged, e.g. secrets.GITHUB_TOKEN."
   fi
   # Repository path, so this token is preferred over a host-wide ghcr.io secret.
   # docker-registry requires a username field; GHCR authenticates the token.

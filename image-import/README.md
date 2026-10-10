@@ -10,14 +10,24 @@ Pin a tag or commit SHA, not `@main`. `oc-runner` checks out the caller repo, so
 
 ## Usage
 
-`builder` publishes `registry_host` (`ghcr.io`) and `image_path` (`/owner/repo/image:tag`). Join them:
+In quickstart-openshift's `pr-open.yml`, the Builds job (matrix `backend`, `frontend`, `migrations`) runs `bcgov/action-builder-ghcr`. Give that step `id: build` and import what it published. `registry_host` is `ghcr.io` and `image_path` is `/owner/repo/package:tag`, using the first tag, so this imports `backend:<pr>`:
 
 ```yaml
+- uses: bcgov/action-builder-ghcr@<sha> # vX.Y.Z
+  id: build
+  with:
+    package: ${{ matrix.package }}
+    tags: |
+      ${{ github.event.number }}
+      ${{ github.event.pull_request.head.sha }}
+    tag_fallback: latest
+    triggers: ('${{ matrix.package }}/', '.github/workflows/pr-open.yml')
+
 - name: Import into OpenShift
   uses: bcgov/actions-openshift/image-import@vX.Y.Z
   with:
     image: ${{ steps.build.outputs.registry_host }}${{ steps.build.outputs.image_path }}
-    oc_namespace: ${{ vars.OC_NAMESPACE }}
+    oc_namespace: ${{ secrets.OC_NAMESPACE }}
     oc_server: ${{ vars.OC_SERVER }}
     oc_token: ${{ secrets.OC_TOKEN }}
 ```
@@ -34,13 +44,36 @@ tag: ${{ github.event.number }}
 
 OpenShift needs `oc_namespace`, `oc_server`, and `oc_token`. A private package also needs `github_token`. Omit `github_token` for a public package. The pull secret is limited to that repository and deleted after the import.
 
-```yaml
-image: ghcr.io/bcgov/private-app/backend:1.2.3
-github_token: ${{ secrets.GITHUB_TOKEN }}
-```
-
-Delete that tag when the pull request closes. Deleting the ImageStream removes every pull request's tag.
+`secrets.GITHUB_TOKEN` can read the package only when the job grants `packages: read`. A package published by another repository must also give the calling repository read access in the package's **Manage Actions access** settings. Otherwise GHCR denies the import.
 
 ```yaml
-oc delete imagestreamtag backend:${{ github.event.number }} --ignore-not-found
+permissions:
+  contents: read
+  packages: read
+steps:
+  - uses: bcgov/actions-openshift/image-import@vX.Y.Z
+    with:
+      image: ghcr.io/bcgov/private-app/backend:1.2.3
+      github_token: ${{ secrets.GITHUB_TOKEN }}
+      oc_namespace: ${{ secrets.OC_NAMESPACE }}
+      oc_server: ${{ vars.OC_SERVER }}
+      oc_token: ${{ secrets.OC_TOKEN }}
 ```
+
+Delete those tags when the pull request closes, for example from a `pr-close.yml` step. Deleting the ImageStream removes every pull request's tag.
+
+```yaml
+- uses: bcgov/actions-openshift/oc-runner@vX.Y.Z
+  env:
+    PR: ${{ github.event.number }}
+  with:
+    oc_namespace: ${{ secrets.OC_NAMESPACE }}
+    oc_server: ${{ vars.OC_SERVER }}
+    oc_token: ${{ secrets.OC_TOKEN }}
+    commands: |
+      for package in backend frontend migrations; do
+        oc delete imagestreamtag "${package}:${PR}" --ignore-not-found
+      done
+```
+
+Invalid inputs fail before the import, with an `::error::` line and a `Fix:` line.

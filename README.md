@@ -20,7 +20,7 @@ Imports one GHCR image into a namespace ImageStream (`referencePolicy: Local`, `
 - uses: bcgov/actions-openshift/image-import@vX.Y.Z
   with:
     image: ${{ steps.build.outputs.registry_host }}${{ steps.build.outputs.image_path }}
-    oc_namespace: ${{ vars.OC_NAMESPACE }}
+    oc_namespace: ${{ secrets.OC_NAMESPACE }}
     oc_server: ${{ vars.OC_SERVER }}
     oc_token: ${{ secrets.OC_TOKEN }}
 ```
