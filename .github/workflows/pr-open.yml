@@ -522,7 +522,9 @@ jobs:
           oc_server: ${{ vars.OC_SERVER }}
           oc_token: ${{ secrets.OC_TOKEN }}
 
-      - name: Confirm the pull-request tag
+      # Checked apart from the action: the tag's source and its digest match GHCR's
+      # manifest list digest for the public image
+      - name: Confirm the pull-request tag and digest
         uses: $/oc-runner
         env:
           PR: ${{ github.event.number }}
@@ -535,6 +537,17 @@ jobs:
             from="$(oc get imagestreamtag "image-import:${PR}" -o jsonpath='{.tag.from.name}')"
             if [ "$from" != "$IMAGE" ]; then
               echo "::error::ImageStream tag image-import:${PR} points at '${from}', expected '${IMAGE}'."
+              exit 1
+            fi
+            bearer="$(curl -fsS --retry 3 "https://ghcr.io/token?scope=repository:bcgov/quickstart-openshift/backend:pull&service=ghcr.io" | jq -r .token)"
+            ghcr="$(curl -fsSI --retry 3 -H "Authorization: Bearer ${bearer}" \
+              -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+              "https://ghcr.io/v2/bcgov/quickstart-openshift/backend/manifests/latest" \
+              | tr -d '\r' | awk 'tolower($0) ~ /^docker-content-digest:/ { sub(/^[^:]*:[ \t]*/, ""); print }')"
+            cluster="$(oc get imagestream image-import -o jsonpath="{.status.tags[?(@.tag==\"${PR}\")].items[0].image}")"
+            echo "GHCR ${ghcr}, ImageStream ${cluster}"
+            if [[ ! "$ghcr" =~ ^sha256:[a-f0-9]{64}$ ]] || [ "$cluster" != "$ghcr" ]; then
+              echo "::error::image-import:${PR} digest '${cluster}' does not match GHCR '${ghcr}'."
               exit 1
             fi
 

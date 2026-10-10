@@ -1,5 +1,5 @@
 name: "Image Import"
-description: "Import one GHCR image into the namespace ImageStream so workloads can pull it from the internal registry."
+description: "Import one GHCR image into the namespace ImageStream, verify its digest against GHCR, so workloads can pull it from the internal registry."
 inputs:
   image:
     description: "Full GHCR reference. ghcr.io/owner/name:tag, ghcr.io/owner/name@sha256:<hex>, or ghcr.io/owner/name:tag@sha256:<hex>."

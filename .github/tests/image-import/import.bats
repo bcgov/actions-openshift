@@ -4,10 +4,17 @@ setup() {
   SCRIPT="${BATS_TEST_DIRNAME}/../../../image-import/import.sh"
   D="${BATS_TEST_TMPDIR}"
   mkdir -p "${D}/bin"
-  export OC_LOG="${D}/oc.log"
-  : > "${OC_LOG}"
+  export OC_LOG="${D}/oc.log" OC_GET_LOG="${D}/oc-get.log" CURL_LOG="${D}/curl.log"
+  : > "${OC_LOG}"; : > "${OC_GET_LOG}"; : > "${CURL_LOG}"
+  export GHCR_DIGEST="sha256:$(printf 'c%.0s' {1..64})"
+  export IS_DIGEST="${GHCR_DIGEST}"
   cat > "${D}/bin/oc" << 'STUB'
 #!/bin/bash
+if [ "$1" = "get" ]; then
+  printf '%s\n' "$*" >> "$OC_GET_LOG"
+  printf '%s' "${IS_DIGEST}"
+  exit 0
+fi
 printf '%s\n' "$*" >> "$OC_LOG"
 if [ "${OC_FAIL:-}" = "1" ]; then
   echo "import failed" >&2
@@ -15,6 +22,19 @@ if [ "${OC_FAIL:-}" = "1" ]; then
 fi
 exit 0
 STUB
+  # GHCR: the token endpoint returns a bearer token, a manifest HEAD returns the digest
+  cat > "${D}/bin/curl" << 'STUB'
+#!/bin/bash
+config=""
+for a in "$@"; do [ "$a" = "-" ] && config="$(cat)"; done
+printf '%s | %s\n' "$*" "${config}" >> "$CURL_LOG"
+case "$*" in
+  *ghcr.io/token*) printf '{"token":"bearer-1"}' ;;
+  *ghcr.io/v2/*) printf 'HTTP/2 200\r\ndocker-content-digest: %s\r\n\r\n' "${GHCR_DIGEST}" ;;
+  *) exit 22 ;;
+esac
+STUB
+  chmod +x "${D}/bin/curl"
   chmod +x "${D}/bin/oc"
 }
 
@@ -36,6 +56,7 @@ import_image() {
 
 @test "digest without a tag uses the hex as the ImageStream tag" {
   digest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  IS_DIGEST="sha256:${digest}"
   import_image "ghcr.io/bcgov/app/backend@sha256:${digest}"
   [ "$status" -eq 0 ]
   [ "$(cat "${OC_LOG}")" = "import-image backend:${digest} --from=ghcr.io/bcgov/app/backend@sha256:${digest} --confirm --import-mode=PreserveOriginal --reference-policy=local" ]
@@ -43,6 +64,7 @@ import_image() {
 
 @test "tag and digest keeps the tag and pins --from" {
   digest="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  IS_DIGEST="sha256:${digest}"
   import_image "ghcr.io/bcgov/app/backend:pr-7@sha256:${digest}"
   [ "$status" -eq 0 ]
   [ "$(cat "${OC_LOG}")" = "import-image backend:pr-7 --from=ghcr.io/bcgov/app/backend:pr-7@sha256:${digest} --confirm --import-mode=PreserveOriginal --reference-policy=local" ]
@@ -139,4 +161,66 @@ import_image() {
     [[ "$output" == *"Fix: "* ]]
   done
   [ ! -s "${OC_LOG}" ]
+}
+
+@test "digest pin is the expected digest and skips the GHCR lookup" {
+  digest="dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  IS_DIGEST="sha256:${digest}"
+  import_image "ghcr.io/bcgov/app/backend:pr-7@sha256:${digest}"
+  [ "$status" -eq 0 ]
+  [ ! -s "${CURL_LOG}" ]
+  [[ "$output" == *"Verified backend:pr-7 digest sha256:${digest}"* ]]
+}
+
+@test "matching digest asks GHCR for the manifest list and passes" {
+  import_image "ghcr.io/bcgov/quickstart-openshift/backend:pr-42"
+  [ "$status" -eq 0 ]
+  grep -q 'ghcr.io/token?scope=repository:bcgov/quickstart-openshift/backend:pull' "${CURL_LOG}"
+  grep -q 'application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' "${CURL_LOG}"
+  grep -q 'https://ghcr.io/v2/bcgov/quickstart-openshift/backend/manifests/pr-42 | header = "Authorization: Bearer bearer-1"' "${CURL_LOG}"
+  [ "$(cat "${OC_GET_LOG}")" = 'get imagestream backend -o jsonpath={.status.tags[?(@.tag=="pr-42")].items[0].image}' ]
+  [[ "$output" == *"Verified backend:pr-42 digest ${GHCR_DIGEST}"* ]]
+}
+
+@test "GHCR lookup uses the source tag when tag overrides the destination" {
+  run env PATH="${D}/bin:${PATH}" OC_NAMESPACE=abc123-prod \
+    IMAGE="ghcr.io/bcgov/quickstart-openshift/backend:latest" NAME=image-import TAG=100 \
+    bash "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  grep -q 'manifests/latest |' "${CURL_LOG}"
+  grep -q 'tag=="100"' "${OC_GET_LOG}"
+}
+
+@test "token authenticates the GHCR digest lookup as the actor" {
+  run env PATH="${D}/bin:${PATH}" OC_NAMESPACE=abc123-prod \
+    IMAGE="ghcr.io/bcgov/private-app/backend:1.2.3" TOKEN=test-token ACTOR=octocat \
+    bash "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  grep -q 'ghcr.io/token?scope=repository:bcgov/private-app/backend:pull.* | user = "octocat:test-token"' "${CURL_LOG}"
+}
+
+@test "digest mismatch after the import fails with a Fix line" {
+  IS_DIGEST="sha256:$(printf 'e%.0s' {1..64})"
+  import_image "ghcr.io/bcgov/app/backend:latest"
+  [ "$status" -eq 1 ]
+  grep -q '^import-image ' "${OC_LOG}"
+  [[ "$output" == *"::error::ImageStream tag backend:latest holds '${IS_DIGEST}', but GHCR serves ${GHCR_DIGEST}"* ]]
+  [[ "$output" == *"Fix: "* ]]
+  [[ "$output" != *"Verified"* ]]
+}
+
+@test "empty ImageStream digest fails" {
+  IS_DIGEST=""
+  import_image "ghcr.io/bcgov/app/backend:latest"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"holds 'no image'"* ]]
+  [[ "$output" == *"Fix: "* ]]
+}
+
+@test "unreadable GHCR digest fails with a Fix line" {
+  GHCR_DIGEST="not-a-digest"
+  import_image "ghcr.io/bcgov/app/backend:latest"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error::Could not read the GHCR digest of ghcr.io/bcgov/app/backend:latest."* ]]
+  [[ "$output" == *"Fix: "* ]]
 }

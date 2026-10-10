@@ -4,6 +4,8 @@ Imports one GHCR image into an ImageStream in the target namespace. `importMode:
 
 Import stores the manifest. It does not copy layer blobs. A platform that has not been pulled yet still needs GHCR.
 
+After the import, the action checks that the ImageStream tag holds the digest GHCR serves for `image`: the manifest list digest for a multi-arch image, or the pinned digest when `image` has `@sha256:`. A mismatch, or a GHCR digest it cannot read, fails the step with an `::error::` line and a `Fix:` line. There is no warn-only mode.
+
 Point the workload at the printed in-cluster pull spec. Deployments that still use `ghcr.io/...` are unchanged by a successful import.
 
 Pin a tag or commit SHA, not `@main`. `oc-runner` checks out the caller repo, so a private repository needs `contents: read` on the job.
@@ -42,7 +44,7 @@ name: image-import
 tag: ${{ github.event.number }}
 ```
 
-OpenShift needs `oc_namespace`, `oc_server`, and `oc_token`. GHCR pulls use a live token, like `bcgov/action-builder-ghcr` and `deployer`: `github_token` defaults to the run's `github.token`. The action stores it in a pull secret scoped to that repository path, as `github.actor`, imports, and deletes the secret. That secret takes precedence over a host-wide `ghcr.io` secret saved in the namespace.
+OpenShift needs `oc_namespace`, `oc_server`, and `oc_token`. GHCR pulls use a live token, like `bcgov/action-builder-ghcr` and `deployer`: `github_token` defaults to the run's `github.token`. The action stores it in a pull secret scoped to that repository path, as `github.actor`, imports, and deletes the secret.
 
 Grant the job `packages: read`. A private package published by another repository must also give the calling repository read access in the package's **Manage Actions access** settings, or pass a PAT as `github_token`. Otherwise GHCR denies the import. The Builds job above already has `packages: write`.
 

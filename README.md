@@ -13,7 +13,7 @@ GitHub Action that applies an OpenShift Route with a custom TLS certificate (ope
 
 
 ### 3. [Image Import](./image-import) (Composite Action)
-Imports one GHCR image into a namespace ImageStream (`referencePolicy: Local`, `importMode: PreserveOriginal`).
+Imports one GHCR image into a namespace ImageStream (`referencePolicy: Local`, `importMode: PreserveOriginal`) and checks the imported digest against GHCR.
 * See [image-import/README.md](./image-import/README.md) for the reference format and pull spec.
 
 ```yaml
