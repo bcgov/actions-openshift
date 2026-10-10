@@ -1,0 +1,46 @@
+name: "Image Import"
+description: "Import one GHCR image into the namespace ImageStream, verify its digest against GHCR, so workloads can pull it from the internal registry."
+inputs:
+  image:
+    description: "Full GHCR reference. ghcr.io/owner/name:tag, ghcr.io/owner/name@sha256:<hex>, or ghcr.io/owner/name:tag@sha256:<hex>."
+    required: true
+  name:
+    description: "ImageStream name. Defaults to the last path segment of image."
+    required: false
+    default: ""
+  tag:
+    description: "ImageStream tag. Defaults to the tag in image, or the digest hex when image has no tag."
+    required: false
+    default: ""
+  github_token:
+    description: "Specify token (GH or PAT), instead of inheriting one from the calling workflow. The import pulls from GHCR with it."
+    required: false
+    default: ${{ github.token }}
+  oc_namespace:
+    description: "OpenShift namespace."
+    required: true
+  oc_server:
+    description: "OpenShift API URL."
+    required: true
+  oc_token:
+    description: "OpenShift token."
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Import image
+      uses: $/oc-runner
+      env:
+        IMPORT_SCRIPT: ${{ github.action_path }}/import.sh
+        IMAGE: ${{ inputs.image }}
+        NAME: ${{ inputs.name }}
+        TAG: ${{ inputs.tag }}
+        TOKEN: ${{ inputs.github_token }}
+        ACTOR: ${{ github.actor }}
+        OC_NAMESPACE: ${{ inputs.oc_namespace }}
+      with:
+        oc_namespace: ${{ inputs.oc_namespace }}
+        oc_server: ${{ inputs.oc_server }}
+        oc_token: ${{ inputs.oc_token }}
+        commands: bash "$IMPORT_SCRIPT"
