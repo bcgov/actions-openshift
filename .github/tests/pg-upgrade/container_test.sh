@@ -39,10 +39,13 @@ wait_db() {
   echo "database $1 did not start"
   exit 1
 }
+# podman adds the UID to /etc/passwd; docker and OpenShift don't
+NO_PASSWD=()
+[ "$ENGINE" != podman ] || NO_PASSWD=(--passwd=false)
 run_job() { # image mode source [target] [extra env...]
   local image="$1" mode="$2" src="$3" tgt="${4:-}"
   shift 4 || shift $#
-  "$ENGINE" run --rm --label "pgup-test=${NET}" --network "$NET" --user "${JOB_UID:-1000680000}:0" \
+  "$ENGINE" run --rm "${NO_PASSWD[@]}" --label "pgup-test=${NET}" --network "$NET" --user "${JOB_UID:-1000680000}:0" \
     --tmpfs /work:rw,mode=1777 --tmpfs /var/run/postgresql:rw,mode=1777 \
     -e MODE="$mode" -e SOURCE_HOST="$src" -e SRC_DB=app -e SRC_USER=app -e SRC_PASSWORD="$PW" \
     -e TARGET_HOST="$tgt" -e TGT_DB="${TGT_DB:-app}" -e TGT_USER="${TGT_USER:-app}" -e TGT_PASSWORD="$PW" \

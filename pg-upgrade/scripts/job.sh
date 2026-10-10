@@ -34,9 +34,10 @@ src_psql() { PGPASSWORD="$SRC_PASSWORD" psql -X -q -v ON_ERROR_STOP=1 -h "$SOURC
 src_admin() { PGOPTIONS='-c default_transaction_read_only=off' src_psql "$@"; }
 tgt_psql() { PGPASSWORD="$TGT_PASSWORD" psql -X -q -v ON_ERROR_STOP=1 -h "$TARGET_HOST" -p "$PORT" -U "$TGT_USER" -d "$TGT_DB" "$@"; }
 
-wait_ready() { # host label
-  if ! pg_isready -q -h "$1" -p "$PORT" -t "$READY_SECONDS"; then
-    fail "The ${2} database (${1}) did not accept connections within ${READY_SECONDS}s." "Make sure its pod is running and Ready, then re-run."
+wait_ready() { # host user label
+  # -U: OpenShift's random UID has no passwd entry for libpq to take a default user from
+  if ! pg_isready -q -h "$1" -p "$PORT" -U "$2" -t "$READY_SECONDS"; then
+    fail "The ${3} database (${1}) did not accept connections within ${READY_SECONDS}s." "Make sure its pod is running and Ready, then re-run."
   fi
 }
 
@@ -59,7 +60,7 @@ SQL
 }
 
 echo "Mode: ${MODE}"
-wait_ready "$SOURCE_HOST" source
+wait_ready "$SOURCE_HOST" "$SRC_USER" source
 SRC_MAJOR="$(major_of src_psql)"
 CLIENT_MAJOR="$(pg_dump --version | sed -E 's/^[^0-9]*([0-9]+).*/\1/')"
 echo "Source ${SOURCE_HOST}: PostgreSQL ${SRC_MAJOR}"
@@ -74,7 +75,7 @@ fi
 [ "$CLIENT_MAJOR" -gt "$SRC_MAJOR" ] || fail "Image is PostgreSQL ${CLIENT_MAJOR}, not newer than the source (${SRC_MAJOR}), so there is nothing to upgrade." "Set image to the new major, e.g. postgres:17."
 
 if [ "$MODE" = upgrade ]; then
-  wait_ready "$TARGET_HOST" target
+  wait_ready "$TARGET_HOST" "$TGT_USER" target
   TGT_MAJOR="$(major_of tgt_psql)"
   echo "Target ${TARGET_HOST}: PostgreSQL ${TGT_MAJOR}"
   [ "$TGT_MAJOR" -eq "$CLIENT_MAJOR" ] || fail "Target runs PostgreSQL ${TGT_MAJOR} but the image is ${CLIENT_MAJOR}." "Use the target's image (same repository and major) for image."
