@@ -73,16 +73,25 @@ equals() { # name actual expected
   if [ "$2" = "$3" ]; then echo "PASS: $1"; else echo "FAIL: $1 (got '$2', want '$3')"; FAILED=1; fi
 }
 
+# Any supported pair; CI runs every one from versions.sh. GIS_NEW empty skips the PostGIS checks.
 PG_OLD="${PG_OLD:-postgres:13}"
 PG_NEW="${PG_NEW:-postgres:17}"
 GIS_OLD="${GIS_OLD:-postgis/postgis:13-3.5}"
-GIS_NEW="${GIS_NEW:-postgis/postgis:17-3.5}"
+GIS_NEW="${GIS_NEW-postgis/postgis:17-3.5}"
+major() { sed -E 's/^[^:]+:([0-9]+).*/\1/' <<< "$1"; }
+OLD_MAJOR="$(major "$PG_OLD")"
+NEW_MAJOR="$(major "$PG_NEW")"
+echo "Testing ${PG_OLD} -> ${PG_NEW}${GIS_NEW:+ and ${GIS_OLD} -> ${GIS_NEW}}"
 
 db src "$PG_OLD"
 db tgt "$PG_NEW"
-db gsrc "$GIS_OLD"
-db gtgt "$GIS_NEW"
-for c in src tgt gsrc gtgt; do wait_db "$c"; done
+DBS=(src tgt)
+if [ -n "$GIS_NEW" ]; then
+  db gsrc "$GIS_OLD"
+  db gtgt "$GIS_NEW"
+  DBS+=(gsrc gtgt)
+fi
+for c in "${DBS[@]}"; do wait_db "$c"; done
 
 sql src "CREATE SCHEMA sales;
   CREATE TABLE public.users (id serial PRIMARY KEY, name text NOT NULL);
@@ -93,7 +102,7 @@ sql src "CREATE SCHEMA sales;
   INSERT INTO public.users (name) SELECT 'user ' || g FROM generate_series(1, 500) g;
   INSERT INTO sales.\"Orders\" (user_id, note) SELECT 1 + g % 500, repeat('x', g % 50) FROM generate_series(1, 2000) g;
   INSERT INTO public.flyway_schema_history VALUES (1, '1'), (2, '2');"
-sql gsrc "CREATE TABLE public.places (id serial PRIMARY KEY, geom geometry(Point, 4326));
+[ -z "$GIS_NEW" ] || sql gsrc "CREATE TABLE public.places (id serial PRIMARY KEY, geom geometry(Point, 4326));
   INSERT INTO public.places (geom) SELECT ST_SetSRID(ST_MakePoint(-123 + g / 1000.0, 49), 4326) FROM generate_series(1, 300) g;"
 
 check "rehearse: copies and verifies without changes" pass "Rehearsal passed" -- run_job "$PG_NEW" rehearse src
@@ -101,8 +110,11 @@ equals "rehearse: target untouched" "$(sql tgt "SELECT count(*) FROM pg_tables W
 equals "rehearse: source still writable" "$(sql src "INSERT INTO public.users (name) VALUES ('after rehearsal') RETURNING 'ok'")" ok
 
 check "same major fails" fail "Fix: Set image to the new major" -- run_job "$PG_OLD" rehearse src
-check "missing PostGIS in a plain image fails" fail "Extension\\(s\\) postgis.*not available" -- run_job "$PG_NEW" rehearse gsrc
-check "image major must match the target" fail "Target runs PostgreSQL 17 but the image is 16" -- run_job "${PG_MID:-postgres:16}" upgrade src tgt
+[ -z "$GIS_NEW" ] || check "missing PostGIS in a plain image fails" fail "Extension\\(s\\) postgis.*not available" -- run_job "$PG_NEW" rehearse gsrc
+# Needs a major between source and target
+if [ $((NEW_MAJOR - OLD_MAJOR)) -ge 2 ]; then
+  check "image major must match the target" fail "Target runs PostgreSQL ${NEW_MAJOR} but the image is $((NEW_MAJOR - 1))" -- run_job "postgres:$((NEW_MAJOR - 1))" upgrade src tgt
+fi
 
 # A client that overrides the write pause and keeps writing must fail the upgrade, not lose rows
 "$ENGINE" exec -d src bash -c 'while [ ! -f /tmp/stop-writer ]; do
@@ -119,6 +131,12 @@ equals "writes during the copy: source writable again" "$(sql src "INSERT INTO p
 
 check "upgrade: copies and verifies" pass "Upgrade complete" -- run_job "$PG_NEW" upgrade src tgt
 if grep -q 'sales."Orders": 2000 rows' "$LOG"; then echo "PASS: upgrade: per-table counts printed"; else echo "FAIL: per-table counts missing"; sed "s/^/    /" "$LOG"; FAILED=1; fi
+if grep -qE '^pg-upgrade stats: mode=upgrade rows=[1-9][0-9]* source_bytes=[1-9][0-9]* dump_bytes=[1-9][0-9]* copy_seconds=[0-9]+ peak_memory_bytes=[1-9][0-9]*$' "$LOG"; then
+  echo "PASS: upgrade: stats line ($(grep '^pg-upgrade stats: ' "$LOG"))"
+else
+  echo "FAIL: upgrade: stats line missing or incomplete"; grep 'pg-upgrade stats' "$LOG" | sed "s/^/    /"; FAILED=1
+fi
+equals "upgrade: target major" "$(sql tgt "SHOW server_version_num" | cut -c1-2)" "$NEW_MAJOR"
 equals "upgrade: users copied" "$(sql tgt "SELECT count(*) FROM public.users")" 501
 equals "upgrade: view copied" "$(sql tgt "SELECT count(*) FROM public.user_orders")" 2000
 equals "upgrade: sequence continues" "$(sql tgt "SELECT nextval('public.users_id_seq')")" 502
@@ -132,6 +150,8 @@ equals "upgrade: source reads still work" "$(sql src "SELECT count(*) FROM publi
 check "non-empty target is refused" fail "is not empty" -- run_job "$PG_NEW" upgrade src tgt
 check "rollback makes the source writable" pass "accepts writes again" -- run_job "$PG_NEW" rollback src
 equals "rollback: source writable" "$(sql src "INSERT INTO public.users (name) VALUES ('after rollback') RETURNING 'ok'")" ok
+
+if [ -z "$GIS_NEW" ]; then exit "$FAILED"; fi
 
 # A failure part-way through the restore commits nothing and lifts the write pause.
 # The non-superuser target role can't CREATE EXTENSION postgis in a database without it.
