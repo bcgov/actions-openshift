@@ -122,7 +122,7 @@ findings() {
 }
 
 @test "URL, bad hostname and bad port fail with Fix lines" {
-  for h in "https://myapp.gov.bc.ca" "myapp.gov.bc.ca/path" "bad_host.gov.bc.ca" "-lead.gov.bc.ca" "myapp.gov.bc.ca:0" "myapp.gov.bc.ca:99999" "myapp.gov.bc.ca:abc"; do
+  for h in "*" "*.gov.bc.ca" "https://myapp.gov.bc.ca" "myapp.gov.bc.ca/path" "bad_host.gov.bc.ca" "-lead.gov.bc.ca" "myapp.gov.bc.ca:0" "myapp.gov.bc.ca:99999" "myapp.gov.bc.ca:abc"; do
     INPUT_HOSTS="$h" run bash "$SCRIPT"
     [ "$status" -eq 1 ]
     [[ "$output" == *"::error::"*"Fix: "* ]]

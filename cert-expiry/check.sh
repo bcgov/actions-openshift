@@ -51,7 +51,9 @@ ENTRIES=()
 declare -A SEEN=()
 while IFS= read -r line; do
   line="${line%%#*}"
-  for entry in ${line//,/ }; do
+  # read -a splits without pathname expansion, so '*' is rejected, not globbed
+  IFS=$' \t,' read -r -a parts <<< "$line"
+  for entry in "${parts[@]}"; do
     if [[ "$entry" == *"://"* || "$entry" == */* ]]; then
       fail "'${entry}' is a URL, not a hostname." "List the hostname only, for example myapp.gov.bc.ca or myapp.gov.bc.ca:8443."
     fi

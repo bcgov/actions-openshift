@@ -26,6 +26,11 @@ jobs:
       contents: read
       issues: write
     steps:
+      # workflow-notifier reads CODEOWNERS from the workspace to assign the issue
+      - uses: actions/checkout@<sha> # <tag>
+        with:
+          persist-credentials: false
+
       - name: Check certificate expiry
         id: check
         uses: bcgov/actions-openshift/cert-expiry@vX.Y.Z
@@ -43,7 +48,7 @@ jobs:
           notify_codeowners: "true"
 ```
 
-For a list of hosts, commit a file with one hostname per line and pass `hosts_file`. To open one issue per host, run the check with `fail_on_findings: "false"` and feed `findings` to a matrix job, as this repository's own [`cert-expiry.yml`](../.github/workflows/cert-expiry.yml) does.
+For a list of hosts, commit a file with one hostname per line and pass `hosts_file`. To open one issue per host, expose `findings` as a job output and run a matrix notify job with `if: always()` over it, as this repository's own [`cert-expiry.yml`](../.github/workflows/cert-expiry.yml) does (job outputs are kept when the check fails).
 
 ## Inputs
 
