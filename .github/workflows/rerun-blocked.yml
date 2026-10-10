@@ -3,7 +3,7 @@ name: Rerun Blocked Runners
 # Re-runs failed jobs when the only failures are a GitHub runner IP blocked from the
 # OpenShift API (oc-runner's "IP blocked from OpenShift (not a code problem)" annotation).
 # Any other failure annotation leaves the run alone. At most two re-runs per run (run_attempt).
-# Copy pattern for other repos: oc-runner/README.md, "Re-run jobs on blocked runners".
+# For this repo's own CI only.
 
 on:
   workflow_run:
