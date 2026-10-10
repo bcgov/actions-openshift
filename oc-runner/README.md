@@ -131,6 +131,10 @@ This action returns:
 
 - `triggered`: boolean (`'true'` or `'false'`) indicating whether trigger paths changed
 - `commands`: generic command output channel from the `commands` step (usually empty unless explicitly set)
+- `blocked`: `'true'` when login failed because this runner's IP is blocked from the OpenShift API; not a code problem, re-run the job
+- `unreachable`: `'true'` when login failed because neither the OpenShift API nor the cluster router answered (outage)
+
+`blocked` and `unreachable` are set even though the step fails, so a later step can react with `if: failure() && steps.<id>.outputs.blocked == 'true'`.
 
 `commands` is expected to be empty in most runs. To populate it, write to `$GITHUB_OUTPUT` inside your `commands` input. Plain text lines are automatically mapped to the `commands` output (you do not need to prefix with `commands=`). Existing `commands=<value>` usage is still supported.
 
@@ -165,8 +169,11 @@ jobs:
 
 To handle transient network drops, cluster API restarts, or runner configuration mistakes, the action implements validation gates and retry logic:
 - **Pre-flight Reachability Check:** Before downloading `oc`, logging in or running any commands, the action sends an unauthenticated request to the API's `/version` (10-second timeout, TLS verified). Any HTTP response, including `401`/`403`, means the API is reachable and the job continues. If the connection is refused or times out, the action probes the same cluster's router (`api.<cluster>.devops.gov.bc.ca` maps to `console.apps.<cluster>.devops.gov.bc.ca`, e.g. gold, silver, golddr; if `oc_server` doesn't match that pattern, it logs a notice and uses silver's router), logs the runner's public IP and fails immediately with one of:
-  - `Cluster is up (the <cluster> router answered), but this runner's IP (x.x.x.x) is blocked from the OpenShift API (...). Re-run the job to get a different runner.` The router answered, so the cluster is up but this GitHub-hosted runner's IP is blocked by the firewall. Re-running the job usually lands on a runner with a different IP.
-  - `OpenShift is unreachable from this runner (IP x.x.x.x): neither the API (...) nor the <cluster> router answered.` The cluster or the network may be down; re-run later.
+  - **`IP blocked from OpenShift (not a code problem)`**: `This runner's IP (x.x.x.x) is blocked from the OpenShift API (...). Re-run this job, and speak with your network administrators if it keeps happening.` The router answered, so the cluster is up but this GitHub-hosted runner's IP is blocked by the firewall. Re-running the job usually lands on a runner with a different IP. Sets the `blocked` output to `true`.
+  - **`OpenShift unreachable (outage, not a code problem)`**: `Neither the OpenShift API (...) nor the <cluster> router answered this runner (IP x.x.x.x). OpenShift or the network looks down. Re-run this job once OpenShift is back.` Sets the `unreachable` output to `true`.
+
+  Both are titled error annotations, so they show on the pull request's checks summary, and both are also written to the job's step summary.
+- **Blocked After Pre-flight:** A runner IP can be blocked after the pre-flight passes. If the last token request fails to connect and `/version` no longer answers either, the action reports the blocked or outage message above instead of the generic `Failed to log in to OpenShift after N attempts`.
 - **Early Input Validation:** Before executing any login attempts or downloading tools, the action validates that `oc_server`, `oc_namespace`, and `oc_token` are populated and that the server URL is properly formatted. If inputs are missing or malformed, the action fails fast immediately to prevent useless retries.
 - **Fail Fast:** If the OpenShift API returns a non-retryable client error (such as `401 Unauthorized`, `403 Forbidden`, or `404 Not Found`), the action aborts immediately on the first attempt to save runner billing minutes.
 - **Retry:** If the connection times out at the network layer (HTTP status `000`), hits a request timeout (`408`), gets rate-limited (`429`), or if the API returns a transient server error (HTTP status `5xx` during control-plane reboots), the action waits 2 seconds and retries once (`login_attempts` is capped at 2, since a blocked runner IP stays blocked).

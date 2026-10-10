@@ -22,9 +22,46 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Unit tests (bats)
+      - name: Unit tests (bats, 2 workers)
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq bats
-          bats .github/tests/oc-runner
+          sudo apt-get install -y -qq bats parallel
+          bats --jobs 2 .github/tests/oc-runner
+
+  unreachable-api:
+    name: Test oc-runner blocked output
+    # No credentials: a non-routable API address times out at pre-flight, the silver router
+    # still answers, so the action must fail with blocked=true (unreachable=true if the router
+    # is down too) and the composite outputs must survive the failed step
+    permissions: {}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - id: oc
+        continue-on-error: true
+        uses: $/oc-runner
+        with:
+          oc_namespace: abc123-dev
+          oc_server: https://10.255.255.1:6443
+          oc_token: not-a-real-token-not-a-real-token-0000
+
+      - name: Check outcome and outputs
+        env:
+          OUTCOME: ${{ steps.oc.outcome }}
+          BLOCKED: ${{ steps.oc.outputs.blocked }}
+          UNREACHABLE: ${{ steps.oc.outputs.unreachable }}
+        run: |
+          echo "outcome=${OUTCOME} blocked=${BLOCKED} unreachable=${UNREACHABLE}"
+          if [ "${OUTCOME}" != failure ]; then
+            echo "::error::oc-runner should fail against a non-routable API"
+            exit 1
+          fi
+          if [ "${BLOCKED}${UNREACHABLE}" != truefalse ] && [ "${BLOCKED}${UNREACHABLE}" != falsetrue ]; then
+            echo "::error::Expected exactly one of blocked/unreachable to be true"
+            exit 1
+          fi
