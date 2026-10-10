@@ -106,18 +106,19 @@ import_image() {
   [ "$(cat "${OC_LOG}")" = "import-image image-import:100 --from=ghcr.io/bcgov/quickstart-openshift/backend:latest --confirm --import-mode=PreserveOriginal --reference-policy=local" ]
 }
 
-@test "token creates a repository pull secret and deletes it" {
+@test "token creates a repository pull secret as the actor and deletes it" {
   run env \
     PATH="${D}/bin:${PATH}" \
     OC_LOG="${OC_LOG}" \
     OC_NAMESPACE=abc123-prod \
     IMAGE="ghcr.io/bcgov/private-app/backend:1.2.3" \
     TOKEN="test-token" \
+    ACTOR="octocat" \
     bash "${SCRIPT}"
   [ "$status" -eq 0 ]
   secret="image-import-$(printf '%s' "bcgov/private-app/backend:1.2.3" | sha256sum | cut -c1-20)"
   [ "$(sed -n '1p' "${OC_LOG}")" = "delete secret ${secret} --ignore-not-found" ]
-  [ "$(sed -n '2p' "${OC_LOG}")" = "create secret docker-registry ${secret} --docker-server=ghcr.io/bcgov/private-app/backend --docker-username=USERNAME --docker-password=test-token --docker-email=unused" ]
+  [ "$(sed -n '2p' "${OC_LOG}")" = "create secret docker-registry ${secret} --docker-server=ghcr.io/bcgov/private-app/backend --docker-username=octocat --docker-password=test-token --docker-email=unused" ]
   [ "$(sed -n '3p' "${OC_LOG}")" = "import-image backend:1.2.3 --from=ghcr.io/bcgov/private-app/backend:1.2.3 --confirm --import-mode=PreserveOriginal --reference-policy=local" ]
   [ "$(sed -n '4p' "${OC_LOG}")" = "delete secret ${secret} --ignore-not-found" ]
 }

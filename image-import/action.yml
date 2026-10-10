@@ -13,9 +13,9 @@ inputs:
     required: false
     default: ""
   github_token:
-    description: "Token for a private GHCR package. Omit for a public package."
+    description: "Specify token (GH or PAT), instead of inheriting one from the calling workflow. The import pulls from GHCR with it."
     required: false
-    default: ""
+    default: ${{ github.token }}
   oc_namespace:
     description: "OpenShift namespace."
     required: true
@@ -37,6 +37,7 @@ runs:
         NAME: ${{ inputs.name }}
         TAG: ${{ inputs.tag }}
         TOKEN: ${{ inputs.github_token }}
+        ACTOR: ${{ github.actor }}
         OC_NAMESPACE: ${{ inputs.oc_namespace }}
       with:
         oc_namespace: ${{ inputs.oc_namespace }}

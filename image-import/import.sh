@@ -71,16 +71,16 @@ fi
 
 if [ -n "${TOKEN:-}" ]; then
   if [[ "${TOKEN}" =~ [[:space:]] ]]; then
-    fail "github_token must not contain whitespace." "Pass the token unchanged, e.g. secrets.GITHUB_TOKEN."
+    fail "github_token must not contain whitespace." "Pass the token unchanged, or omit github_token to use the run's token."
   fi
-  # Repository path, so this token is preferred over a host-wide ghcr.io secret.
-  # docker-registry requires a username field; GHCR authenticates the token.
+  # Live token, scoped to the repository path so it is preferred over any
+  # host-wide ghcr.io secret saved in the namespace. Deleted after the import.
   secret="image-import-$(printf '%s' "${path}:${tag}" | sha256sum | cut -c1-20)"
   trap 'oc delete secret "'"${secret}"'" --ignore-not-found >/dev/null' EXIT
   oc delete secret "${secret}" --ignore-not-found >/dev/null
   oc create secret docker-registry "${secret}" \
     --docker-server="ghcr.io/${path}" \
-    --docker-username=USERNAME \
+    --docker-username="${ACTOR:-github-actions}" \
     --docker-password="${TOKEN}" \
     --docker-email=unused
 fi

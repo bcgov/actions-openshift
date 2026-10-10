@@ -507,34 +507,12 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
+      packages: read
     runs-on: ubuntu-26.04
     timeout-minutes: 15
-    # Secret ghcr is namespace-wide: one pull request at a time changes its annotation
-    concurrency:
-      group: image-import-ghcr-secret
-      cancel-in-progress: false
     steps:
-      # The ghcr secret's credential is denied for this public image. Exclude it, and
-      # mark it so cleanup only undoes an exclusion this pull request added.
-      - name: Hide the namespace ghcr secret from this import
-        uses: $/oc-runner
-        env:
-          PR: ${{ github.event.number }}
-        with:
-          oc_namespace: ${{ vars.OC_NAMESPACE }}
-          oc_server: ${{ vars.OC_SERVER }}
-          oc_token: ${{ secrets.OC_TOKEN }}
-          commands: |
-            if ! oc get secret ghcr >/dev/null 2>&1; then
-              echo "secret ghcr not found"
-            elif [ "$(oc get secret ghcr -o json | jq -r '.metadata.annotations["openshift.io/image.excludeSecret"] // ""')" = "true" ]; then
-              echo "secret ghcr was already excluded; leaving it as is"
-            else
-              oc annotate secret ghcr openshift.io/image.excludeSecret=true "actions-openshift.bcgov/image-import-pr=${PR}" --overwrite
-              echo "secret ghcr excluded from image import"
-            fi
-
-      - name: Import a public image onto this pull request's tag
+      # github_token defaults to the run's token, so GHCR sees a live credential
+      - name: Import onto this pull request's tag
         uses: $/image-import
         with:
           image: ghcr.io/bcgov/quickstart-openshift/backend:latest
@@ -571,7 +549,3 @@ jobs:
           oc_token: ${{ secrets.OC_TOKEN }}
           commands: |
             oc delete imagestreamtag "image-import:${PR}" --ignore-not-found
-            if oc get secret ghcr >/dev/null 2>&1 \
-              && [ "$(oc get secret ghcr -o json | jq -r '.metadata.annotations["actions-openshift.bcgov/image-import-pr"] // ""')" = "${PR}" ]; then
-              oc annotate secret ghcr openshift.io/image.excludeSecret- actions-openshift.bcgov/image-import-pr-
-            fi
