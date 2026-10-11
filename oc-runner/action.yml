@@ -107,6 +107,15 @@ outputs:
   triggered:
     description: Whether the action was triggered
     value: ${{ steps.diff.outputs.triggered }}
+  blocked:
+    description: |
+      'true' when login failed because this runner's IP is blocked from the OpenShift API (the cluster router answered).
+      Not a code problem; re-running the job usually lands on another runner.
+    value: ${{ steps.login.outputs.blocked }}
+  unreachable:
+    description: |
+      'true' when login failed because neither the OpenShift API nor the cluster router answered (outage).
+    value: ${{ steps.login.outputs.unreachable }}
 
 
 runs:
@@ -127,162 +136,19 @@ runs:
         key: oc-cli-stable-${{ inputs.oc_version }}-${{ runner.os }}-${{ runner.arch }}
 
     - if: steps.diff.outputs.triggered == 'true'
+      id: login
       env:
         OC: ${{ format('stable-{0}', inputs.oc_version) }}
         SERVER_URL: ${{ inputs.oc_server }}
         NAMESPACE: ${{ inputs.oc_namespace }}
         TOKEN_INPUT: ${{ inputs.oc_token }}
         ATTEMPTS: ${{ inputs.login_attempts }}
+        ACTION_PATH: ${{ github.action_path }}
       shell: bash
       working-directory: /usr/local/bin
       run: |
-        # Input validation gate
-        if [ -z "${SERVER_URL}" ] || [[ ! "${SERVER_URL}" =~ ^https:// ]]; then
-          echo "::error::Invalid or missing oc_server. Must be https://"
-          exit 1
-        fi
-        if [ -z "${NAMESPACE}" ]; then
-          echo "::error::Missing oc_namespace."
-          exit 1
-        fi
-        if [ -z "${TOKEN_INPUT}" ]; then
-          echo "::error::Missing oc_token."
-          exit 1
-        fi
-        if ! [[ "${ATTEMPTS}" =~ ^[1-9][0-9]*$ ]]; then
-          echo "::error::Invalid login_attempts: '${ATTEMPTS}'. Must be a positive integer."
-          exit 1
-        fi
-        # At most one retry: a blocked runner IP stays blocked, so more attempts only burn minutes
-        if [ "${ATTEMPTS}" -gt 2 ]; then
-          echo "::notice::login_attempts=${ATTEMPTS} capped at 2 (one retry)"
-          ATTEMPTS=2
-        fi
-
-        runner_ip() {
-          curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo "unknown (lookup failed)"
-        }
-
-        # Pre-flight: unauthenticated request to /version, before oc login or any commands.
-        # Any HTTP status (even 401/403) means the API is reachable; only no-connection results stop here.
-        PREFLIGHT_RC=0
-        PREFLIGHT_ERR=$(curl -sS -4 -o /dev/null --connect-timeout 10 --max-time 10 "${SERVER_URL}/version" 2>&1) || PREFLIGHT_RC=$?
-        if [ "${PREFLIGHT_RC}" -eq 7 ] || [ "${PREFLIGHT_RC}" -eq 28 ]; then
-          # Connection refused or timed out: tell a blocked runner IP apart from an outage via the router
-          RUNNER_IP=$(runner_ip)
-          echo "Pre-flight: ${PREFLIGHT_ERR}"
-          # Router for the same cluster: api.<cluster>.devops.gov.bc.ca -> console.apps.<cluster>.devops.gov.bc.ca
-          if [[ "${SERVER_URL}" =~ ^https://api\.([a-z0-9-]+)\.devops\.gov\.bc\.ca(:[0-9]+)?/?$ ]]; then
-            CLUSTER="${BASH_REMATCH[1]}"
-          else
-            CLUSTER=silver
-            echo "::notice::Could not derive the cluster from ${SERVER_URL}; using the silver router for the reachability check"
-          fi
-          if curl -sS -4 -o /dev/null --connect-timeout 10 --max-time 10 "https://console.apps.${CLUSTER}.devops.gov.bc.ca/" 2>/dev/null; then
-            echo "::error::Cluster is up (the ${CLUSTER} router answered), but this runner's IP (${RUNNER_IP}) is blocked from the OpenShift API (${SERVER_URL}). Re-run the job to get a different runner."
-          else
-            echo "::error::OpenShift is unreachable from this runner (IP ${RUNNER_IP}): neither the API (${SERVER_URL}) nor the ${CLUSTER} router answered. The cluster or network may be down; re-run the job later."
-          fi
-          exit 1
-        elif [ "${PREFLIGHT_RC}" -ne 0 ]; then
-          echo "::error::Pre-flight request to ${SERVER_URL}/version failed (curl exit ${PREFLIGHT_RC}): ${PREFLIGHT_ERR}"
-          exit 1
-        fi
-
-        # Install CLI Tool and Login
-        # Check if oc is already installed
-        if ! command -v oc &>/dev/null; then
-          URL="https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${OC}/openshift-client-linux.tar.gz"
-          echo "Downloading OpenShift CLI from ${URL}..."
-
-          # Download the archive with timeout limits
-          if ! wget --timeout=15 --tries=3 "${URL}" -qO oc.tar.gz; then
-            echo "Error: Failed to download OpenShift CLI"
-            exit 1
-          fi
-
-          # Extract the oc binary
-          if ! tar -xzf oc.tar.gz oc; then
-            echo "Error: Failed to extract oc binary"
-            rm -f oc.tar.gz
-            exit 1
-          fi
-          rm -f oc.tar.gz
-        fi
-
-        # OpenShift login with smart retry
-        DELAY=2
-        SA_TOKEN_URL="${SERVER_URL}/api/v1/namespaces/${NAMESPACE}/serviceaccounts/pipeline/token"
-
-        attempt=1
-        while [ "$attempt" -le "$ATTEMPTS" ]; do
-          echo "Attempting to acquire token (Attempt $attempt/$ATTEMPTS)..."
-          
-          # Fetch token response with HTTP code directly to memory
-          ERR_FILE=$(mktemp)
-          RESPONSE=$(curl -sS -4 --connect-timeout 10 --max-time 30 -w "%{http_code}" -X POST "${SA_TOKEN_URL}" \
-            --header "Authorization: Bearer ${TOKEN_INPUT}" \
-            --header "Content-Type: application/json; charset=utf-8" \
-            --data '{"spec": {"expirationSeconds": 1500 }}' 2>"$ERR_FILE") || true
-          CURL_ERR=$(cat "$ERR_FILE")
-          rm -f "$ERR_FILE"
-
-          # Extract HTTP code and response body in memory
-          HTTP_CODE="000"
-          BODY=""
-          if [ ${#RESPONSE} -ge 3 ]; then
-            HTTP_CODE="${RESPONSE: -3}"
-            BODY="${RESPONSE:0:${#RESPONSE}-3}"
-          fi
-
-          # Success path: try to log in
-          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
-            TOKEN=$(echo "$BODY" | jq -r '.status.token' 2>/dev/null || true)
-            if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-              echo "Error: Failed to parse token from response."
-            elif OC_OUT=$(oc login --server="${SERVER_URL}" --token="${TOKEN}" 2>&1); then
-              echo "Login successful!"
-              break
-            else
-              echo "Token acquired, but 'oc login' failed. Error: $OC_OUT"
-            fi
-          # Retry paths: timeouts (000), request timeouts (408), rate limits (429), or server errors (5xx)
-          elif [ "$HTTP_CODE" = "000" ] || [ "$HTTP_CODE" = "408" ] || [ "$HTTP_CODE" = "429" ] || [[ "$HTTP_CODE" =~ ^5[0-9]{2}$ ]]; then
-            echo "Transient connection or server error (HTTP $HTTP_CODE). Retrying..."
-            if [ -n "$CURL_ERR" ]; then
-              echo "Curl error: $CURL_ERR"
-            fi
-          # Fail-fast path: client configuration/authorization errors (401, 403, 404, etc.)
-          else
-            echo "::error::API request failed with HTTP $HTTP_CODE. Failing fast."
-            TRUNCATED_BODY=$(echo -n "$BODY" | head -c 500)
-            echo "Response body: $(echo "$TRUNCATED_BODY" | sed -E 's/("token"[[:space:]]*:[[:space:]]*")[^"]+/\1***REDACTED***/g')"
-            exit 1
-          fi
-
-          if [ $attempt -eq $ATTEMPTS ]; then
-            echo "::error::Failed to log in to OpenShift after $ATTEMPTS attempts."
-            # Runner IP helps diagnose GitHub runner IPs blocked from the API (bcgov/actions-openshift#49)
-            echo "::error::Runner public IP: $(runner_ip)"
-            exit 1
-          fi
-
-          echo "Login attempt $attempt failed, retrying in $DELAY seconds..."
-          sleep $DELAY
-          DELAY=$((DELAY * 2))
-          attempt=$((attempt + 1))
-        done
-
-        # Verify namespace
-        if [ "$( oc project -q )" != "${NAMESPACE}" ]; then
-          echo "Project and token do not match!"
-          exit 1
-        fi
-
-        # Version for client, kustomize, server and Kubernetes
-        echo -e "\nInput Version: ${OC}"
-        oc version
-        echo
+        # Input gate, API pre-flight, oc install and login; reports blocked runner IPs and outages
+        "${ACTION_PATH}/scripts/login.sh"
 
     - if: steps.diff.outputs.triggered == 'true'
       uses: actions/checkout@v7
