@@ -22,9 +22,50 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Unit tests (bats)
+      - name: Unit tests (bats, 2 workers)
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq bats
-          bats .github/tests/oc-runner
+          sudo apt-get install -y -qq bats parallel
+          bats --jobs 2 .github/tests/oc-runner
+
+  unreachable-api:
+    name: Test oc-runner blocked output
+    # No credentials: silver's API name points at a non-routable address on this runner, so
+    # pre-flight times out while the real silver router still answers. The action must fail
+    # with blocked=true (unreachable=true if the router is down too), and the composite
+    # outputs must survive the failed step
+    permissions: {}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Point the silver API at a non-routable address
+        run: echo "10.255.255.1 api.silver.devops.gov.bc.ca" | sudo tee -a /etc/hosts
+
+      - id: oc
+        continue-on-error: true
+        uses: $/oc-runner
+        with:
+          oc_namespace: abc123-dev
+          oc_server: https://api.silver.devops.gov.bc.ca:6443
+          oc_token: not-a-real-token-not-a-real-token-0000
+
+      - name: Check outcome and outputs
+        env:
+          OUTCOME: ${{ steps.oc.outcome }}
+          BLOCKED: ${{ steps.oc.outputs.blocked }}
+          UNREACHABLE: ${{ steps.oc.outputs.unreachable }}
+        run: |
+          echo "outcome=${OUTCOME} blocked=${BLOCKED} unreachable=${UNREACHABLE}"
+          if [ "${OUTCOME}" != failure ]; then
+            echo "::error::oc-runner should fail against a non-routable API"
+            exit 1
+          fi
+          if [ "${BLOCKED}${UNREACHABLE}" != truefalse ] && [ "${BLOCKED}${UNREACHABLE}" != falsetrue ]; then
+            echo "::error::Expected exactly one of blocked/unreachable to be true"
+            exit 1
+          fi
