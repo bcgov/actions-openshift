@@ -1,0 +1,89 @@
+name: PG Upgrade
+
+# pg-upgrade's own tests: unit tests, and every supported source major upgraded to
+# quickstart-openshift's major and to the newest postgres major on Docker Hub (versions.sh), in containers.
+on:
+  pull_request:
+    paths:
+      - pg-upgrade/**
+      - oc-runner/**
+      - .github/tests/pg-upgrade/**
+      - .github/workflows/pg-upgrade.yml
+  push:
+    branches:
+      - main
+    paths:
+      - pg-upgrade/**
+      - oc-runner/**
+      - .github/tests/pg-upgrade/**
+      - .github/workflows/pg-upgrade.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  versions:
+    name: PG Upgrade (versions)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      containers: ${{ steps.versions.outputs.containers }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Supported sources, golden path and newest major
+        id: versions
+        run: .github/tests/pg-upgrade/versions.sh
+
+  unit:
+    name: PG Upgrade (unit)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Shellcheck
+        run: shellcheck pg-upgrade/scripts/*.sh .github/tests/pg-upgrade/*.sh
+
+      - name: Unit tests (bats, 2 workers)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats parallel
+          bats --jobs 2 .github/tests/pg-upgrade
+
+  containers:
+    name: PG Upgrade (containers, ${{ matrix.name }})
+    needs: versions
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.versions.outputs.containers) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Upgrade, rehearsal, rollback and failure paths, for postgres and (where it exists) PostGIS
+      - name: Run job.sh against real databases
+        env:
+          ENGINE: docker
+          PG_OLD: ${{ matrix.pg_old }}
+          PG_NEW: ${{ matrix.pg_new }}
+          GIS_OLD: ${{ matrix.gis_old }}
+          GIS_NEW: ${{ matrix.gis_new }}
+        run: .github/tests/pg-upgrade/container_test.sh

@@ -1,0 +1,109 @@
+name: PostgreSQL major upgrade
+description: |
+  Copy a PostgreSQL/PostGIS database into a new, empty database on a newer major,
+  verify every table's row count, and pause writes on the old one. Opt-in.
+branding:
+  icon: database
+  color: blue
+
+inputs:
+  ### Required
+  source:
+    description: |
+      Service name of the old database
+      Example: myapp-test-database
+    required: true
+  secret:
+    description: |
+      Secret with the database credentials, keys database-name, database-user and database-password
+      Example: myapp-test-database
+    required: true
+  oc_namespace:
+    description: OpenShift namespace, e.g. abc123-test
+    required: true
+  oc_server:
+    description: OpenShift server URL with port, e.g. https://api.silver.devops.gov.bc.ca:6443
+    required: true
+  oc_token:
+    description: OpenShift access token
+    required: true
+
+  ### Typical
+  target:
+    description: |
+      Service name of the new, empty database (required for mode upgrade)
+      Example: myapp-test-database-18
+    default: ""
+  image:
+    description: |
+      Docker Hub image for the new major, same as the target's: postgres or postgis/postgis with a tag
+      Example: postgres:18.0, postgis/postgis:18-3.6
+    required: true
+  mode:
+    description: |
+      upgrade: copy, verify and pause writes on the source
+      rehearse: copy into a throwaway server inside the Job and verify; changes nothing
+      rollback: make the source writable again
+    default: upgrade
+  app_label:
+    description: |
+      app label for the Job, NetworkPolicies and ConfigMap, so PR cleanup removes them
+      Example: myapp-123
+    default: ""
+
+  ### Usually not needed
+  target_secret:
+    description: Secret for the target, when it differs from secret (same keys)
+    default: ""
+  memory_limit:
+    description: Memory limit for the Job pod, at least 256Mi (the rehearsal server runs in it)
+    default: 1Gi
+  timeout:
+    description: Time allowed for the whole step, e.g. 30m, 1h
+    default: 30m
+
+outputs:
+  result:
+    description: upgraded, already-upgraded, rehearsed, rolled-back or skipped (no source Service)
+    value: ${{ steps.run.outputs.result }}
+  copy_seconds:
+    description: Seconds from the start of the copy to the verified commit; for upgrade, how long writes were paused. Empty when nothing was copied
+    value: ${{ steps.run.outputs.copy_seconds }}
+  peak_memory_mib:
+    description: Peak working set of the Job container in MiB (as oc adm top counts it, sampled every second), for sizing memory_limit. Empty when nothing was copied
+    value: ${{ steps.run.outputs.peak_memory_mib }}
+  rows:
+    description: Rows copied and verified across all tables. Empty when nothing was copied
+    value: ${{ steps.run.outputs.rows }}
+
+runs:
+  using: composite
+  steps:
+    - name: OpenShift login
+      uses: $/oc-runner
+      with:
+        oc_namespace: ${{ inputs.oc_namespace }}
+        oc_server: ${{ inputs.oc_server }}
+        oc_token: ${{ inputs.oc_token }}
+
+    - id: run
+      name: PostgreSQL ${{ inputs.mode }}
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        MODE: ${{ inputs.mode }}
+        SOURCE: ${{ inputs.source }}
+        TARGET: ${{ inputs.target }}
+        SECRET: ${{ inputs.secret }}
+        TARGET_SECRET: ${{ inputs.target_secret }}
+        IMAGE: ${{ inputs.image }}
+        APP_LABEL: ${{ inputs.app_label }}
+        MEMORY_LIMIT: ${{ inputs.memory_limit }}
+        TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        # run.sh validates TIMEOUT and gives its Job a deadline one minute shorter
+        if [[ "$TIMEOUT" =~ ^[0-9]+[smh]$ ]]; then
+          timeout --foreground "$TIMEOUT" "${ACTION_PATH}/scripts/run.sh"
+        else
+          "${ACTION_PATH}/scripts/run.sh"
+        fi
