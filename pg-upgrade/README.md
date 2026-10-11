@@ -41,7 +41,7 @@ The upgrade must finish before the backend points at the new database, so the da
     needs: [init]
     runs-on: ubuntu-24.04
     steps:
-      - uses: bcgov/action-deployer-openshift@e2d60eb9cacceb89c3b97d8dcf0a2c460eea5eab # v4.2.3
+      - uses: bcgov/actions-openshift/deployer@vX.Y.Z
         with:
           file: common/openshift.database.yml
           oc_namespace: ${{ secrets.oc_namespace }}
