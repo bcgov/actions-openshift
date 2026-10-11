@@ -234,6 +234,35 @@ The parameters `verification_path`, `verification_retry_attempts` and `verificat
 
 Pull requests created by Dependabot require their own secrets.  See `GitHub Repo > Settings > Secrets > Dependabot`.
 
+## Re-deploy didn't roll out
+
+When a template is deployed again with the same image tag (e.g. the PR number), the rendered Deployment is identical to what's already running, so `oc apply` changes nothing and the pods keep the old image.
+
+Teams deploying by a reused tag should add a `RANDOM_EXPRESSION` parameter and use it as a pod environment variable.  It's regenerated on every deployment, so each deploy rolls out.
+
+```yaml
+parameters:
+  - name: RANDOM_EXPRESSION
+    description: Random expression to make sure deployments update
+    from: "[a-zA-Z0-9]{32}"
+    generate: expression
+objects:
+  - kind: Deployment
+    ...
+    spec:
+      template:
+        spec:
+          containers:
+            - name: ${NAME}
+              env:
+                - name: RANDOM_EXPRESSION
+                  value: ${RANDOM_EXPRESSION}
+```
+
+Leave it off database templates, or the database restarts on every deployment.
+
+Deploying by commit SHA tag avoids the need for it, since every push changes the image reference.  [quickstart-openshift](https://github.com/bcgov/quickstart-openshift/pull/2817) does this for pull requests, and it's becoming the default.
+
 # Feedback
 
 Please contribute your ideas!  [Issues] and [pull requests] are appreciated.
