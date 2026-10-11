@@ -162,10 +162,7 @@ The last three are empty when nothing was copied. The same numbers, with the sou
 
 ## Tested versions
 
-CI in this repo, on every pull request and nightly (3:17 AM PDT, 2:17 AM PST):
-
-* **Containers:** every source major from 13 to 17 upgraded to quickstart-openshift's major (17) and to the newest `postgres` major on Docker Hub, found from its tags on each run, so a new release is tested the night it appears. Each pair runs the full set of checks, with `postgis/postgis` pairs at the newest PostGIS for each major. A brand-new major is tested for PostGIS once `postgis/postgis` publishes it.
-* **Cluster:** PostgreSQL 13 to 17 through rehearse, upgrade, repeat and rollback; and a PostGIS 13 to newest-major upgrade of a large dataset (points, polygons and lines with GiST indexes, a million-row table and 512 KB values), sized to the namespace quota, with counts, content hashes and spatial queries compared on both sides.
+CI in this repo, on every pull request: every source major from 13 to 17 upgraded to quickstart-openshift's major (17) and to the newest `postgres` major on Docker Hub, found from its tags on each run, in containers. Each pair runs the full set of checks, with `postgis/postgis` pairs at the newest PostGIS for each major. A brand-new major is tested for PostGIS once `postgis/postgis` publishes it.
 
 The action also accepts sources from PostgreSQL 10 to 12, which CI doesn't test.
 

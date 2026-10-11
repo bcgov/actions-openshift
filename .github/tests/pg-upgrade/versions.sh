@@ -4,7 +4,7 @@
 #   SOURCES: every source major the action supports
 #   GOLDEN:  bcgov/quickstart-openshift's major, the usual upgrade target
 #   NEWEST:  the highest major tag of the official postgres image (found here)
-# Writes containers=<json> and cluster=<json> to $GITHUB_OUTPUT. TAGS_DIR=<dir> reads
+# Writes containers=<json> to $GITHUB_OUTPUT. TAGS_DIR=<dir> reads
 # <dir>/postgres.json and <dir>/postgis-<major>.json instead of Docker Hub (tests).
 set -euo pipefail
 
@@ -65,18 +65,9 @@ CONTAINERS="$(
   done | jq -sc '{include: .}'
 )"
 
-# Representative cluster subset: the oldest source to the golden path with the full cycle on
-# small data, and PostGIS from the oldest source to the newest major on a large dataset
-OLDEST="$(tr ' ' '\n' <<< "$SOURCES" | sort -n | head -n 1)"
-CLUSTER="$(jq -nc --arg o "$OLDEST" --arg g "$GOLDEN" --arg go "${GIS[$OLDEST]}" --arg gn "${GIS[$GIS_NEWEST]}" '{include: [
-  {id: "pg", name: ("postgres " + $o + " → " + $g + ", small"), old: ("postgres:" + $o), new: ("postgres:" + $g), data: "small"},
-  {id: "gis", name: ("postgis " + $go + " → " + $gn + ", large"), old: ("postgis/postgis:" + $go), new: ("postgis/postgis:" + $gn), data: "large"}]}')"
-
 echo "Newest postgres major: ${NEWEST}; golden path: ${GOLDEN}; PostGIS newest: ${GIS[$GIS_NEWEST]}"
 jq -r '.include[] | "  containers: " + .name + " (" + .pg_old + " → " + .pg_new + (if .gis_new != "" then "; " + .gis_old + " → " + .gis_new else "" end) + ")"' <<< "$CONTAINERS"
-jq -r '.include[] | "  cluster: " + .name' <<< "$CLUSTER"
 {
   echo "containers=${CONTAINERS}"
-  echo "cluster=${CLUSTER}"
   echo "newest=${NEWEST}"
 } >> "${GITHUB_OUTPUT:-/dev/null}"

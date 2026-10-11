@@ -25,7 +25,6 @@ out() { sed -n "s/^$1=//p" "$GITHUB_OUTPUT"; }
   [ "$(out newest)" = 18 ]
   [ "$(out containers | jq -r '[.include[].name] | join(",")')" = "13 → 17,14 → 17,15 → 17,16 → 17,13 → 18,14 → 18,15 → 18,16 → 18,17 → 18" ]
   [ "$(out containers | jq -r '.include[] | select(.name == "17 → 18") | .gis_old + " " + .gis_new')" = "postgis/postgis:17-3.5 postgis/postgis:18-3.6" ]
-  [ "$(out cluster | jq -r '[.include[] | .old + ">" + .new + ":" + .data] | join(" ")')" = "postgres:13>postgres:17:small postgis/postgis:13-3.5>postgis/postgis:18-3.6:large" ]
 }
 
 @test "a new major is picked up with no pin to bump" {
@@ -45,7 +44,6 @@ out() { sed -n "s/^$1=//p" "$GITHUB_OUTPUT"; }
   [ "$(out containers | jq -r '.include[] | select(.name == "13 → 19") | .pg_new + " " + .gis_new')" = "postgres:19 postgis/postgis:18-3.6" ]
   # 18 → 19 has no PostGIS pair: nothing newer than 18 to go to
   [ "$(out containers | jq -r '.include[] | select(.name == "18 → 19") | .gis_new')" = "" ]
-  [ "$(out cluster | jq -r '.include[1].new')" = postgis/postgis:18-3.6 ]
 }
 
 @test "unreadable tags fail with a Fix line" {

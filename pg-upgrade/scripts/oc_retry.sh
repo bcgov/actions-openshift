@@ -2,7 +2,7 @@
 # GitHub runners sometimes can't reach the OpenShift API for a few seconds (bcgov/actions-openshift#49).
 # Retry a call only when the connection was never made (dial errors), so no request reached the
 # server and even a create, patch or exec is safe to repeat. stdin is kept for "-f -" and "exec -i";
-# output is printed once. Sourced by run.sh and by this repo's cluster tests.
+# output is printed once. Sourced by run.sh.
 OC_RETRIES="${OC_RETRIES:-6}"
 OC_RETRY_DELAY="${OC_RETRY_DELAY:-10}"
 oc() {
