@@ -69,3 +69,19 @@ run_script() {
   run_script
   [ "$status" -eq 0 ]
 }
+
+@test "commands output under the limit is passed on" {
+  export COMMANDS='echo small-value >> "$GITHUB_OUTPUT"'
+  run_script
+  [ "$status" -eq 0 ]
+  grep -q '^small-value$' "$GITHUB_OUTPUT"
+}
+
+@test "commands output over the limit fails clearly and writes nothing" {
+  export COMMANDS='head -c 524289 /dev/zero | tr "\\0" a >> "$GITHUB_OUTPUT"'
+  run_script
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error title=bcgov/actions-openshift/oc-runner: commands output too large::"* ]]
+  [[ "$output" == *"the limit is 524288 bytes"* ]]
+  [ ! -s "$GITHUB_OUTPUT" ]
+}

@@ -136,7 +136,7 @@ This action returns:
 
 `blocked` and `unreachable` are set even though the step fails, so a later step can react with `if: failure() && steps.<id>.outputs.blocked == 'true'`.
 
-`commands` is expected to be empty in most runs. To populate it, write to `$GITHUB_OUTPUT` inside your `commands` input. Plain text lines are automatically mapped to the `commands` output (you do not need to prefix with `commands=`). Existing `commands=<value>` usage is still supported.
+`commands` is expected to be empty in most runs. To populate it, write to `$GITHUB_OUTPUT` inside your `commands` input. Plain text lines are automatically mapped to the `commands` output (you do not need to prefix with `commands=`). Existing `commands=<value>` usage is still supported. The `commands` output is capped at 512 KiB (524288 bytes), since GitHub allows 1 MB of outputs per job counted as UTF-16. Larger output fails the step with a `commands output too large` error instead of being truncated; write large data to a file or artifact and put only a path or summary in `$GITHUB_OUTPUT`.
 
 ```yaml
 jobs:
