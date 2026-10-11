@@ -9,7 +9,7 @@ Repository facts and constraints for automated coding assistants.
 - Tests: `.github/tests/` (bats). Script-injection audit: `scripts/audit_composite_actions.py`
 
 ## Build, test, deploy
-- No package build. Lint workflows: `docker run --rm -v "$(pwd)":/repo -w /repo rhysd/actionlint:latest`. Audit: `python3 scripts/audit_composite_actions.py`
+- No package build. Lint workflows: `docker run --rm -v "$(pwd)":/repo -w /repo rhysd/actionlint:latest`. Audit: `python3 scripts/audit_composite_actions.py`. ShellCheck: `shellcheck --severity=warning` on `*.sh` (except `crunchy/`) and `python3 scripts/shellcheck_composite_actions.py`
 - Unit tests: `bats .github/tests/crunchy .github/tests/route-tls .github/tests/image-import` and `bats .github/tests/oc-runner`. Chart: `helm lint crunchy/charts/crunchy --values crunchy/values.yml`
 - OpenShift deploys run from GitHub Actions, not a workstation. Same-repo pull requests exercise deployer and route-tls; `pr-close.yml` removes the deployer test resources. Workstation scripts live in [bcgov/devops-scripts](https://github.com/bcgov/devops-scripts)
 
