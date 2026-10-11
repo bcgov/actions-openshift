@@ -2,6 +2,8 @@
 
 set -eEuo pipefail
 ACTION_SOURCE="bcgov/actions-openshift/oc-runner"
+# Largest commands output passed on; above it the step fails rather than truncate
+OUTPUT_LIMIT_BYTES=524288
 
 on_commands_error() {
   exit_code="${1:-$?}"
@@ -76,9 +78,9 @@ fi
 # Map user-written output lines to the action's generic commands output.
 # Allows plain `echo "value" >> "$GITHUB_OUTPUT"` without requiring `commands=`.
 if [ -s "$ACTION_OUTPUT_FILE" ]; then
-  DELIM="EOF_ACTION_OC_RUNNER_COMMANDS_$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${RANDOM}${RANDOM}$$")"
+  MAPPED_FILE="$(mktemp)"
+  trap 'rm -f "$ACTION_OUTPUT_FILE" "$COMMANDS_FILE" "$TIMEOUT_MARK" "$MAPPED_FILE"' EXIT
   {
-    echo "commands<<$DELIM"
     if grep -q '^commands=' "$ACTION_OUTPUT_FILE"; then
       sed -n 's/^commands=//p' "$ACTION_OUTPUT_FILE"
     elif grep -q '^commands<<' "$ACTION_OUTPUT_FILE"; then
@@ -100,6 +102,19 @@ if [ -s "$ACTION_OUTPUT_FILE" ]; then
     else
       cat "$ACTION_OUTPUT_FILE"
     fi
+  } > "$MAPPED_FILE"
+
+  # GitHub allows 1 MB of outputs per job, counted as UTF-16 (2 bytes per character)
+  MAPPED_BYTES="$(wc -c < "$MAPPED_FILE")"
+  if [ "$MAPPED_BYTES" -gt "$OUTPUT_LIMIT_BYTES" ]; then
+    echo "::error title=${ACTION_SOURCE}: commands output too large::[${ACTION_SOURCE}] commands output is ${MAPPED_BYTES} bytes; the limit is ${OUTPUT_LIMIT_BYTES} bytes. Write large data to a file or artifact and put only a path or summary in \$GITHUB_OUTPUT."
+    exit 1
+  fi
+
+  DELIM="EOF_ACTION_OC_RUNNER_COMMANDS_$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "${RANDOM}${RANDOM}$$")"
+  {
+    echo "commands<<$DELIM"
+    cat "$MAPPED_FILE"
     echo "$DELIM"
   } >> "$REAL_GITHUB_OUTPUT"
 fi
