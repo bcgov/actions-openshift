@@ -12,10 +12,10 @@ Pin a tag or commit SHA, not `@main`. `oc-runner` checks out the caller repo, so
 
 ## Usage
 
-In quickstart-openshift's `pr-open.yml`, the Builds job (matrix `backend`, `frontend`, `migrations`) runs `bcgov/action-builder-ghcr`. Give that step `id: build` and import what it published. `registry_host` is `ghcr.io` and `image_path` is `/owner/repo/package:tag`, using the first tag, so this imports `backend:<pr>`:
+Build with `bcgov/actions/builder`, for example in a Builds job with matrix `backend`, `frontend`, `migrations` like quickstart-openshift's `pr-open.yml`. Give that step `id: build` and import what it published. `registry_host` is `ghcr.io` and `image_path` is `/owner/repo/package:tag`, using the first tag, so this imports `backend:<pr>`:
 
 ```yaml
-- uses: bcgov/action-builder-ghcr@<sha> # vX.Y.Z
+- uses: bcgov/actions/builder@<sha> # vX.Y.Z
   id: build
   with:
     package: ${{ matrix.package }}
@@ -23,7 +23,9 @@ In quickstart-openshift's `pr-open.yml`, the Builds job (matrix `backend`, `fron
       ${{ github.event.number }}
       ${{ github.event.pull_request.head.sha }}
     tag_fallback: latest
-    triggers: ('${{ matrix.package }}/', '.github/workflows/pr-open.yml')
+    triggers: |
+      ${{ matrix.package }}/
+      .github/workflows/pr-open.yml
 
 - name: Import into OpenShift
   uses: bcgov/actions-openshift/image-import@vX.Y.Z
@@ -44,7 +46,7 @@ name: image-import
 tag: ${{ github.event.number }}
 ```
 
-OpenShift needs `oc_namespace`, `oc_server`, and `oc_token`. GHCR pulls use a live token, like `bcgov/action-builder-ghcr` and `deployer`: `github_token` defaults to the run's `github.token`. The action stores it in a pull secret scoped to that repository path, as `github.actor`, imports, and deletes the secret.
+OpenShift needs `oc_namespace`, `oc_server`, and `oc_token`. GHCR pulls use a live token, like `bcgov/actions/builder` and `deployer`: `github_token` defaults to the run's `github.token`. The action stores it in a pull secret scoped to that repository path, as `github.actor`, imports, and deletes the secret.
 
 Grant the job `packages: read`. A private package published by another repository must also give the calling repository read access in the package's **Manage Actions access** settings, or pass a PAT as `github_token`. Otherwise GHCR denies the import. The Builds job above already has `packages: write`.
 

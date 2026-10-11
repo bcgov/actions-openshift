@@ -23,7 +23,7 @@ Here's a breakdown of the main phases:
 
 ### Deploy Database
 
-*   This is the core deployment step, utilizing the `bcgov/action-oc-runner` action to interact with the target OpenShift cluster.
+*   This is the core deployment step, utilizing the sibling `oc-runner` action to interact with the target OpenShift cluster.
 *   It prepares a Crunchy Helm chart (adjusting the name in `Chart.yaml`) and packages it.
 *   It then uses `helm upgrade --install` to deploy or update the Crunchy PostgreSQL cluster.
 *   **Importantly**, it includes logic to conditionally enable and configure S3 backups based on provided inputs.
