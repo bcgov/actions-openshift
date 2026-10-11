@@ -12,7 +12,7 @@ Pin a tag or commit SHA, not `@main`. `oc-runner` checks out the caller repo, so
 
 ## Usage
 
-Build with `bcgov/actions/builder`, for example in a Builds job with matrix `backend`, `frontend`, `migrations` like quickstart-openshift's `pr-open.yml`. Give that step `id: build` and import what it published. `registry_host` is `ghcr.io` and `image_path` is `/owner/repo/package:tag`, using the first tag, so this imports `backend:<pr>`:
+This example uses `bcgov/actions/builder` in a Builds job with matrix `backend`, `frontend`, `migrations`. quickstart-openshift's `pr-open.yml` uses `bcgov/action-builder-ghcr`, which has the same `registry_host` and `image_path` outputs. Give the build step `id: build` and import what it published. `registry_host` is `ghcr.io` and `image_path` is `/owner/repo/package:tag`, using the first tag, so this imports `backend:<pr>`:
 
 ```yaml
 - uses: bcgov/actions/builder@<sha> # vX.Y.Z
