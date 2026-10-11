@@ -41,6 +41,7 @@ die() {
 
 # set -e exits before die on oc login, backup, and oc apply. Report the line and
 # status only. BASH_COMMAND can contain the token or the private key.
+# shellcheck disable=SC2154 # rc and line are assigned inside the trap string
 trap 'rc=$?; line=${LINENO}; trap - ERR; die "Command failed at line ${line} (exit status ${rc}). See the step log for details."' ERR
 
 load_file() {

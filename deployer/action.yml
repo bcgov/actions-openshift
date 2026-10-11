@@ -264,6 +264,7 @@ runs:
 
         # Follow any active deployments
         DEPLOYMENT=$(jq -r '.items[] | select(.kind=="Deployment").metadata.name //empty' "${TEMPLATE_FILE}")
+        # shellcheck disable=SC2046 # quoting changes multi-Deployment templates; left as is
         if [ ! -z "${DEPLOYMENT}" ]&&[ ! -z $(oc get deployment ${DEPLOYMENT} -o name --ignore-not-found) ]; then
           oc rollout status deployment/${DEPLOYMENT} -w
         fi
