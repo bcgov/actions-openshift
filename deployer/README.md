@@ -216,17 +216,11 @@ The action will return a boolean (true|false) of whether a deployment has been t
     echo "Triggered = ${{ steps.meaningful_id_name.outputs.triggered }}"
 ```
 
-# Deprecations
+# Unsupported Inputs
 
-## Deployment Configs
+The inputs `delete_completed` and `post_rollout` are not supported. Use the sibling [`oc-runner`](../oc-runner/README.md) action for that work.
 
-The DeploymentConfig API has been [deprecated by Red Hat](https://access.redhat.com/articles/7041372).  If this action is used to deploy a template containing DeploymentConfig objects, it will provide an error message and exit.
-
-## Parameters
-
-The parameters `delete_completed` and `post_rollout` are deprecated.  This functionality is better served by the sibling [`oc-runner`](../oc-runner/README.md) action.
-
-The parameters `verification_path`, `verification_retry_attempts` and `verification_retry_seconds` are deprecated.  Please use OpenShift [health checks](https://docs.openshift.com/container-platform/4.18/applications/application-health.html) instead.
+The inputs `verification_path`, `verification_retry_attempts` and `verification_retry_seconds` are not supported. Use OpenShift [health checks](https://docs.openshift.com/container-platform/4.18/applications/application-health.html) instead.
 
 # Troubleshooting
 

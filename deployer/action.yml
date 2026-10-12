@@ -188,13 +188,6 @@ runs:
         echo "template_file=${TEMPLATE_FILE}" >> "${GITHUB_OUTPUT}"
         oc process -f "${FILE}" "${ARGS[@]}" --local > "${TEMPLATE_FILE}"
 
-        # Check for deprecated DeploymentConfig objects
-        DC_COUNT=$(jq '[.items[] | select(.kind=="DeploymentConfig")] | length' "${TEMPLATE_FILE}")
-        if [ "${DC_COUNT}" -gt 0 ]; then
-          echo "Error: DeploymentConfig objects are deprecated and no longer supported. Please use Deployment objects instead."
-          exit 1
-        fi
-
         # Clean any previous ImageStreams
         for name in $(jq -r '.items[] | select(.kind=="ImageStream").metadata.name' "${TEMPLATE_FILE}"); do
           oc delete imagestream ${name} --ignore-not-found
