@@ -216,13 +216,7 @@ The action will return a boolean (true|false) of whether a deployment has been t
     echo "Triggered = ${{ steps.meaningful_id_name.outputs.triggered }}"
 ```
 
-# Unsupported Objects and Inputs
-
-## Deployment Configs
-
-The DeploymentConfig API has been [deprecated by Red Hat](https://access.redhat.com/articles/7041372).  If this action is used to deploy a template containing DeploymentConfig objects, it will provide an error message and exit.
-
-## Parameters
+# Unsupported Inputs
 
 The inputs `delete_completed` and `post_rollout` are not supported. Use the sibling [`oc-runner`](../oc-runner/README.md) action for that work.
 
