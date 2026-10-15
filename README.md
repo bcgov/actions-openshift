@@ -1,6 +1,11 @@
 # actions-openshift
 Consolidated repo for bcgov-specific openshift actions. Please feel free to contribute!
 
+
+## Experimental actions (not covered by the 1.0 semver promise)
+
+`pg-upgrade` and `sysdig-monitor` are experimental. Their inputs, outputs and behaviour may change in any release, including patch releases. Do not rely on them for a stable 1.0 contract.
+
 ## Workflows and Actions
 
 ### 1. [PR Cleanup](./cleanup-pr) (Composite Action)
@@ -53,6 +58,19 @@ Deploy to OpenShift using templates. Verification or penetration tests.
 
 ```yaml
 - uses: bcgov/actions-openshift/deployer@vX.Y.Z
+```
+
+
+### [sysdig-monitor](./sysdig-monitor/) (Composite Action)
+Create/update Sysdig email alerts for an OpenShift app on PROD deploy. Experimental (see above).
+* See [sysdig-monitor/README.md](./sysdig-monitor/README.md) for inputs and usage.
+
+```yaml
+- uses: bcgov/actions-openshift/sysdig-monitor@vX.Y.Z
+  with:
+    sysdig_api_token: ${{ secrets.SYSDIG_API_TOKEN }}
+    oc_namespace: ${{ secrets.OC_NAMESPACE }}
+    app: my-app
 ```
 
 ### 7. SchemaSpy (`.github/workflows/.schema-spy.yml`)

@@ -75,7 +75,7 @@ Adding/removing alert recipients is done by editing `spec.team.users[]` in the S
 ## Usage
 
 ```yaml
-- uses: bcgov/actions/sysdig-monitor@vX.Y.Z # Replace with latest release tag
+- uses: bcgov/actions-openshift/sysdig-monitor@vX.Y.Z # Replace with latest release tag
   with:
     ### Required
 
