@@ -2,10 +2,6 @@
 Consolidated repo for bcgov-specific openshift actions. Please feel free to contribute!
 
 
-## Experimental actions (not covered by the 1.0 semver promise)
-
-`pg-upgrade` and `sysdig-monitor` are experimental. Their inputs, outputs and behaviour may change in any release, including patch releases. Do not rely on them for a stable 1.0 contract.
-
 ## Workflows and Actions
 
 ### 1. [PR Cleanup](./cleanup-pr) (Composite Action)
@@ -44,15 +40,7 @@ Login and run `oc` commands (and optional cronjobs) on OpenShift.
 ```
 
 
-### 5. [crunchy](./crunchy) (Composite Action)
-Deploy Crunchy Postgres on OpenShift (PR pipelines and cleanup).
-* See [crunchy/README.md](./crunchy/README.md).
-
-```yaml
-- uses: bcgov/actions-openshift/crunchy@vX.Y.Z
-```
-
-### 6. [deployer](./deployer) (Composite Action)
+### 5. [deployer](./deployer) (Composite Action)
 Deploy to OpenShift using templates. Verification or penetration tests.
 * See [deployer/README.md](./deployer/README.md).
 
@@ -61,8 +49,8 @@ Deploy to OpenShift using templates. Verification or penetration tests.
 ```
 
 
-### [sysdig-monitor](./sysdig-monitor/) (Composite Action)
-Create/update Sysdig email alerts for an OpenShift app on PROD deploy. Experimental (see above).
+### 6. [sysdig-monitor](./sysdig-monitor/) (Composite Action)
+Create/update Sysdig email alerts for an OpenShift app on PROD deploy.
 * See [sysdig-monitor/README.md](./sysdig-monitor/README.md) for inputs and usage.
 
 ```yaml
