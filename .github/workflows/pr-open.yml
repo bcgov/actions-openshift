@@ -565,7 +565,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
-      # github_token defaults to the run's token, so GHCR sees a live credential
+      # `token` defaults to the run's token, so GHCR sees a live credential
       - name: Import onto this pull request's tag
         uses: $/image-import
         with:

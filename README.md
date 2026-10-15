@@ -1,6 +1,11 @@
 # actions-openshift
 Consolidated repo for bcgov-specific openshift actions. Please feel free to contribute!
 
+
+## Experimental actions (not covered by the 1.0 semver promise)
+
+`pg-upgrade` and `sysdig-monitor` are experimental. Their inputs, outputs and behaviour may change in any release, including patch releases. Do not rely on them for a stable 1.0 contract.
+
 ## Workflows and Actions
 
 ### 1. [PR Cleanup](./cleanup-pr) (Composite Action)

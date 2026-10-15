@@ -140,7 +140,7 @@ The action accepts the following inputs:
 | `route_host` | Override: Route host name; requires `route_enabled`, OpenShift generates one if omitted | |
 | `environment` | Environment name (omit for PRs) | |
 | `triggers` | Paths used to trigger a deployment (e.g., ./backend/ ./frontend/) | |
-| `oc_server` | OpenShift server URL | https://api.silver.devops.gov.bc.ca:6443 |
+| `oc_server` | OpenShift server URL with port (required) | |
 | `s3_access_key` | S3 access key for backups | |
 | `s3_secret_key` | S3 secret key for backups | |
 | `s3_bucket` | S3 bucket for backups | |
@@ -153,7 +153,7 @@ The action accepts the following inputs:
 | `ref` | Git ref of `repository` (e.g., branch, tag, SHA); used only when `repository` is set | main |
 | `release_name` | The release name to use, if provided overrides the computed pg-md5hash(1-8) of github repo name, if release_name is `pg-abc`,postgres cluster created will be `pg-abc-crunchy` | |
 | `diff_branch` | The branch to diff against (if not using default branch) Optional | |
-| `github_token` | (Optional) GitHub (built-in or PAT) token, otherwise inherited from workflow token | `github.token` |
+| `token` | (Optional) GitHub (built-in or PAT) token, otherwise inherited from workflow token | `github.token` |
 
 ### Outputs
 
@@ -234,7 +234,7 @@ jobs:
           environment: ${{ inputs.environment }}
           values_file: charts/crunchy/values.yml
           triggers: ${{ inputs.triggers }}
-          # github_token: ${{ secrets.GITHUB_TOKEN }}  # Optional; needed for private repositories (defaults to github.token)
+          # token: ${{ secrets.GITHUB_TOKEN }}  # Optional; needed for private repositories (defaults to github.token)
 ```
 
 ### Deployment with S3 Backups
@@ -269,7 +269,7 @@ jobs:
           environment: ${{ inputs.environment }}
           values_file: charts/crunchy/values.yml
           triggers: ${{ inputs.triggers }}
-          # github_token: ${{ secrets.GITHUB_TOKEN }}  # Optional; specify a custom token/PAT if not using standard inheritance (defaults to github.token)
+          # token: ${{ secrets.GITHUB_TOKEN }}  # Optional; specify a custom token/PAT if not using standard inheritance (defaults to github.token)
           s3_access_key: ${{ secrets.S3_ACCESS_KEY }}
           s3_secret_key: ${{ secrets.S3_SECRET_KEY }}
           s3_bucket: ${{ secrets.S3_BUCKET }}
@@ -323,18 +323,18 @@ require configuration.  This action may access a values.yml file from the callin
 Crunchy's deployment parameters.  When the calling repository is private the values.yml file is restricted, 
 and requires authentication to access.
 
-By default, the action inherits the calling workflow's built-in GitHub authentication token (`github.token`) via the optional `github_token` input. For this to succeed in a private repository, your workflow (or the job within the workflow) must have `contents: read` permissions:
+By default, the action inherits the calling workflow's built-in GitHub authentication token (`github.token`) via the optional `token` input. For this to succeed in a private repository, your workflow (or the job within the workflow) must have `contents: read` permissions:
 
 ```yaml
 permissions:
   contents: read
 ```
 
-If you need to access a different repository or require a custom Personal Access Token (PAT), you can pass it explicitly via the optional `github_token` input:
+If you need to access a different repository or require a custom Personal Access Token (PAT), you can pass it explicitly via the optional `token` input:
 
 ```yaml
 with:
-  github_token: ${{ secrets.MY_CUSTOM_PAT }}
+  token: ${{ secrets.MY_CUSTOM_PAT }}
 ```
 
 ## Backup and Recovery

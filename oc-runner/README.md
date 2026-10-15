@@ -199,3 +199,14 @@ Please contribute your ideas!  [Issues] and [pull requests] are appreciated.
 <!-- # Acknowledgements
 
 This Action is provided courtesty of the Forestry Digital Services, part of the Government of British Columbia. -->
+
+## Outputs
+
+| Output | Description |
+| --- | --- |
+| `commands` | Data written to `$GITHUB_OUTPUT` by the `commands` step (may be empty) |
+| `job_name` | Name of the Job created from the `cronjob` input |
+| `triggered` | Whether path triggers fired (`true`/`false`) |
+| `blocked` | `true` when the runner IP is blocked from the OpenShift API |
+| `unreachable` | `true` when neither the API nor the cluster router answered |
+
