@@ -73,4 +73,5 @@ runs:
         DEBUG: ${{ inputs.debug }}
         CHANNEL_TEMPLATE: ${{ github.action_path }}/templates/channel.json
         ALERTS_DIR: ${{ github.workspace }}/${{ inputs.alerts_dir }}
-      run: ${{ github.action_path }}/scripts/apply.sh
+        APPLY_SCRIPT: ${{ github.action_path }}/scripts/apply.sh
+      run: bash "$APPLY_SCRIPT"
