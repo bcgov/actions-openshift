@@ -72,7 +72,7 @@ fi
 
 if [ -n "${TOKEN:-}" ]; then
   if [[ "${TOKEN}" =~ [[:space:]] ]]; then
-    fail "github_token must not contain whitespace." "Pass the token unchanged, or omit github_token to use the run's token."
+    fail "token must not contain whitespace." "Pass the token unchanged, or omit token to use the run's token."
   fi
   # Live token in a pull secret scoped to the repository path. Deleted after the import.
   secret="image-import-$(printf '%s' "${path}:${tag}" | sha256sum | cut -c1-20)"
@@ -110,7 +110,7 @@ if [ -z "${expected}" ]; then
       | tr -d '\r' | awk 'tolower($0) ~ /^docker-content-digest:/ { sub(/^[^:]*:[ \t]*/, ""); print }')" || expected=""
   fi
   if [[ ! "${expected}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
-    fail "Could not read the GHCR digest of ${IMAGE}." "Check that the image exists and that github_token can read the package (packages: read), or pin image with @sha256:<digest>."
+    fail "Could not read the GHCR digest of ${IMAGE}." "Check that the image exists and that token can read the package (packages: read), or pin image with @sha256:<digest>."
   fi
 fi
 actual="$(oc get imagestream "${stream}" -o jsonpath="{.status.tags[?(@.tag==\"${tag}\")].items[0].image}")"

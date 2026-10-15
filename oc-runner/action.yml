@@ -78,7 +78,7 @@ inputs:
       Example: 10m, 30s, 1h
     default: 10m
     pattern: "^[0-9]+[mhs]$"
-  github_token:
+  token:
     description: Specify token (GH or PAT), instead of inheriting one from the calling workflow
     default: ${{ github.token }}
   verbose:
@@ -101,9 +101,9 @@ outputs:
       Typically populated via $GITHUB_OUTPUT in the commands step and may be empty
       if no commands are run or the commands step does not execute.
     value: ${{ steps.commands.outputs.commands }}
-  job-name:
+  job_name:
     description: Name of the job created from the cronjob param
-    value: ${{ steps.cronjob.outputs.job-name }}
+    value: ${{ steps.cronjob.outputs.job_name }}
   triggered:
     description: Whether the action was triggered
     value: ${{ steps.diff.outputs.triggered }}
@@ -153,7 +153,7 @@ runs:
     - if: steps.diff.outputs.triggered == 'true'
       uses: actions/checkout@v7
       with:
-        token: ${{ inputs.github_token }}
+        token: ${{ inputs.token }}
         repository: ${{ inputs.repository }}
         ref: ${{ inputs.ref }}
 
@@ -177,7 +177,7 @@ runs:
       name: Restore caller checkout
       uses: actions/checkout@v7
       with:
-        token: ${{ inputs.github_token }}
+        token: ${{ inputs.token }}
 
     - if: steps.diff.outputs.triggered == 'true' && inputs.cronjob
       id: cronjob

@@ -11,7 +11,7 @@ This composite action cleans up resources in a target OpenShift namespace on pul
 | `repository` | The GitHub repository name | No | `${{ github.event.repository.name }}` |
 | `target` | Environment target identifier (e.g. PR number) | No | `${{ github.event.number }}` |
 | `remove_pvc` | Comma-separated list of PVCs to delete | No | `""` |
-| `oc_server` | OpenShift API server URL | No | `https://api.silver.devops.gov.bc.ca:6443` |
+| `oc_server` | OpenShift API server URL with port | Yes | |
 | `oc_namespace` | Target OpenShift namespace | **Yes** | N/A |
 | `oc_token` | OpenShift Service Account token | **Yes** | N/A |
 

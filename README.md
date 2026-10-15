@@ -48,7 +48,6 @@ Deploy to OpenShift using templates. Verification or penetration tests.
 - uses: bcgov/actions-openshift/deployer@vX.Y.Z
 ```
 
-
 ### 6. [sysdig-monitor](./sysdig-monitor/) (Composite Action)
 Create/update Sysdig email alerts for an OpenShift app on PROD deploy.
 * See [sysdig-monitor/README.md](./sysdig-monitor/README.md) for inputs and usage.

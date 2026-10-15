@@ -46,9 +46,9 @@ name: image-import
 tag: ${{ github.event.number }}
 ```
 
-OpenShift needs `oc_namespace`, `oc_server`, and `oc_token`. GHCR pulls use a live token, like `bcgov/actions/builder` and `deployer`: `github_token` defaults to the run's `github.token`. The action stores it in a pull secret scoped to that repository path, as `github.actor`, imports, and deletes the secret.
+OpenShift needs `oc_namespace`, `oc_server`, and `oc_token`. GHCR pulls use a live token, like `bcgov/actions/builder` and `deployer`: `token` defaults to the run's `github.token`. The action stores it in a pull secret scoped to that repository path, as `github.actor`, imports, and deletes the secret.
 
-Grant the job `packages: read`. A private package published by another repository must also give the calling repository read access in the package's **Manage Actions access** settings, or pass a PAT as `github_token`. Otherwise GHCR denies the import. The Builds job above already has `packages: write`.
+Grant the job `packages: read`. A private package published by another repository must also give the calling repository read access in the package's **Manage Actions access** settings, or pass a PAT as `token`. Otherwise GHCR denies the import. The Builds job above already has `packages: write`.
 
 ```yaml
 permissions:

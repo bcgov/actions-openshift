@@ -12,7 +12,7 @@ inputs:
     description: "ImageStream tag. Defaults to the tag in image, or the digest hex when image has no tag."
     required: false
     default: ""
-  github_token:
+  token:
     description: "Specify token (GH or PAT), instead of inheriting one from the calling workflow. The import pulls from GHCR with it."
     required: false
     default: ${{ github.token }}
@@ -36,7 +36,7 @@ runs:
         IMAGE: ${{ inputs.image }}
         NAME: ${{ inputs.name }}
         TAG: ${{ inputs.tag }}
-        TOKEN: ${{ inputs.github_token }}
+        TOKEN: ${{ inputs.token }}
         ACTOR: ${{ github.actor }}
         OC_NAMESPACE: ${{ inputs.oc_namespace }}
       with:

@@ -23,9 +23,8 @@ inputs:
     required: false
     default: ""
   oc_server:
-    description: "OpenShift server"
-    required: false
-    default: "https://api.silver.devops.gov.bc.ca:6443"
+    description: "OpenShift server URL with port (e.g. https://api.silver.devops.gov.bc.ca:6443)"
+    required: true
   oc_namespace:
     description: "OpenShift namespace"
     required: true

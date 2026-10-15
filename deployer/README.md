@@ -60,7 +60,6 @@ Testing has only been done with public images (ghcr.io, hub.docker.com) so far.
     ref: ${{ github.event.repository.default_branch }}
 
     # Override default OpenShift CLI (oc) version; e.g. 4.13
-    oc_version: "4.13"
 
     # Repository to clone and process
     # Useful for consuming other repos, defaults to the current one

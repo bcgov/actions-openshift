@@ -80,11 +80,11 @@ inputs:
       Example: bcgov/quickstart-openshift
     default: ${{ github.repository }}
     pattern: "^[a-zA-Z0-9-_]+/[a-zA-Z0-9-_]+$"
-  github_token:
+  token:
     description: |
       Specify token (GH or PAT), instead of inheriting one from the calling workflow
     default: ${{ github.token }}
-  oc_login_attempts:
+  login_attempts:
     description: |
       Maximum number of login attempts; values above 2 are capped at 2 (one retry)
       Example: 1, 2
@@ -123,32 +123,20 @@ runs:
       with:
         triggers: ${{ inputs.triggers }}
         ref: ${{ inputs.ref }}
-        token: ${{ inputs.github_token }}
+        token: ${{ inputs.token }}
 
     - name: Validate oc login retry inputs
       if: steps.triggers.outputs.triggered == 'true'
       shell: bash
       env:
-        OC_LOGIN_ATTEMPTS: ${{ inputs.oc_login_attempts }}
+        LOGIN_ATTEMPTS: ${{ inputs.login_attempts }}
       run: |
-        if ! [[ "${OC_LOGIN_ATTEMPTS}" =~ ^[1-9][0-9]*$ ]]; then
-          echo "::error::oc_login_attempts must be a positive integer"
+        if ! [[ "${LOGIN_ATTEMPTS}" =~ ^[1-9][0-9]*$ ]]; then
+          echo "::error::login_attempts must be a positive integer"
           exit 1
         fi
 
-    - if: inputs.oc_version != '' && steps.triggers.outputs.triggered == 'true'
-      uses: $/oc-runner
-      with:
-        oc_namespace: ${{ inputs.oc_namespace }}
-        oc_token: ${{ inputs.oc_token }}
-        oc_server: ${{ inputs.oc_server }}
-        oc_version: ${{ inputs.oc_version }}
-        repository: ${{ inputs.repository }}
-        triggers: ${{ inputs.triggers }}
-        github_token: ${{ inputs.github_token }}
-        login_attempts: ${{ inputs.oc_login_attempts }}
-
-    - if: inputs.oc_version == '' && steps.triggers.outputs.triggered == 'true'
+    - if: steps.triggers.outputs.triggered == 'true'
       uses: $/oc-runner
       with:
         oc_namespace: ${{ inputs.oc_namespace }}
@@ -156,8 +144,8 @@ runs:
         oc_server: ${{ inputs.oc_server }}
         repository: ${{ inputs.repository }}
         triggers: ${{ inputs.triggers }}
-        github_token: ${{ inputs.github_token }}
-        login_attempts: ${{ inputs.oc_login_attempts }}
+        token: ${{ inputs.token }}
+        login_attempts: ${{ inputs.login_attempts }}
 
     - if: steps.triggers.outputs.triggered == 'true'
       id: process
@@ -275,4 +263,4 @@ runs:
       if: github.repository != inputs.repository
       uses: actions/checkout@v7
       with:
-        token: ${{ inputs.github_token }}
+        token: ${{ inputs.token }}
