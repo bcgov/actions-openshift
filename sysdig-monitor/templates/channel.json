@@ -1,0 +1,15 @@
+{
+  "id": null,
+  "version": null,
+  "teamId": 0,
+  "name": "__CHANNEL_NAME__",
+  "type": "EMAIL",
+  "enabled": true,
+  "sendTestNotification": false,
+  "failureStrategy": "DO_NOT_NOTIFY",
+  "failureEmailRecipients": [],
+  "options": {
+    "hideSensitiveInfo": false,
+    "emailRecipients": []
+  }
+}
