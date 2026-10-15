@@ -2,10 +2,6 @@
 Consolidated repo for bcgov-specific openshift actions. Please feel free to contribute!
 
 
-## Experimental actions (not covered by the 1.0 semver promise)
-
-`pg-upgrade` and `sysdig-monitor` are experimental. Their inputs, outputs and behaviour may change in any release, including patch releases. Do not rely on them for a stable 1.0 contract.
-
 ## Workflows and Actions
 
 ### 1. [PR Cleanup](./cleanup-pr) (Composite Action)
@@ -44,15 +40,7 @@ Login and run `oc` commands (and optional cronjobs) on OpenShift.
 ```
 
 
-### 5. [crunchy](./crunchy) (Composite Action)
-Deploy Crunchy Postgres on OpenShift (PR pipelines and cleanup).
-* See [crunchy/README.md](./crunchy/README.md).
-
-```yaml
-- uses: bcgov/actions-openshift/crunchy@vX.Y.Z
-```
-
-### 6. [deployer](./deployer) (Composite Action)
+### 5. [deployer](./deployer) (Composite Action)
 Deploy to OpenShift using templates. Verification or penetration tests.
 * See [deployer/README.md](./deployer/README.md).
 
@@ -60,7 +48,7 @@ Deploy to OpenShift using templates. Verification or penetration tests.
 - uses: bcgov/actions-openshift/deployer@vX.Y.Z
 ```
 
-### 7. SchemaSpy (`.github/workflows/.schema-spy.yml`)
+### 6. SchemaSpy (`.github/workflows/.schema-spy.yml`)
 A reusable workflow that spins up a Postgres/PostGIS service, runs migrations using Flyway, generates interactive database documentation with SchemaSpy, and automatically publishes the results to GitHub Pages.
 
 #### Example Usage:
@@ -75,7 +63,7 @@ jobs:
       deploy_dir: docs/schema
 ```
 
-### 8. Runner reachability records (`.github/workflows/probe-runner-*.yml`)
+### 7. Runner reachability records (`.github/workflows/probe-runner-*.yml`)
 Internal records of whether GitHub-hosted runner IPs can reach the OpenShift APIs (background: #49). Nothing alerts on blocked runners; the runs stay green.
 * `probe-runner-reachability.yml` runs every 6 hours, probes the gold and silver APIs (:6443) and the silver router (:443) from 20 runners, writes a table to the run summary and uploads a `probe-results` JSON artifact (kept 14 days). A blocked runner is a warning; the run fails only when samples are missing, and then skips the upload so an earlier, complete record is kept.
 * `probe-runner-report.yml` runs weekly and summarizes the past 14 days of `probe-results`: this week vs last week, block rate per /24 runner IP range (always, sometimes or never blocked), and the gold vs silver split.
