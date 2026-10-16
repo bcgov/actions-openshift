@@ -671,3 +671,25 @@ jobs:
           oc_token: ${{ secrets.OC_TOKEN }}
           commands: |
             oc delete imagestreamtag "image-import:${PR}" --ignore-not-found
+
+  # Single merge gate for this workflow. Skipped jobs count as passing, so path-filtered
+  # and same-repo-only jobs still let it report; it fails on any failed or cancelled job.
+  results:
+    name: PR Results
+    needs:
+      - actionlint
+      - test-deployer
+      - test-crunchy
+      - route-tls-changes
+      - test-route-tls
+      - test-route-tls-logs
+      - test-fork-token-degradation
+      - test-image-import
+    if: always()
+    permissions: {}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: bcgov/actions/workflow-results@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
+        with:
+          needs: ${{ toJson(needs) }}
