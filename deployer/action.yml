@@ -48,8 +48,11 @@ inputs:
     default: "15m"
   triggers:
     description: |
-      Omit to always build, otherwise trigger by path
-      Example: ('./backend/', './frontend/)
+      Omit to always build, otherwise trigger by path (one path per line).
+      Example:
+        triggers: |
+          ./backend/
+          ./frontend/
   lite_mode:
     description: |
       Apply 'lite mode' modifications (scaling down, removing PDBs) for pull requests?
