@@ -7,6 +7,14 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
   postGISVersion: "3.6"
   imagePullPolicy: IfNotPresent
   image: "artifacts.developer.gov.bc.ca/bcgov-docker-local/crunchy-postgres-gis:ubi9-18.1-3.6-2547"
+  # Enable to create a standby cluster that follows WAL from a pgBackRest repo
+  # (typically S3 repo2). Modelled on DriveBC.ca infrastructure/crunchy-postgres.
+  standby:
+    enabled: false
+    repoName: repo2
+  # Scale workloads to zero (Services/Volumes remain). Useful when failing over.
+  shutdown: false
+
   # enable below to start a new crunchy cluster after disaster from a backed-up location, crunchy will choose the best place to recover from.
   # follow https://access.crunchydata.com/documentation/postgres-operator/5.8/tutorials/backups-disaster-recovery/disaster-recovery
   # Clone From Backups Stored in S3 / GCS / Azure Blob Storage
@@ -102,6 +110,7 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
         max_connections: 100 # keep aggregate pgbouncer connections below this
         log_min_duration_statement: 1000ms # log queries taking more than 1 second to respond.
         effective_io_concurrency: 20 #If the underlying disk can handle multiple simultaneous requests, then you should increase the effective_io_concurrency value and test what value provides the best application performance. All BCGov clusters have SSD.
+        wal_retrieve_retry_interval: 30000 # reduce object-storage polling from standby clusters
 
   proxy:
     enabled: true

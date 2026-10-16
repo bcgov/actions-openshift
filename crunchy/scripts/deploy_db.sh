@@ -24,6 +24,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Validate overrides before any side effects
 OVERRIDE_ARGS="$(VALUES_URL="${VALUES_URL}" "${SCRIPT_DIR}/resolve_helm_args.sh")"
 
+# Standby via action inputs needs S3 (repo2). values_file callers configure S3 themselves.
+if [ "${STANDBY_ENABLED:-false}" = "true" ]; then
+  if [ -z "${S3_ACCESS_KEY:-}" ] || [ -z "${S3_SECRET_KEY:-}" ] || [ -z "${S3_BUCKET:-}" ] || [ -z "${S3_ENDPOINT:-}" ]; then
+    echo "Error: standby_enabled requires s3_access_key, s3_secret_key, s3_bucket and s3_endpoint (standby follows repo2)."
+    exit 1
+  fi
+fi
+
 # Deploy Database
 echo 'Deploying crunchy helm chart'
 cd "$DIRECTORY"

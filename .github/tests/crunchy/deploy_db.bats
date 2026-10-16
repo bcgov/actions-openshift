@@ -32,7 +32,7 @@ STUB
   export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
   unset HELM_STATUS SELF_HEAL_STUCK_RELEASES VALUES_URL PVC_SIZE STORAGE_CLASS \
     POSTGRES_VERSION REPLICAS CPU_REQUEST MEMORY_REQUEST ROUTE_ENABLED ROUTE_HOST \
-    DRY_RUN HELM_UPGRADE_RC
+    DRY_RUN HELM_UPGRADE_RC STANDBY_ENABLED STANDBY_REPO_NAME SHUTDOWN
 }
 
 deploy() {
@@ -116,3 +116,16 @@ STUB
   [[ "$output" == *"Crunchy DB instance is ready."* ]]
 }
 
+@test "standby_enabled without S3 fails" {
+  STANDBY_ENABLED=true deploy
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"standby_enabled requires s3"* ]]
+}
+
+@test "standby_enabled with S3 deploys standby sets" {
+  STANDBY_ENABLED=true run "${SCRIPT}" "${CHART}" "" app pg-test true ak sk bucket endpoint.example
+  [ "$status" -eq 0 ]
+  grep -q 'crunchy.standby.enabled=true' "${STUB_LOG}"
+  grep -q 'crunchy.standby.repoName=repo2' "${STUB_LOG}"
+  grep -q 'crunchy.pgBackRest.s3.enabled=true' "${STUB_LOG}"
+}

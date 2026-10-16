@@ -57,6 +57,21 @@ inputs:
     description: 'Route host name; requires route_enabled, OpenShift generates one if omitted'
     required: false
 
+  standby_enabled:
+    description: >-
+      Deploy as a standby cluster that follows WAL from standby_repo_name
+      (usually S3 repo2). Requires S3 backups configured on primary and standby.
+    default: 'false'
+    required: false
+  standby_repo_name:
+    description: 'pgBackRest repo the standby follows (default repo2 = S3)'
+    default: 'repo2'
+    required: false
+  shutdown:
+    description: 'Scale the cluster to zero (keep Services/Volumes) for failover'
+    default: 'false'
+    required: false
+
   s3_access_key:
     description: 'S3 access key'
     required: false
@@ -278,6 +293,9 @@ runs:
         MEMORY_REQUEST: ${{ inputs.memory_request }}
         ROUTE_ENABLED: ${{ inputs.route_enabled }}
         ROUTE_HOST: ${{ inputs.route_host }}
+        STANDBY_ENABLED: ${{ inputs.standby_enabled }}
+        STANDBY_REPO_NAME: ${{ inputs.standby_repo_name }}
+        SHUTDOWN: ${{ inputs.shutdown }}
         SELF_HEAL_STUCK_RELEASES: ${{ inputs.self_heal_stuck_releases }}
         DRY_RUN: ${{ inputs.dry_run }}
         CHART_REPOSITORY: ${{ inputs.repository }}

@@ -15,6 +15,9 @@
 #   MEMORY_REQUEST    crunchy.instances.requests.memory
 #   ROUTE_ENABLED     true or false; true renders the TLS passthrough Route
 #   ROUTE_HOST        Route host; requires ROUTE_ENABLED=true
+#   STANDBY_ENABLED   true or false; standby cluster following STANDBY_REPO_NAME
+#   STANDBY_REPO_NAME pgBackRest repo name (default repo2)
+#   SHUTDOWN          true or false; scale workloads to zero
 #
 # Unset overrides emit nothing, so the values file (bundled or custom) applies.
 
@@ -29,6 +32,9 @@ CPU_REQUEST="${CPU_REQUEST:-}"
 MEMORY_REQUEST="${MEMORY_REQUEST:-}"
 ROUTE_ENABLED="${ROUTE_ENABLED:-false}"
 ROUTE_HOST="${ROUTE_HOST:-}"
+STANDBY_ENABLED="${STANDBY_ENABLED:-false}"
+STANDBY_REPO_NAME="${STANDBY_REPO_NAME:-repo2}"
+SHUTDOWN="${SHUTDOWN:-false}"
 
 fail() {
   echo "Error: $*" >&2
@@ -38,6 +44,14 @@ fail() {
 if [ "${ROUTE_ENABLED}" != "true" ] && [ "${ROUTE_ENABLED}" != "false" ]; then
   fail "route_enabled must be 'true' or 'false', got '${ROUTE_ENABLED}'."
 fi
+
+for pair in "standby_enabled:${STANDBY_ENABLED}" "shutdown:${SHUTDOWN}"; do
+  name="${pair%%:*}"
+  val="${pair#*:}"
+  if [ "${val}" != "true" ] && [ "${val}" != "false" ]; then
+    fail "${name} must be 'true' or 'false', got '${val}'."
+  fi
+done
 
 # values_file and override inputs are mutually exclusive
 if [ -n "${VALUES_URL}" ]; then
@@ -49,6 +63,12 @@ if [ -n "${VALUES_URL}" ]; then
   done
   if [ "${ROUTE_ENABLED}" = "true" ]; then
     CONFLICTS+=("route_enabled")
+  fi
+  if [ "${STANDBY_ENABLED}" = "true" ]; then
+    CONFLICTS+=("standby_enabled")
+  fi
+  if [ "${SHUTDOWN}" = "true" ]; then
+    CONFLICTS+=("shutdown")
   fi
   if [ "${#CONFLICTS[@]}" -gt 0 ]; then
     fail "values_file cannot be combined with override inputs (${CONFLICTS[*]}). Move those settings into the values file, or drop values_file."
@@ -102,6 +122,13 @@ if [ -n "${ROUTE_HOST}" ]; then
   [ "${ROUTE_ENABLED}" = "true" ] || fail "route_host requires route_enabled: true."
   [[ "${ROUTE_HOST}" =~ ^${DNS_LABEL}(\.${DNS_LABEL})*$ ]] || fail "route_host '${ROUTE_HOST}' is not a valid host name."
   ARGS+=(--set-string "route.host=${ROUTE_HOST}")
+fi
+if [ "${STANDBY_ENABLED}" = "true" ]; then
+  ARGS+=(--set "crunchy.standby.enabled=true")
+  ARGS+=(--set-string "crunchy.standby.repoName=${STANDBY_REPO_NAME}")
+fi
+if [ "${SHUTDOWN}" = "true" ]; then
+  ARGS+=(--set "crunchy.shutdown=true")
 fi
 
 # Validated values contain no whitespace, so callers can word-split the output

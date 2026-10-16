@@ -75,7 +75,8 @@ setup() {
 
 @test "values_file conflicts with every override input" {
   for var in PVC_SIZE=1Gi STORAGE_CLASS=netapp-block-standard POSTGRES_VERSION=17 REPLICAS=3 \
-    CPU_REQUEST=50m MEMORY_REQUEST=128Mi ROUTE_ENABLED=true ROUTE_HOST=db.example.com; do
+    CPU_REQUEST=50m MEMORY_REQUEST=128Mi ROUTE_ENABLED=true ROUTE_HOST=db.example.com \
+    STANDBY_ENABLED=true SHUTDOWN=true; do
     run env VALUES_URL=https://example.com/values.yml "$var" "${SCRIPT}"
     [ "$status" -eq 1 ]
     name="${var%%=*}"
@@ -102,4 +103,28 @@ setup() {
   ROUTE_HOST=db.example.com run "${SCRIPT}"
   [ "$status" -eq 1 ]
   [[ "$output" == *"route_host requires route_enabled"* ]]
+}
+
+@test "standby: enables with default repo2" {
+  STANDBY_ENABLED=true run "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--set crunchy.standby.enabled=true"* ]]
+  [[ "$output" == *"--set-string crunchy.standby.repoName=repo2"* ]]
+}
+
+@test "standby: custom repo name" {
+  STANDBY_ENABLED=true STANDBY_REPO_NAME=repo1 run "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--set-string crunchy.standby.repoName=repo1"* ]]
+}
+
+@test "shutdown: sets crunchy.shutdown" {
+  SHUTDOWN=true run "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "--set crunchy.shutdown=true" ]
+}
+
+@test "standby_enabled must be true or false" {
+  STANDBY_ENABLED=yes run "${SCRIPT}"
+  [ "$status" -eq 1 ]
 }

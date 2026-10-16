@@ -17,3 +17,13 @@ setup() {
   grep -q 'GITHUB_ACTION_PATH}/charts/crunchy' "$ACTION"
   grep -F "trap 'rm -rf \"\${DIRECTORY}\"' EXIT" "$ACTION"
 }
+
+@test "standby.enabled renders PostgresCluster standby block" {
+  CHART="${BATS_TEST_DIRNAME}/../../../crunchy/charts/crunchy"
+  VALUES="${BATS_TEST_DIRNAME}/../../../crunchy/values.yml"
+  helm template smoke "$CHART" --values "$VALUES" \
+    --set crunchy.standby.enabled=true \
+    --set-string crunchy.standby.repoName=repo2 > "${BATS_TEST_TMPDIR}/standby.yaml"
+  grep -q 'standby:' "${BATS_TEST_TMPDIR}/standby.yaml"
+  grep -q 'repoName: repo2' "${BATS_TEST_TMPDIR}/standby.yaml"
+}
