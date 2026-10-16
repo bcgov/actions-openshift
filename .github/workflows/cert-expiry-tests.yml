@@ -5,21 +5,13 @@ name: Cert Expiry Tests
 # ubuntu-26.04 and ubuntu-slim (the runner quickstart-openshift's scheduled
 # jobs use). Scheduling and notifying belong to each calling repository.
 
+# Always runs on pull requests and main pushes so Cert Expiry Results reports; the test
+# jobs run only when cert-expiry changed (Markdown excluded).
 on:
   pull_request:
-    paths:
-      - .github/tests/cert-expiry/**
-      - .github/workflows/cert-expiry-tests.yml
-      - cert-expiry/**
-      - "!**/*.md"
   push:
     branches:
       - main
-    paths:
-      - .github/tests/cert-expiry/**
-      - .github/workflows/cert-expiry-tests.yml
-      - cert-expiry/**
-      - "!**/*.md"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
@@ -28,8 +20,45 @@ concurrency:
 permissions: {}
 
 jobs:
+  changes:
+    name: Cert Expiry (changes)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      triggered: ${{ steps.diff.outputs.triggered }}
+    steps:
+      # diff-triggers compares against the base branch tip. The merge base keeps a
+      # newer main change out of this pull request's diff. Pushes compare the whole pushed range.
+      - name: Find the pull request merge base
+        id: base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No merge base for ${BASE_SHA}...${HEAD_SHA}"; exit 1; }
+          echo "Merge base: ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - id: diff
+        uses: bcgov/actions/diff-triggers@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
+        with:
+          ref: ${{ steps.base.outputs.sha || github.event.before }}
+          triggers: |
+            cert-expiry/
+            .github/tests/cert-expiry/
+            .github/workflows/cert-expiry-tests.yml
+            !*.md
+
   unit:
     name: Test cert-expiry (bats)
+    needs: changes
+    if: needs.changes.outputs.triggered == 'true'
     permissions: {}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
@@ -47,6 +76,8 @@ jobs:
 
   known-host:
     name: Test cert-expiry (known host, ${{ matrix.runner }})
+    needs: changes
+    if: needs.changes.outputs.triggered == 'true'
     permissions: {}
     strategy:
       fail-fast: false
@@ -98,3 +129,19 @@ jobs:
           [ "$OUTCOME" = "failure" ] || { echo "::error::Expected the step to fail, got ${OUTCOME}"; exit 1; }
           jq -e 'length == 1' <<< "$FINDINGS" > /dev/null || { echo "::error::Expected findings on failure, got ${FINDINGS}"; exit 1; }
           echo "Failing step failed and still set findings"
+
+  # Merge gate for this workflow: always reports, skipped jobs count as passing
+  results:
+    name: Cert Expiry Results
+    needs:
+      - changes
+      - unit
+      - known-host
+    if: always()
+    permissions: {}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: bcgov/actions/workflow-results@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
+        with:
+          needs: ${{ toJson(needs) }}
