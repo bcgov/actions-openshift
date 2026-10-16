@@ -26,6 +26,7 @@ Repository facts and constraints for automated coding assistants.
   - `TLS_CA_CERTIFICATE`: issuing intermediate only (`Entrust OV TLS Issuing RSA CA 2.pem`). Exclude root CAs and `.csr`.
 - **Runtime**: Choose bash or JavaScript from the action's job. Bash calls `oc` and `openssl`. JavaScript or TypeScript fits a GitHub API client, pagination, or JSON assembly. Pick whichever implementation is smaller.
 - **Pinning**: Pin third-party actions to full 40-character commit SHAs with `# vX.Y.Z` trailing comments. Never pin `@main`. Pin bcgov shared actions (`bcgov/actions/*`, `bcgov/action-*`) to a published release SHA with a `# vX.Y.Z` comment.
+- **PR triggers**: PR workflows must not fire unnecessarily. Gate heavy jobs (matrices, container tests, deploys) with job-level `bcgov/actions/diff-triggers` or path filters that list only the files each job depends on, never a whole action folder with its README. Markdown and docs-only changes never start heavy jobs. Skipped jobs still report through `bcgov/actions/workflow-results` with the standard job names and no `title`, so required checks stay stable; a top-level `paths` filter hides the whole workflow, so avoid it where checks are required.
 
 ## README usage examples
 
