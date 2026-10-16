@@ -140,7 +140,8 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
   # https://access.crunchydata.com/documentation/postgres-operator/latest/tutorials/basic-setup/user-management
 
   # When non-empty, deploy_db.sh applies this password outside Helm to the
-  # primary app pguser Secret (DR / standby shared credentials).
+  # primary app pguser Secret (DR / standby shared credentials). Leave empty for
+  # the operator to generate a random password.
   pgUser:
     customPassword: ""
 

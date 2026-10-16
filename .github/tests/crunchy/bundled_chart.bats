@@ -40,5 +40,6 @@ setup() {
   VALUES="${BATS_TEST_DIRNAME}/../../../crunchy/values.yml"
   helm template smoke "$CHART" --values "$VALUES" \
     --set-string crunchy.pgUser.customPassword=shared-pass > "${BATS_TEST_TMPDIR}/with.yaml"
+  # Password Secrets are applied by deploy_db.sh outside Helm
   ! grep -q 'password: "shared-pass"' "${BATS_TEST_TMPDIR}/with.yaml"
 }

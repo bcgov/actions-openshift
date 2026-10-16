@@ -85,6 +85,13 @@ inputs:
     description: 'S3 endpoint'
     required: false
 
+  custom_pguser_password:
+    description: >-
+      Password for the primary app pgUser Secret (global.config.dbName).
+      When set, primary and standby clusters can share the same credentials
+      (DR / sandbox). Leave empty for the operator to generate one.
+    required: false
+
   dry_run:
     description: 'When true, helm upgrade --dry-run=server --hide-secret validates the chart against the OpenShift API, then the action exits without deploying, waiting, or changing PR users'
     default: false
@@ -285,6 +292,7 @@ runs:
         S3_SECRET_KEY: ${{ inputs.s3_secret_key }}
         S3_BUCKET: ${{ inputs.s3_bucket }}
         S3_ENDPOINT: ${{ inputs.s3_endpoint }}
+        CUSTOM_PGUSER_PASSWORD: ${{ inputs.custom_pguser_password }}
         PVC_SIZE: ${{ inputs.pvc_size }}
         STORAGE_CLASS: ${{ inputs.storage_class }}
         POSTGRES_VERSION: ${{ inputs.postgres_version }}
