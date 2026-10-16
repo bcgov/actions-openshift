@@ -111,8 +111,57 @@ jobs:
           fi
           echo "No template leak found"
 
+  # Path filters for the jobs below that do not need every pull request
+  changes:
+    name: Path filters
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      changes: ${{ steps.diff.outputs.changes }}
+    steps:
+      # diff-triggers compares against the base branch tip. The merge base keeps a
+      # newer main change out of this pull request's diff. Push events use HEAD^.
+      - name: Find the pull request merge base
+        id: base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No merge base for ${BASE_SHA}...${HEAD_SHA}"; exit 1; }
+          echo "Merge base: ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - id: diff
+        uses: bcgov/actions/diff-triggers@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
+        with:
+          ref: ${{ steps.base.outputs.sha }}
+          filters: |
+            crunchy:
+              - crunchy/
+              - .github/tests/crunchy/
+              - .github/tests/route-tls/
+              - .github/tests/image-import/
+              - route-tls/
+              - image-import/
+              - .github/workflows/pr-open.yml
+              - "!*.md"
+            image-import:
+              - image-import/
+              - oc-runner/action.yml
+              - oc-runner/scripts/
+              - .github/workflows/pr-open.yml
+              - "!*.md"
+
   test-crunchy:
     name: Test Crunchy
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.changes || '[]'), 'crunchy')
     permissions: {}
     runs-on: ubuntu-26.04
     steps:
@@ -221,6 +270,7 @@ jobs:
             route-tls/
             oc-runner/
             .github/workflows/pr-open.yml
+            !*.md
 
   test-route-tls:
     name: Test Route TLS
@@ -559,8 +609,11 @@ jobs:
 
   test-image-import:
     name: Test Image Import
+    needs: changes
     # Needs OpenShift credentials: same-repo PRs only
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+      && contains(fromJSON(needs.changes.outputs.changes || '[]'), 'image-import')
     permissions:
       contents: read
       packages: read

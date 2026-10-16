@@ -2,21 +2,14 @@ name: PG Upgrade
 
 # pg-upgrade's own tests: unit tests, and every supported source major upgraded to
 # quickstart-openshift's major and to the newest postgres major on Docker Hub (versions.sh), in containers.
+# Every pull request and main push runs the cheap path filter; the unit and container jobs
+# run only when pg-upgrade or the oc-runner login it calls changed (Markdown excluded),
+# so their checks still report, as skipped, instead of disappearing.
 on:
   pull_request:
-    paths:
-      - pg-upgrade/**
-      - oc-runner/**
-      - .github/tests/pg-upgrade/**
-      - .github/workflows/pg-upgrade.yml
   push:
     branches:
       - main
-    paths:
-      - pg-upgrade/**
-      - oc-runner/**
-      - .github/tests/pg-upgrade/**
-      - .github/workflows/pg-upgrade.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number }}
@@ -25,8 +18,48 @@ concurrency:
 permissions: {}
 
 jobs:
+  changes:
+    name: PG Upgrade (changes)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      triggered: ${{ steps.diff.outputs.triggered }}
+    steps:
+      # diff-triggers compares against the base branch tip. The merge base keeps a
+      # newer main change out of this pull request's diff. Push events use HEAD^.
+      - name: Find the pull request merge base
+        id: base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No merge base for ${BASE_SHA}...${HEAD_SHA}"; exit 1; }
+          echo "Merge base: ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - id: diff
+        uses: bcgov/actions/diff-triggers@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
+        with:
+          ref: ${{ steps.base.outputs.sha }}
+          # pg-upgrade/action.yml calls oc-runner only to log in
+          triggers: |
+            pg-upgrade/
+            .github/tests/pg-upgrade/
+            .github/workflows/pg-upgrade.yml
+            oc-runner/action.yml
+            oc-runner/scripts/login.sh
+            !*.md
+
   versions:
     name: PG Upgrade (versions)
+    needs: changes
+    if: needs.changes.outputs.triggered == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-26.04
@@ -44,6 +77,8 @@ jobs:
 
   unit:
     name: PG Upgrade (unit)
+    needs: changes
+    if: needs.changes.outputs.triggered == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-26.04

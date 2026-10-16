@@ -11,6 +11,7 @@ on:
       - .github/tests/cert-expiry/**
       - .github/workflows/cert-expiry-tests.yml
       - cert-expiry/**
+      - "!**/*.md"
   push:
     branches:
       - main
@@ -18,6 +19,7 @@ on:
       - .github/tests/cert-expiry/**
       - .github/workflows/cert-expiry-tests.yml
       - cert-expiry/**
+      - "!**/*.md"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
