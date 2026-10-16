@@ -81,7 +81,9 @@ jobs:
           oc_token: ${{ secrets.OC_TOKEN }}
           oc_version: ${{ matrix.oc_version }}
           overwrite: ${{ matrix.overwrite }}
-          triggers: ('deployer/', '.github/workflows/pr-open.yml')
+          triggers: |
+            deployer/
+            .github/workflows/pr-open.yml
           debug: true
           parameters: -p NAME=${{ github.event.repository.name }} -p ZONE=${{ github.event.number }} ${{ matrix.parameters }}
 
