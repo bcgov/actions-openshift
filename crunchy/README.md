@@ -138,6 +138,9 @@ The action accepts the following inputs:
 | `memory_request` | Override: memory request for PostgreSQL instances, e.g. `128Mi` | |
 | `route_enabled` | Override: create a TLS passthrough Route to the primary database service, see [External Access](#external-access) | false |
 | `route_host` | Override: Route host name; requires `route_enabled`, OpenShift generates one if omitted | |
+| `standby_enabled` | Deploy as a standby that follows `standby_repo_name` (needs S3 / repo2) | false |
+| `standby_repo_name` | pgBackRest repo the standby follows | repo2 |
+| `shutdown` | Scale workloads to zero for failover (Services/Volumes remain) | false |
 | `environment` | Environment name (omit for PRs) | |
 | `triggers` | Paths used to trigger a deployment (e.g., ./backend/ ./frontend/) | |
 | `oc_server` | OpenShift server URL with port (required) | |
@@ -414,4 +417,34 @@ When a standby cluster must authenticate with the same credentials as the primar
 Or set `crunchy.pgUser.customPassword` in a `values_file`. Leave it empty for the default operator-generated password.
 
 Adapted from [bcgov/action-crunchy#70](https://github.com/bcgov/action-crunchy/pull/70) (@cberg-aot) and the custom-password pattern in [bcgov/DriveBC.ca `infrastructure/crunchy-postgres`](https://github.com/bcgov/DriveBC.ca/tree/main/infrastructure/crunchy-postgres).
+
+## Standby (Gold / GoldDR)
+
+Modelled on [bcgov/DriveBC.ca `infrastructure/crunchy-postgres`](https://github.com/bcgov/DriveBC.ca/tree/main/infrastructure/crunchy-postgres) (@wmuldergov).
+
+1. Primary (Gold): deploy with S3 backups enabled (`s3_*` inputs or values). Take a manual backup if this is the first standby bootstrap.
+2. Standby (GoldDR): deploy with the **same** S3 credentials and `backupPath` / `clusterCounter`, plus:
+
+```yaml
+- uses: bcgov/actions-openshift/crunchy@vX.Y.Z
+  with:
+    oc_namespace: ${{ vars.OC_NAMESPACE_DR }}
+    oc_server: ${{ vars.OC_SERVER_DR }}
+    oc_token: ${{ secrets.OC_TOKEN_DR }}
+    s3_access_key: ${{ secrets.CRUNCHY_S3_ACCESS_KEY }}
+    s3_secret_key: ${{ secrets.CRUNCHY_S3_SECRET_KEY }}
+    s3_bucket: ${{ secrets.CRUNCHY_S3_BUCKET }}
+    s3_endpoint: ${{ secrets.CRUNCHY_S3_ENDPOINT }}
+    standby_enabled: true
+    standby_repo_name: repo2
+    # Prefer a shared password with the primary (see custom_pguser_password / values)
+    custom_pguser_password: ${{ secrets.CRUNCHY_USER_PASSWORD }}
+```
+
+Or set `crunchy.standby.enabled` / `crunchy.standby.repoName` in a `values_file` (DriveBC uses a separate `values-*-dr.yaml`).
+
+**Failover (high level):** shut down or fence the primary (`shutdown: true` when still reachable), then set `standby_enabled: false` on the former standby so it becomes primary. Rebuild the old side as a new standby. See DriveBC's README for the full active-standby runbook, including `ccp_monitoring` password sync.
+
+The chart already supports `pgbackrestLogCleanup` for DR log rotation; enable it via `values_file` when needed.
+
 
