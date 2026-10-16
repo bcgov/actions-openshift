@@ -145,6 +145,7 @@ The action accepts the following inputs:
 | `s3_secret_key` | S3 secret key for backups | |
 | `s3_bucket` | S3 bucket for backups | |
 | `s3_endpoint` | S3 endpoint for backups | |
+| `custom_pguser_password` | Password for the primary app pgUser Secret so primary and standby can share credentials; empty = operator-generated | |
 | `dry_run` | `helm upgrade --dry-run=server --hide-secret` validates the chart against the OpenShift API, then the action exits without deploying, waiting, or changing PR users. Secret resources are omitted from the output | false |
 | `force_cleanup` | Force cleanup of the database | false |
 | `self_heal_stuck_releases` | Purge a Helm release stuck in a non-deployed state (`pending-*`, `failed`, `uninstalling`) before reinstalling. **Deletes the PostgresCluster and its data volumes** | false |
@@ -392,3 +393,25 @@ restore:
 If you encounter issues, check out the [Troubleshooting Guide](https://github.com/bcgov/crunchy-postgres/blob/main/Troubleshoot.md) for quick solutions.
 
 Need more help? Join the discussion in the [CrunchyDB Rocket.Chat Channel](https://chat.developer.gov.bc.ca/channel/crunchydb) to get support from the community and experts.
+
+## Custom app-user password (DR / standby)
+
+When a standby cluster must authenticate with the same credentials as the primary (Gold / GoldDR, or a read-only sandbox), set `custom_pguser_password` to a shared secret. The action writes the password to a mode-600 temp file and creates or patches the `{cluster}-pguser-{dbName}` Secret **outside Helm** (so an existing operator-managed Secret is never replaced or deleted). Skipped on `dry_run`.
+
+```yaml
+- uses: bcgov/actions-openshift/crunchy@vX.Y.Z
+  with:
+    oc_namespace: ${{ vars.OC_NAMESPACE }}
+    oc_server: ${{ vars.OC_SERVER }}
+    oc_token: ${{ secrets.OC_TOKEN }}
+    s3_access_key: ${{ secrets.CRUNCHY_S3_ACCESS_KEY }}
+    s3_secret_key: ${{ secrets.CRUNCHY_S3_SECRET_KEY }}
+    s3_bucket: ${{ secrets.CRUNCHY_S3_BUCKET }}
+    s3_endpoint: ${{ secrets.CRUNCHY_S3_ENDPOINT }}
+    custom_pguser_password: ${{ secrets.CRUNCHY_USER_PASSWORD }}
+```
+
+Or set `crunchy.pgUser.customPassword` in a `values_file`. Leave it empty for the default operator-generated password.
+
+Adapted from [bcgov/action-crunchy#70](https://github.com/bcgov/action-crunchy/pull/70) (@cberg-aot) and the custom-password pattern in [bcgov/DriveBC.ca `infrastructure/crunchy-postgres`](https://github.com/bcgov/DriveBC.ca/tree/main/infrastructure/crunchy-postgres).
+
