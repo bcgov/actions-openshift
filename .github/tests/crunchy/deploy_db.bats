@@ -83,15 +83,15 @@ refute_call() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"skipping database ready check"* ]]
   [[ "$output" != *"already deployed, triggers did not fire"* ]]
-  grep -q "^helm upgrade --dry-run=server --hide-secret --install pg-test" "${STUB_LOG}"
-  refute_call "^helm upgrade --install --wait"
+  grep -q "^helm upgrade --dry-run=server --hide-secret --install --wait pg-test" "${STUB_LOG}"
+  refute_call "^helm upgrade --install --wait pg-test"
   refute_call "^oc "
 }
 
 @test "dry_run does not self-heal a stuck release" {
   HELM_STATUS=pending-upgrade SELF_HEAL_STUCK_RELEASES=true DRY_RUN=true deploy
   [ "$status" -eq 0 ]
-  grep -q "^helm upgrade --dry-run=server --hide-secret --install pg-test" "${STUB_LOG}"
+  grep -q "^helm upgrade --dry-run=server --hide-secret --install --wait pg-test" "${STUB_LOG}"
   refute_call "^helm uninstall"
   refute_call "^oc "
 }
@@ -128,4 +128,46 @@ STUB
   grep -q 'crunchy.standby.enabled=true' "${STUB_LOG}"
   grep -q 'crunchy.standby.repoName=repo2' "${STUB_LOG}"
   grep -q 'crunchy.pgBackRest.s3.enabled=true' "${STUB_LOG}"
+}
+
+@test "shutdown input: waits for zero ready replicas" {
+  cat > "${BATS_TEST_TMPDIR}/bin/oc" <<'STUB'
+#!/bin/bash
+echo "oc $*" >> "${STUB_LOG}"
+if [ "$1" = "get" ]; then
+  echo '{"status":{"instances":[{"name":"db","readyReplicas":0}]}}'
+fi
+STUB
+  chmod +x "${BATS_TEST_TMPDIR}/bin/oc"
+  SHUTDOWN=true deploy
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Crunchy DB is shut down"* ]]
+}
+
+@test "shutdown via values_file: waits for zero ready replicas" {
+  cat > "${BATS_TEST_TMPDIR}/bin/oc" <<'STUB'
+#!/bin/bash
+echo "oc $*" >> "${STUB_LOG}"
+if [ "$1" = "get" ]; then
+  echo '{"status":{"instances":[{"name":"db","readyReplicas":0}]}}'
+fi
+STUB
+  chmod +x "${BATS_TEST_TMPDIR}/bin/oc"
+  VALUES_SRC="${BATS_TEST_TMPDIR}/shutdown-values.yml"
+  cp "${BATS_TEST_DIRNAME}/../../../crunchy/values.yml" "${VALUES_SRC}"
+  yq -i '.crunchy.shutdown = true' "${VALUES_SRC}"
+  cat > "${BATS_TEST_TMPDIR}/bin/curl" <<STUB
+#!/bin/bash
+echo "curl \$*" >> "${STUB_LOG}"
+out=""
+while [ \$# -gt 0 ]; do
+  if [ "\$1" = "-o" ]; then out="\$2"; shift 2; continue; fi
+  shift
+done
+cp "${VALUES_SRC}" "\${out}"
+STUB
+  chmod +x "${BATS_TEST_TMPDIR}/bin/curl"
+  run "${SCRIPT}" "${CHART}" "https://example.com/values-shutdown.yml" app pg-test true
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Crunchy DB is shut down"* ]]
 }

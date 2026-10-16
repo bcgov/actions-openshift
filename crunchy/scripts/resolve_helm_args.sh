@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # Resolves Helm --set arguments for the crunchy chart from override inputs.
-# Validates input and prints the arguments to stdout; errors go to stderr.
+# Validates input and prints one argument per line on stdout (no word-splitting
+# needed by callers that mapfile into an array). Errors go to stderr.
 # No side effects (no cd, helm, oc or curl), so it can be unit tested.
 #
 # Env vars (all optional):
@@ -16,7 +17,7 @@
 #   ROUTE_ENABLED     true or false; true renders the TLS passthrough Route
 #   ROUTE_HOST        Route host; requires ROUTE_ENABLED=true
 #   STANDBY_ENABLED   true or false; standby cluster following STANDBY_REPO_NAME
-#   STANDBY_REPO_NAME pgBackRest repo name (default repo2)
+#   STANDBY_REPO_NAME pgBackRest repo name (repo1–repo4, default repo2)
 #   SHUTDOWN          true or false; scale workloads to zero
 #
 # Unset overrides emit nothing, so the values file (bundled or custom) applies.
@@ -53,6 +54,11 @@ for pair in "standby_enabled:${STANDBY_ENABLED}" "shutdown:${SHUTDOWN}"; do
   fi
 done
 
+# Always validate repo name shape when standby is on, or when a non-default is supplied
+if [ "${STANDBY_ENABLED}" = "true" ] || [ "${STANDBY_REPO_NAME}" != "repo2" ]; then
+  [[ "${STANDBY_REPO_NAME}" =~ ^repo[1-4]$ ]] || fail "standby_repo_name must match ^repo[1-4]$, got '${STANDBY_REPO_NAME}'."
+fi
+
 # values_file and override inputs are mutually exclusive
 if [ -n "${VALUES_URL}" ]; then
   CONFLICTS=()
@@ -66,6 +72,10 @@ if [ -n "${VALUES_URL}" ]; then
   fi
   if [ "${STANDBY_ENABLED}" = "true" ]; then
     CONFLICTS+=("standby_enabled")
+  fi
+  # Non-default repo name is an override even when standby_enabled is left false
+  if [ "${STANDBY_REPO_NAME}" != "repo2" ]; then
+    CONFLICTS+=("standby_repo_name")
   fi
   if [ "${SHUTDOWN}" = "true" ]; then
     CONFLICTS+=("shutdown")
@@ -90,8 +100,6 @@ if [ -n "${STORAGE_CLASS}" ]; then
   ARGS+=(--set-string "crunchy.instances.dataVolumeClaimSpec.storageClassName=${STORAGE_CLASS}")
 fi
 if [ -n "${POSTGRES_VERSION}" ]; then
-  # Known-good GIS images for Crunchy Operator 5.8.5:
-  # https://github.com/bcgov/crunchy-postgres#current-compatible-images
   case "${POSTGRES_VERSION}" in
     15) IMAGE_TAG="ubi9-15.15-3.3-2547"; POSTGIS_VERSION="3.3" ;;
     16) IMAGE_TAG="ubi9-16.11-3.4-2547"; POSTGIS_VERSION="3.4" ;;
@@ -124,6 +132,7 @@ if [ -n "${ROUTE_HOST}" ]; then
   ARGS+=(--set-string "route.host=${ROUTE_HOST}")
 fi
 if [ "${STANDBY_ENABLED}" = "true" ]; then
+  [[ "${STANDBY_REPO_NAME}" =~ ^repo[1-4]$ ]] || fail "standby_repo_name must match ^repo[1-4]$, got '${STANDBY_REPO_NAME}'."
   ARGS+=(--set "crunchy.standby.enabled=true")
   ARGS+=(--set-string "crunchy.standby.repoName=${STANDBY_REPO_NAME}")
 fi
@@ -131,5 +140,7 @@ if [ "${SHUTDOWN}" = "true" ]; then
   ARGS+=(--set "crunchy.shutdown=true")
 fi
 
-# Validated values contain no whitespace, so callers can word-split the output
-echo "${ARGS[*]}"
+# One argument per line so deploy_db.sh can mapfile into a quoted array
+if [ "${#ARGS[@]}" -gt 0 ]; then
+  printf '%s\n' "${ARGS[@]}"
+fi
