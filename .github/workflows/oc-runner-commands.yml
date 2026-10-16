@@ -23,7 +23,7 @@ jobs:
       triggered: ${{ steps.diff.outputs.triggered }}
     steps:
       # diff-triggers compares against the base branch tip. The merge base keeps a
-      # newer main change out of this pull request's diff. Push events use HEAD^.
+      # newer main change out of this pull request's diff. Pushes compare the whole pushed range.
       - name: Find the pull request merge base
         id: base
         if: github.event_name == 'pull_request'
@@ -41,7 +41,7 @@ jobs:
       - id: diff
         uses: bcgov/actions/diff-triggers@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
         with:
-          ref: ${{ steps.base.outputs.sha }}
+          ref: ${{ steps.base.outputs.sha || github.event.before }}
           triggers: |
             oc-runner/
             .github/tests/oc-runner/
@@ -108,3 +108,19 @@ jobs:
             echo "::error::Expected exactly one of blocked/unreachable to be true"
             exit 1
           fi
+
+  # Merge gate for this workflow: always reports, skipped jobs count as passing
+  results:
+    name: oc-runner Results
+    needs:
+      - changes
+      - commands
+      - unreachable-api
+    if: always()
+    permissions: {}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: bcgov/actions/workflow-results@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
+        with:
+          needs: ${{ toJson(needs) }}
