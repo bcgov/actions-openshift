@@ -98,6 +98,11 @@ if [ -n "$S3_ACCESS_KEY" ] && [ -n "$S3_SECRET_KEY" ] && [ -n "$S3_BUCKET" ] && 
     --set-string crunchy.pgBackRest.s3.endpoint=$S3_ENDPOINT"
 fi
 
+# Shared app-user password for primary/standby (DR). Empty = operator-generated.
+if [ -n "${CUSTOM_PGUSER_PASSWORD:-}" ]; then
+  SET_STRINGS+=" --set-string crunchy.pgUser.customPassword=${CUSTOM_PGUSER_PASSWORD}"
+fi
+
 # Execute the Helm command. dry_run validates against the API and stops
 # before the ready check, which would fail because nothing was applied.
 # --dry-run=server submits the chart to the API. --hide-secret omits Secret

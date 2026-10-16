@@ -129,6 +129,13 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
   # - options: A string specifying user privileges (e.g., "SUPERUSER CREATEDB CREATEROLE"). Ensure the options are valid PostgreSQL roles.
   # For more details, refer to the Crunchy Postgres Operator documentation: 
   # https://access.crunchydata.com/documentation/postgres-operator/latest/tutorials/basic-setup/user-management
+
+  # When non-empty, create the cluster's primary app user Secret with this password
+  # so a primary and standby (or sandbox) can share credentials. Leave empty for
+  # the operator to generate a random password.
+  pgUser:
+    customPassword: ""
+
   users: 
     - name: '{{ .Values.global.config.dbName }}'
       databases:

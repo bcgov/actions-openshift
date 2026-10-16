@@ -32,7 +32,7 @@ STUB
   export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
   unset HELM_STATUS SELF_HEAL_STUCK_RELEASES VALUES_URL PVC_SIZE STORAGE_CLASS \
     POSTGRES_VERSION REPLICAS CPU_REQUEST MEMORY_REQUEST ROUTE_ENABLED ROUTE_HOST \
-    DRY_RUN HELM_UPGRADE_RC
+    DRY_RUN HELM_UPGRADE_RC CUSTOM_PGUSER_PASSWORD
 }
 
 deploy() {
@@ -116,3 +116,16 @@ STUB
   [[ "$output" == *"Crunchy DB instance is ready."* ]]
 }
 
+
+@test "custom_pguser_password sets crunchy.pgUser.customPassword" {
+  CUSTOM_PGUSER_PASSWORD='s3cret-pass' deploy
+  [ "$status" -eq 0 ]
+  grep -q 'crunchy.pgUser.customPassword=s3cret-pass' "${STUB_LOG}"
+}
+
+@test "empty custom_pguser_password omits pgUser set" {
+  unset CUSTOM_PGUSER_PASSWORD
+  deploy
+  [ "$status" -eq 0 ]
+  refute_call 'pgUser.customPassword'
+}
