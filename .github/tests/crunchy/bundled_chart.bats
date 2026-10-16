@@ -18,24 +18,28 @@ setup() {
   grep -F "trap 'rm -rf \"\${DIRECTORY}\"' EXIT" "$ACTION"
 }
 
-@test "customPassword renders pguser Secret; empty does not" {
+@test "standby.enabled renders PostgresCluster standby block" {
   CHART="${BATS_TEST_DIRNAME}/../../../crunchy/charts/crunchy"
   VALUES="${BATS_TEST_DIRNAME}/../../../crunchy/values.yml"
+  helm template smoke "$CHART" --values "$VALUES" \
+    --set crunchy.standby.enabled=true \
+    --set-string crunchy.standby.repoName=repo2 > "${BATS_TEST_TMPDIR}/standby.yaml"
+  grep -q 'standby:' "${BATS_TEST_TMPDIR}/standby.yaml"
+  grep -q 'repoName: repo2' "${BATS_TEST_TMPDIR}/standby.yaml"
+}
 
+@test "wal_retrieve_retry_interval renders in Patroni parameters" {
+  CHART="${BATS_TEST_DIRNAME}/../../../crunchy/charts/crunchy"
+  VALUES="${BATS_TEST_DIRNAME}/../../../crunchy/values.yml"
+  helm template smoke "$CHART" --values "$VALUES" > "${BATS_TEST_TMPDIR}/patroni.yaml"
+  grep -q 'wal_retrieve_retry_interval: 30000' "${BATS_TEST_TMPDIR}/patroni.yaml"
+}
+
+@test "customPassword is not rendered as a Helm Secret" {
+  CHART="${BATS_TEST_DIRNAME}/../../../crunchy/charts/crunchy"
+  VALUES="${BATS_TEST_DIRNAME}/../../../crunchy/values.yml"
   helm template smoke "$CHART" --values "$VALUES" \
     --set-string crunchy.pgUser.customPassword=shared-pass > "${BATS_TEST_TMPDIR}/with.yaml"
-  grep -q 'pguser-app' "${BATS_TEST_TMPDIR}/with.yaml"
-  grep -q 'password: "shared-pass"' "${BATS_TEST_TMPDIR}/with.yaml"
-  grep -q 'postgres-operator.crunchydata.com/pguser: app' "${BATS_TEST_TMPDIR}/with.yaml"
-
-  helm template smoke "$CHART" --values "$VALUES" > "${BATS_TEST_TMPDIR}/without.yaml"
-  if grep -q 'pguser-app' "${BATS_TEST_TMPDIR}/without.yaml"; then
-    # Operator-managed users may still reference pguser elsewhere; the Secret we add is only when customPassword is set
-    if grep -A5 'kind: Secret' "${BATS_TEST_TMPDIR}/without.yaml" | grep -q 'password: "'; then
-      echo "unexpected password Secret without customPassword"
-      return 1
-    fi
-  fi
-  # Our custom Secret stringData password must be absent
-  ! grep -q 'password: "shared-pass"' "${BATS_TEST_TMPDIR}/without.yaml"
+  # Password Secrets are applied by deploy_db.sh outside Helm
+  ! grep -q 'password: "shared-pass"' "${BATS_TEST_TMPDIR}/with.yaml"
 }

@@ -32,7 +32,7 @@ STUB
   export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
   unset HELM_STATUS SELF_HEAL_STUCK_RELEASES VALUES_URL PVC_SIZE STORAGE_CLASS \
     POSTGRES_VERSION REPLICAS CPU_REQUEST MEMORY_REQUEST ROUTE_ENABLED ROUTE_HOST \
-    DRY_RUN HELM_UPGRADE_RC CUSTOM_PGUSER_PASSWORD
+    DRY_RUN HELM_UPGRADE_RC STANDBY_ENABLED STANDBY_REPO_NAME SHUTDOWN CUSTOM_PGUSER_PASSWORD
 }
 
 deploy() {
@@ -83,15 +83,15 @@ refute_call() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"skipping database ready check"* ]]
   [[ "$output" != *"already deployed, triggers did not fire"* ]]
-  grep -q "^helm upgrade --dry-run=server --hide-secret --install pg-test" "${STUB_LOG}"
-  refute_call "^helm upgrade --install --wait"
+  grep -q "^helm upgrade --dry-run=server --hide-secret --install --wait pg-test" "${STUB_LOG}"
+  refute_call "^helm upgrade --install --wait pg-test"
   refute_call "^oc "
 }
 
 @test "dry_run does not self-heal a stuck release" {
   HELM_STATUS=pending-upgrade SELF_HEAL_STUCK_RELEASES=true DRY_RUN=true deploy
   [ "$status" -eq 0 ]
-  grep -q "^helm upgrade --dry-run=server --hide-secret --install pg-test" "${STUB_LOG}"
+  grep -q "^helm upgrade --dry-run=server --hide-secret --install --wait pg-test" "${STUB_LOG}"
   refute_call "^helm uninstall"
   refute_call "^oc "
 }
@@ -116,16 +116,156 @@ STUB
   [[ "$output" == *"Crunchy DB instance is ready."* ]]
 }
 
-
-@test "custom_pguser_password sets crunchy.pgUser.customPassword" {
-  CUSTOM_PGUSER_PASSWORD='s3cret-pass' deploy
-  [ "$status" -eq 0 ]
-  grep -q 'crunchy.pgUser.customPassword=s3cret-pass' "${STUB_LOG}"
+@test "standby_enabled without S3 fails" {
+  STANDBY_ENABLED=true deploy
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"standby_enabled requires s3"* ]]
 }
 
-@test "empty custom_pguser_password omits pgUser set" {
-  unset CUSTOM_PGUSER_PASSWORD
-  deploy
+@test "standby_enabled with S3 deploys standby sets" {
+  STANDBY_ENABLED=true run "${SCRIPT}" "${CHART}" "" app pg-test true ak sk bucket endpoint.example
   [ "$status" -eq 0 ]
-  refute_call 'pgUser.customPassword'
+  grep -q 'crunchy.standby.enabled=true' "${STUB_LOG}"
+  grep -q 'crunchy.standby.repoName=repo2' "${STUB_LOG}"
+  grep -q 'crunchy.pgBackRest.s3.enabled=true' "${STUB_LOG}"
+}
+
+@test "shutdown input: waits for zero ready replicas" {
+  cat > "${BATS_TEST_TMPDIR}/bin/oc" <<'STUB'
+#!/bin/bash
+echo "oc $*" >> "${STUB_LOG}"
+if [ "$1" = "get" ]; then
+  echo '{"status":{"instances":[{"name":"db","readyReplicas":0}]}}'
+fi
+STUB
+  chmod +x "${BATS_TEST_TMPDIR}/bin/oc"
+  SHUTDOWN=true deploy
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Crunchy DB is shut down"* ]]
+}
+
+@test "shutdown via values_file: waits for zero ready replicas" {
+  cat > "${BATS_TEST_TMPDIR}/bin/oc" <<'STUB'
+#!/bin/bash
+echo "oc $*" >> "${STUB_LOG}"
+if [ "$1" = "get" ]; then
+  echo '{"status":{"instances":[{"name":"db","readyReplicas":0}]}}'
+fi
+STUB
+  chmod +x "${BATS_TEST_TMPDIR}/bin/oc"
+  VALUES_SRC="${BATS_TEST_TMPDIR}/shutdown-values.yml"
+  cp "${BATS_TEST_DIRNAME}/../../../crunchy/values.yml" "${VALUES_SRC}"
+  yq -i '.crunchy.shutdown = true' "${VALUES_SRC}"
+  cat > "${BATS_TEST_TMPDIR}/bin/curl" <<STUB
+#!/bin/bash
+echo "curl \$*" >> "${STUB_LOG}"
+out=""
+while [ \$# -gt 0 ]; do
+  if [ "\$1" = "-o" ]; then out="\$2"; shift 2; continue; fi
+  shift
+done
+cp "${VALUES_SRC}" "\${out}"
+STUB
+  chmod +x "${BATS_TEST_TMPDIR}/bin/curl"
+  run "${SCRIPT}" "${CHART}" "https://example.com/values-shutdown.yml" app pg-test true
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Crunchy DB is shut down"* ]]
+}
+
+@test "custom password with spaces/punctuation patches existing Secret via oc" {
+  PASS='alpha beta,x!y'
+  cat > "${BATS_TEST_TMPDIR}/bin/oc" <<'STUB'
+#!/bin/bash
+echo "oc $*" >> "${STUB_LOG}"
+if [ "$1" = "get" ] && [[ "$*" == *"PostgresCluster/"* ]]; then
+  echo '{"status":{"instances":[{"name":"db","readyReplicas":1}]}}'
+  exit 0
+fi
+if [ "$1" = "get" ] && [[ "$*" == *secret/*pguser* ]]; then
+  exit 0
+fi
+if [ "$1" = "project" ]; then
+  echo "test-ns"
+  exit 0
+fi
+if [ "$1" = "patch" ]; then
+  # Record patch file contents for assertion
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "--patch-file" ]; then
+      cp "$2" "${STUB_LOG}.patch"
+      break
+    fi
+    shift
+  done
+  exit 0
+fi
+STUB
+  chmod +x "${BATS_TEST_TMPDIR}/bin/oc"
+  # jq needed for patch builder
+  command -v jq >/dev/null
+  CUSTOM_PGUSER_PASSWORD="$PASS" deploy
+  [ "$status" -eq 0 ]
+  grep -q "Patching password on existing Secret" <<< "$output"
+  grep -q "oc patch secret/pg-test-crunchy-pguser-app" "${STUB_LOG}"
+  # Assert literal password survived into the patch JSON
+  grep -q "$PASS" "${STUB_LOG}.patch"
+  # Helm must not receive --set-file / unquoted password fragments
+  ! grep -q -- '--set-file' "${STUB_LOG}"
+  ! grep -q 'alpha beta' "${STUB_LOG}"
+}
+
+@test "custom password creates Secret when missing (outside Helm)" {
+  cat > "${BATS_TEST_TMPDIR}/bin/oc" <<'STUB'
+#!/bin/bash
+echo "oc $*" >> "${STUB_LOG}"
+if [ "$1" = "get" ] && [[ "$*" == *"PostgresCluster/"* ]]; then
+  echo '{"status":{"instances":[{"name":"db","readyReplicas":1}]}}'
+  exit 0
+fi
+if [ "$1" = "get" ] && [[ "$*" == *secret/*pguser* ]]; then
+  exit 1
+fi
+if [ "$1" = "project" ]; then echo "test-ns"; exit 0; fi
+if [ "$1" = "create" ]; then
+  # Emit a minimal Secret for the label|apply pipeline; record --from-file path
+  while [ $# -gt 0 ]; do
+    if [[ "$1" == --from-file=password=* ]]; then
+      src="${1#--from-file=password=}"
+      cp "$src" "${STUB_LOG}.pass"
+    fi
+    shift
+  done
+  cat <<'YAML'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pg-test-crunchy-pguser-app
+YAML
+  exit 0
+fi
+if [ "$1" = "label" ]; then
+  cat
+  exit 0
+fi
+if [ "$1" = "apply" ]; then
+  if [ ! -t 0 ]; then cat > "${STUB_LOG}.apply"; fi
+  exit 0
+fi
+STUB
+  chmod +x "${BATS_TEST_TMPDIR}/bin/oc"
+  CUSTOM_PGUSER_PASSWORD='s3cret, with spaces!' deploy
+  [ "$status" -eq 0 ]
+  grep -q "Creating pguser Secret" <<< "$output"
+  grep -q "oc create secret generic pg-test-crunchy-pguser-app" "${STUB_LOG}"
+  grep -q 's3cret, with spaces!' "${STUB_LOG}.pass"
+  grep -q "oc apply" "${STUB_LOG}"
+  ! grep -q -- '--set-file' "${STUB_LOG}"
+}
+
+@test "dry_run skips custom password Secret mutation" {
+  CUSTOM_PGUSER_PASSWORD='should-not-apply' DRY_RUN=true deploy
+  [ "$status" -eq 0 ]
+  refute_call "^oc patch"
+  refute_call "^oc create secret"
+  refute_call "^oc apply"
 }

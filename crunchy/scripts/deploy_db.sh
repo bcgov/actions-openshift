@@ -21,8 +21,70 @@ MAX_DB_READY_RETRIES=90
 DB_READY_SLEEP_SECONDS=10
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Validate overrides before any side effects
-OVERRIDE_ARGS="$(VALUES_URL="${VALUES_URL}" "${SCRIPT_DIR}/resolve_helm_args.sh")"
+# Apply crunchy.pgUser.customPassword outside Helm. Safer than a Helm Secret of the
+# same name as the operator-managed pguser Secret: we never delete live credentials,
+# only create (greenfield) or patch the password key (existing release). Skipped on dry_run.
+PASS_FILE=""
+cleanup_pass_file() {
+  if [ -n "${PASS_FILE}" ] && [ -f "${PASS_FILE}" ]; then
+    rm -f "${PASS_FILE}"
+  fi
+}
+trap cleanup_pass_file EXIT
+
+apply_custom_pguser_password() {
+  local password="${CUSTOM_PGUSER_PASSWORD:-}"
+  if [ -z "${password}" ] && [ -f ./values.yml ]; then
+    password="$(yq -r '.crunchy.pgUser.customPassword // ""' ./values.yml)"
+  fi
+  if [ -z "${password}" ] || [ "${password}" = "null" ]; then
+    return 0
+  fi
+
+  local db_name cluster_name secret_name ns patch_file
+  db_name="$(yq -r '.global.config.dbName // "app"' ./values.yml)"
+  cluster_name="${RELEASE_NAME}-crunchy"
+  secret_name="${cluster_name}-pguser-${db_name}"
+  ns="$(oc project -q)"
+
+  PASS_FILE="$(mktemp)"
+  chmod 600 "${PASS_FILE}"
+  printf '%s' "${password}" > "${PASS_FILE}"
+
+  if oc get "secret/${secret_name}" >/dev/null 2>&1; then
+    echo "Patching password on existing Secret ${secret_name} (outside Helm; credentials retained)."
+    patch_file="$(mktemp)"
+    chmod 600 "${patch_file}"
+    jq -n --rawfile p "${PASS_FILE}" '{stringData:{password:$p}}' > "${patch_file}"
+    oc patch "secret/${secret_name}" --type merge --patch-file "${patch_file}"
+    rm -f "${patch_file}"
+  else
+    echo "Creating pguser Secret ${secret_name} with custom password (outside Helm)."
+    oc create secret generic "${secret_name}" \
+      --from-file="password=${PASS_FILE}" \
+      --dry-run=client -o yaml \
+    | oc label --local -f - \
+        "postgres-operator.crunchydata.com/cluster=${cluster_name}" \
+        "postgres-operator.crunchydata.com/pguser=${db_name}" \
+        --overwrite -o yaml \
+    | oc apply -n "${ns}" -f -
+  fi
+}
+
+
+# Validate overrides before any side effects (one Helm arg per line)
+OVERRIDE_ARGS=()
+while IFS= read -r arg; do
+  [ -n "${arg}" ] && OVERRIDE_ARGS+=("${arg}")
+done < <(VALUES_URL="${VALUES_URL}" "${SCRIPT_DIR}/resolve_helm_args.sh")
+
+# Standby via action inputs needs S3 (repo2). values_file callers configure S3 themselves.
+if [ "${STANDBY_ENABLED:-false}" = "true" ]; then
+  if [ -z "${S3_ACCESS_KEY:-}" ] || [ -z "${S3_SECRET_KEY:-}" ] || [ -z "${S3_BUCKET:-}" ] || [ -z "${S3_ENDPOINT:-}" ]; then
+    echo "Error: standby_enabled requires s3_access_key, s3_secret_key, s3_bucket and s3_endpoint (standby follows repo2)."
+    exit 1
+  fi
+fi
 
 # Deploy Database
 echo 'Deploying crunchy helm chart'
@@ -34,7 +96,6 @@ if [ "${ROUTE_ENABLED:-false}" = "true" ] && [ ! -f templates/route.yaml ]; then
 fi
 
 if [ -n "$VALUES_URL" ]; then
-  # Download values.yml file
   CURL_AUTH_OPTS=()
   if [ -n "${GITHUB_TOKEN:-}" ]; then
     CURL_AUTH_OPTS=(-H "Authorization: token ${GITHUB_TOKEN}")
@@ -48,6 +109,14 @@ fi
 if ! yq -e '.' ./values.yml > /dev/null; then
   echo "Error: values.yml is not valid YAML."
   exit 1
+fi
+
+# Effective shutdown: action input or values_file
+EFFECTIVE_SHUTDOWN=false
+if [ "${SHUTDOWN:-false}" = "true" ]; then
+  EFFECTIVE_SHUTDOWN=true
+elif [ "$(yq -r '.crunchy.shutdown // false' ./values.yml)" = "true" ]; then
+  EFFECTIVE_SHUTDOWN=true
 fi
 
 # Set Helm app name
@@ -88,44 +157,59 @@ if [ "${DRY_RUN:-false}" != "true" ] && [ "${SELF_HEAL_STUCK_RELEASES:-false}" =
   fi
 fi
 
-# Build Helm set strings: overrides, then S3 options if provided
-SET_STRINGS="${OVERRIDE_ARGS}"
-if [ -n "$S3_ACCESS_KEY" ] && [ -n "$S3_SECRET_KEY" ] && [ -n "$S3_BUCKET" ] && [ -n "$S3_ENDPOINT" ]; then
-  SET_STRINGS+=" --set crunchy.pgBackRest.s3.enabled=true \
-    --set-string crunchy.pgBackRest.s3.accessKey=$S3_ACCESS_KEY \
-    --set-string crunchy.pgBackRest.s3.secretKey=$S3_SECRET_KEY \
-    --set-string crunchy.pgBackRest.s3.bucket=$S3_BUCKET \
-    --set-string crunchy.pgBackRest.s3.endpoint=$S3_ENDPOINT"
-fi
-
-# Shared app-user password for primary/standby (DR). Empty = operator-generated.
-if [ -n "${CUSTOM_PGUSER_PASSWORD:-}" ]; then
-  SET_STRINGS+=" --set-string crunchy.pgUser.customPassword=${CUSTOM_PGUSER_PASSWORD}"
-fi
-
-# Execute the Helm command. dry_run validates against the API and stops
-# before the ready check, which would fail because nothing was applied.
-# --dry-run=server submits the chart to the API. --hide-secret omits Secret
-# bodies from the output. --debug is not used: it prints user-supplied values.
+# Quoted Helm arg array (never expand unquoted). Overrides are already validated.
+CHART_TGZ="./${APP_NAME}-${CHART_VERSION}.tgz"
+HELM_ARGS=()
 if [ "${DRY_RUN:-false}" = "true" ]; then
-  helm upgrade --dry-run=server --hide-secret --install "$RELEASE_NAME" --values ./values.yml ./$APP_NAME-$CHART_VERSION.tgz $SET_STRINGS
+  HELM_ARGS+=(--dry-run=server --hide-secret)
+fi
+HELM_ARGS+=(--install --wait "$RELEASE_NAME" --values ./values.yml "${CHART_TGZ}")
+HELM_ARGS+=("${OVERRIDE_ARGS[@]}")
+
+if [ -n "$S3_ACCESS_KEY" ] && [ -n "$S3_SECRET_KEY" ] && [ -n "$S3_BUCKET" ] && [ -n "$S3_ENDPOINT" ]; then
+  HELM_ARGS+=(--set "crunchy.pgBackRest.s3.enabled=true")
+  HELM_ARGS+=(--set-string "crunchy.pgBackRest.s3.accessKey=${S3_ACCESS_KEY}")
+  HELM_ARGS+=(--set-string "crunchy.pgBackRest.s3.secretKey=${S3_SECRET_KEY}")
+  HELM_ARGS+=(--set-string "crunchy.pgBackRest.s3.bucket=${S3_BUCKET}")
+  HELM_ARGS+=(--set-string "crunchy.pgBackRest.s3.endpoint=${S3_ENDPOINT}")
+fi
+
+# Custom password is applied outside Helm (see apply_custom_pguser_password) so an
+# operator-created pguser Secret is never replaced by a Helm-owned resource.
+helm upgrade "${HELM_ARGS[@]}"
+
+if [ "${DRY_RUN:-false}" = "true" ]; then
   echo "dry_run: helm upgrade --dry-run=server completed; skipping database ready check."
   exit 0
 fi
-helm upgrade --install --wait "$RELEASE_NAME" --values ./values.yml ./$APP_NAME-$CHART_VERSION.tgz $SET_STRINGS
-# Verify successful db deployment; wait retry 10 times with 60 seconds interval
+
+apply_custom_pguser_password
+
+CLUSTER="PostgresCluster/${RELEASE_NAME}-crunchy"
+
+if [ "${EFFECTIVE_SHUTDOWN}" = "true" ]; then
+  # Shutdown scales workloads to zero; wait until no ready replicas remain.
+  for i in $(seq 1 "$MAX_DB_READY_RETRIES"); do
+    if oc get "${CLUSTER}" -o json | jq -e '([.status.instances[].readyReplicas // 0] | add // 0) == 0' > /dev/null 2>&1; then
+      echo "Crunchy DB is shut down (no ready replicas)."
+      exit 0
+    fi
+    echo "Attempt $i: Crunchy DB still has ready replicas during shutdown, waiting for $DB_READY_SLEEP_SECONDS seconds"
+    sleep "$DB_READY_SLEEP_SECONDS"
+  done
+  echo "Crunchy DB did not shut down after $MAX_DB_READY_RETRIES attempts."
+  exit 1
+fi
+
+# Verify successful db deployment
 for i in $(seq 1 "$MAX_DB_READY_RETRIES"); do
-  # Check if any database instance has at least 1 ready replica
-  if oc get PostgresCluster/"$RELEASE_NAME"-crunchy -o json | jq -e '([.status.instances[].readyReplicas // 0] | add // 0) > 0' > /dev/null 2>&1; then
+  if oc get "${CLUSTER}" -o json | jq -e '([.status.instances[].readyReplicas // 0] | add // 0) > 0' > /dev/null 2>&1; then
     echo "Crunchy DB instance is ready."
-    READY=true
     exit 0
-  else
-    echo "Attempt $i: Crunchy DB is not ready, waiting for $DB_READY_SLEEP_SECONDS seconds"
-    sleep $DB_READY_SLEEP_SECONDS
   fi
+  echo "Attempt $i: Crunchy DB is not ready, waiting for $DB_READY_SLEEP_SECONDS seconds"
+  sleep "$DB_READY_SLEEP_SECONDS"
 done
 
-# Landing here means there's a problem
 echo "Crunchy DB did not become ready after $MAX_DB_READY_RETRIES attempts."
 exit 1

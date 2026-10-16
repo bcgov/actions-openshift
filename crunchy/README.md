@@ -396,7 +396,7 @@ Need more help? Join the discussion in the [CrunchyDB Rocket.Chat Channel](https
 
 ## Custom app-user password (DR / standby)
 
-When a standby cluster must authenticate with the same credentials as the primary (Gold / GoldDR, or a read-only sandbox), set `custom_pguser_password` to a shared secret. The chart creates the `{cluster}-pguser-{dbName}` Secret with that password before the operator generates a random one.
+When a standby cluster must authenticate with the same credentials as the primary (Gold / GoldDR, or a read-only sandbox), set `custom_pguser_password` to a shared secret. The action writes the password to a mode-600 temp file and creates or patches the `{cluster}-pguser-{dbName}` Secret **outside Helm** (so an existing operator-managed Secret is never replaced or deleted). Skipped on `dry_run`.
 
 ```yaml
 - uses: bcgov/actions-openshift/crunchy@vX.Y.Z
