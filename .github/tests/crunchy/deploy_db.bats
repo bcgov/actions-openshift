@@ -171,3 +171,101 @@ STUB
   [ "$status" -eq 0 ]
   [[ "$output" == *"Crunchy DB is shut down"* ]]
 }
+
+@test "custom password with spaces/punctuation patches existing Secret via oc" {
+  PASS='alpha beta,x!y'
+  cat > "${BATS_TEST_TMPDIR}/bin/oc" <<'STUB'
+#!/bin/bash
+echo "oc $*" >> "${STUB_LOG}"
+if [ "$1" = "get" ] && [[ "$*" == *"PostgresCluster/"* ]]; then
+  echo '{"status":{"instances":[{"name":"db","readyReplicas":1}]}}'
+  exit 0
+fi
+if [ "$1" = "get" ] && [[ "$*" == *secret/*pguser* ]]; then
+  exit 0
+fi
+if [ "$1" = "project" ]; then
+  echo "test-ns"
+  exit 0
+fi
+if [ "$1" = "patch" ]; then
+  # Record patch file contents for assertion
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "--patch-file" ]; then
+      cp "$2" "${STUB_LOG}.patch"
+      break
+    fi
+    shift
+  done
+  exit 0
+fi
+STUB
+  chmod +x "${BATS_TEST_TMPDIR}/bin/oc"
+  # jq needed for patch builder
+  command -v jq >/dev/null
+  CUSTOM_PGUSER_PASSWORD="$PASS" deploy
+  [ "$status" -eq 0 ]
+  grep -q "Patching password on existing Secret" <<< "$output"
+  grep -q "oc patch secret/pg-test-crunchy-pguser-app" "${STUB_LOG}"
+  # Assert literal password survived into the patch JSON
+  grep -q "$PASS" "${STUB_LOG}.patch"
+  # Helm must not receive --set-file / unquoted password fragments
+  ! grep -q -- '--set-file' "${STUB_LOG}"
+  ! grep -q 'alpha beta' "${STUB_LOG}"
+}
+
+@test "custom password creates Secret when missing (outside Helm)" {
+  cat > "${BATS_TEST_TMPDIR}/bin/oc" <<'STUB'
+#!/bin/bash
+echo "oc $*" >> "${STUB_LOG}"
+if [ "$1" = "get" ] && [[ "$*" == *"PostgresCluster/"* ]]; then
+  echo '{"status":{"instances":[{"name":"db","readyReplicas":1}]}}'
+  exit 0
+fi
+if [ "$1" = "get" ] && [[ "$*" == *secret/*pguser* ]]; then
+  exit 1
+fi
+if [ "$1" = "project" ]; then echo "test-ns"; exit 0; fi
+if [ "$1" = "create" ]; then
+  # Emit a minimal Secret for the label|apply pipeline; record --from-file path
+  while [ $# -gt 0 ]; do
+    if [[ "$1" == --from-file=password=* ]]; then
+      src="${1#--from-file=password=}"
+      cp "$src" "${STUB_LOG}.pass"
+    fi
+    shift
+  done
+  cat <<'YAML'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pg-test-crunchy-pguser-app
+YAML
+  exit 0
+fi
+if [ "$1" = "label" ]; then
+  cat
+  exit 0
+fi
+if [ "$1" = "apply" ]; then
+  if [ ! -t 0 ]; then cat > "${STUB_LOG}.apply"; fi
+  exit 0
+fi
+STUB
+  chmod +x "${BATS_TEST_TMPDIR}/bin/oc"
+  CUSTOM_PGUSER_PASSWORD='s3cret, with spaces!' deploy
+  [ "$status" -eq 0 ]
+  grep -q "Creating pguser Secret" <<< "$output"
+  grep -q "oc create secret generic pg-test-crunchy-pguser-app" "${STUB_LOG}"
+  grep -q 's3cret, with spaces!' "${STUB_LOG}.pass"
+  grep -q "oc apply" "${STUB_LOG}"
+  ! grep -q -- '--set-file' "${STUB_LOG}"
+}
+
+@test "dry_run skips custom password Secret mutation" {
+  CUSTOM_PGUSER_PASSWORD='should-not-apply' DRY_RUN=true deploy
+  [ "$status" -eq 0 ]
+  refute_call "^oc patch"
+  refute_call "^oc create secret"
+  refute_call "^oc apply"
+}

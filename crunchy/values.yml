@@ -138,6 +138,12 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
   # - options: A string specifying user privileges (e.g., "SUPERUSER CREATEDB CREATEROLE"). Ensure the options are valid PostgreSQL roles.
   # For more details, refer to the Crunchy Postgres Operator documentation: 
   # https://access.crunchydata.com/documentation/postgres-operator/latest/tutorials/basic-setup/user-management
+
+  # When non-empty, deploy_db.sh applies this password outside Helm to the
+  # primary app pguser Secret (DR / standby shared credentials).
+  pgUser:
+    customPassword: ""
+
   users: 
     - name: '{{ .Values.global.config.dbName }}'
       databases:

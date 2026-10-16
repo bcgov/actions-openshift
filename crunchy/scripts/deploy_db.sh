@@ -21,6 +21,57 @@ MAX_DB_READY_RETRIES=90
 DB_READY_SLEEP_SECONDS=10
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Apply crunchy.pgUser.customPassword outside Helm. Safer than a Helm Secret of the
+# same name as the operator-managed pguser Secret: we never delete live credentials,
+# only create (greenfield) or patch the password key (existing release). Skipped on dry_run.
+PASS_FILE=""
+cleanup_pass_file() {
+  if [ -n "${PASS_FILE}" ] && [ -f "${PASS_FILE}" ]; then
+    rm -f "${PASS_FILE}"
+  fi
+}
+trap cleanup_pass_file EXIT
+
+apply_custom_pguser_password() {
+  local password="${CUSTOM_PGUSER_PASSWORD:-}"
+  if [ -z "${password}" ] && [ -f ./values.yml ]; then
+    password="$(yq -r '.crunchy.pgUser.customPassword // ""' ./values.yml)"
+  fi
+  if [ -z "${password}" ] || [ "${password}" = "null" ]; then
+    return 0
+  fi
+
+  local db_name cluster_name secret_name ns patch_file
+  db_name="$(yq -r '.global.config.dbName // "app"' ./values.yml)"
+  cluster_name="${RELEASE_NAME}-crunchy"
+  secret_name="${cluster_name}-pguser-${db_name}"
+  ns="$(oc project -q)"
+
+  PASS_FILE="$(mktemp)"
+  chmod 600 "${PASS_FILE}"
+  printf '%s' "${password}" > "${PASS_FILE}"
+
+  if oc get "secret/${secret_name}" >/dev/null 2>&1; then
+    echo "Patching password on existing Secret ${secret_name} (outside Helm; credentials retained)."
+    patch_file="$(mktemp)"
+    chmod 600 "${patch_file}"
+    jq -n --rawfile p "${PASS_FILE}" '{stringData:{password:$p}}' > "${patch_file}"
+    oc patch "secret/${secret_name}" --type merge --patch-file "${patch_file}"
+    rm -f "${patch_file}"
+  else
+    echo "Creating pguser Secret ${secret_name} with custom password (outside Helm)."
+    oc create secret generic "${secret_name}" \
+      --from-file="password=${PASS_FILE}" \
+      --dry-run=client -o yaml \
+    | oc label --local -f - \
+        "postgres-operator.crunchydata.com/cluster=${cluster_name}" \
+        "postgres-operator.crunchydata.com/pguser=${db_name}" \
+        --overwrite -o yaml \
+    | oc apply -n "${ns}" -f -
+  fi
+}
+
+
 # Validate overrides before any side effects (one Helm arg per line)
 OVERRIDE_ARGS=()
 while IFS= read -r arg; do
@@ -123,28 +174,16 @@ if [ -n "$S3_ACCESS_KEY" ] && [ -n "$S3_SECRET_KEY" ] && [ -n "$S3_BUCKET" ] && 
   HELM_ARGS+=(--set-string "crunchy.pgBackRest.s3.endpoint=${S3_ENDPOINT}")
 fi
 
-# Optional custom password via --set-file (mode 600 temp); shared with #119 pattern
-PASS_FILE=""
-cleanup_pass_file() {
-  if [ -n "${PASS_FILE}" ] && [ -f "${PASS_FILE}" ]; then
-    rm -f "${PASS_FILE}"
-  fi
-}
-trap cleanup_pass_file EXIT
-
-if [ -n "${CUSTOM_PGUSER_PASSWORD:-}" ]; then
-  PASS_FILE="$(mktemp)"
-  chmod 600 "${PASS_FILE}"
-  printf '%s' "${CUSTOM_PGUSER_PASSWORD}" > "${PASS_FILE}"
-  HELM_ARGS+=(--set-file "crunchy.pgUser.customPassword=${PASS_FILE}")
-fi
-
+# Custom password is applied outside Helm (see apply_custom_pguser_password) so an
+# operator-created pguser Secret is never replaced by a Helm-owned resource.
 helm upgrade "${HELM_ARGS[@]}"
 
 if [ "${DRY_RUN:-false}" = "true" ]; then
   echo "dry_run: helm upgrade --dry-run=server completed; skipping database ready check."
   exit 0
 fi
+
+apply_custom_pguser_password
 
 CLUSTER="PostgresCluster/${RELEASE_NAME}-crunchy"
 
