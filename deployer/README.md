@@ -48,9 +48,10 @@ Testing has only been done with public images (ghcr.io, hub.docker.com) so far.
     # Default = "15m"
     timeout: "15m"
 
-    # Bash array to diff for build triggering
+    # Paths to diff for build triggering (one path per line); omit to always build
     # Optional, defaults to nothing, which forces a build
-    triggers: ('frontend/')
+    triggers: |
+      frontend/
 
 
     ### Usually a bad idea / not recommended
@@ -86,7 +87,8 @@ deploys:
         parameters:
           -p MIN_REPLICAS=1 -p MAX_REPLICAS=2
           -p PR_NUMBER=${{ github.event.number }}
-        triggers: ('frontend/')
+        triggers: |
+          frontend/
 ```
 
 # Example, Matrix / Multiple Templates
@@ -105,7 +107,8 @@ runs-on: ubuntu-24.04
         file: backend/openshift.deploy.yml
         overwrite: true
         parameters: -p MIN_REPLICAS=1 -p MAX_REPLICAS=2
-        triggers: ('backend/')
+        triggers: |
+          backend/
       - name: database
         overwrite: false
         file: database/openshift.deploy.yml
@@ -113,7 +116,9 @@ runs-on: ubuntu-24.04
         overwrite: true
         file: frontend/openshift.deploy.yml
         parameters: -p MIN_REPLICAS=1 -p MAX_REPLICAS=2
-        triggers: ('backend/', 'frontend/')
+        triggers: |
+          backend/
+          frontend/
       - name: init
         overwrite: false
         file: common/openshift.init.yml
@@ -151,7 +156,9 @@ runs-on: ubuntu-24.04
       - name: frontend
         file: frontend/openshift.deploy.yml
         parameters: -p MIN_REPLICAS=1 -p MAX_REPLICAS=2
-        triggers: ('backend/', 'frontend/')
+        triggers: |
+          backend/
+          frontend/
 steps:
   - name: Deploys
     uses: bcgov/actions-openshift/deployer@vX.Y.Z
