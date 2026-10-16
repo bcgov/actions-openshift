@@ -13,8 +13,45 @@ concurrency:
 permissions: {}
 
 jobs:
+  changes:
+    name: oc-runner (changes)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      triggered: ${{ steps.diff.outputs.triggered }}
+    steps:
+      # diff-triggers compares against the base branch tip. The merge base keeps a
+      # newer main change out of this pull request's diff. Push events use HEAD^.
+      - name: Find the pull request merge base
+        id: base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No merge base for ${BASE_SHA}...${HEAD_SHA}"; exit 1; }
+          echo "Merge base: ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - id: diff
+        uses: bcgov/actions/diff-triggers@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
+        with:
+          ref: ${{ steps.base.outputs.sha }}
+          triggers: |
+            oc-runner/
+            .github/tests/oc-runner/
+            .github/workflows/oc-runner-commands.yml
+            !*.md
+
   commands:
     name: Test oc-runner commands
+    needs: changes
+    if: needs.changes.outputs.triggered == 'true'
     permissions: {}
     runs-on: ubuntu-26.04
     steps:
@@ -31,6 +68,8 @@ jobs:
 
   unreachable-api:
     name: Test oc-runner blocked output
+    needs: changes
+    if: needs.changes.outputs.triggered == 'true'
     # No credentials: silver's API name points at a non-routable address on this runner, so
     # pre-flight times out while the real silver router still answers. The action must fail
     # with blocked=true (unreachable=true if the router is down too), and the composite
