@@ -111,7 +111,7 @@ jobs:
 
   # Merge gate for this workflow: always reports, skipped jobs count as passing
   results:
-    name: oc-runner Results
+    name: OC Runner Results
     needs:
       - changes
       - commands
