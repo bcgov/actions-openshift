@@ -40,8 +40,11 @@ Provide as few as zero commands to login only.  There is a separate parameter fo
     # Cronjob to run and report on
     cronjob: repo-name-cronjob-etc
 
-    # Bash array to diff for triggering; omit to always run
-    triggers: ('frontend/' 'backend/' 'database/')
+    # Paths to diff for triggering (one path per line); omit to always run
+    triggers: |
+      frontend/
+      backend/
+      database/
 
 
     ### Usually a bad idea / not recommended
@@ -101,7 +104,10 @@ whoareyou:
         oc_namespace: ${{ vars.oc_namespace }}
         oc_server: ${{ vars.oc_server }}
         oc_token: ${{ secrets.OC_TOKEN }}
-        triggers: ('frontend/' 'backend/' 'database/')
+        triggers: |
+          frontend/
+          backend/
+          database/
         commands: |
           oc whoami
           oc version
@@ -121,7 +127,10 @@ cronjob:
         oc_namespace: ${{ vars.oc_namespace }}
         oc_server: ${{ vars.oc_server }}
         oc_token: ${{ secrets.OC_TOKEN }}
-        triggers: ('cronjobland/' 'misc/' 'whatever/')
+        triggers: |
+          cronjobland/
+          misc/
+          whatever/
         cronjob: repo-name-cronjob-etc
 ```
 

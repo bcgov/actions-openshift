@@ -38,8 +38,12 @@ inputs:
       Example: nr-repository-name-cronjob-component
   triggers:
     description: |
-      Bash array to diff for triggering, omit to always run
-      Example: ('./common', './backend/' './frontend/)
+      Omit to always run, otherwise trigger by path (one path per line).
+      Example:
+        triggers: |
+          ./common/
+          ./backend/
+          ./frontend/
 
   ### Usually a bad idea / not recommended
   cronjob_tail:
