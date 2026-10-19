@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared input parsing for actions-openshift, same rules as bcgov/actions shared/inputs.js:
 #   list:  one item per line (preferred), "a, b" on one line, or a JSON array
-#          (bash "('a' 'b')" and space or semicolon separated lines fail with a before/after example)
+#          (anything else, e.g. "('a' 'b')" or "a b", fails with a multiline example)
 #   bool:  true or false, any case
 #   enum:  one of the listed values, any case
 #   debug: the debug input, or RUNNER_DEBUG=1 (a re-run with debug logging)
@@ -24,24 +24,17 @@ _input_trim() {
 }
 
 _input_list_error() {
-  local name="$1" raw="$2" kind inner item
+  local name="$1" raw="$2" inner="$2" item
   local -a items=()
-  if [[ "$raw" == \(*\) ]]; then
-    kind="Bash-style parenthesized lists"
-    inner="${raw:1:${#raw}-2}"
-  else
-    kind="Semicolon or space separated single-line lists"
-    inner="$raw"
-  fi
+  [[ "$raw" == \(*\) ]] && inner="${raw:1:${#raw}-2}"
   for item in ${inner//[,;]/ }; do
     item="$(_input_strip_quotes "$item")"
     [ -n "$item" ] && items+=("$item")
   done
   [ "${#items[@]}" -gt 0 ] || items=(backend/ frontend/)
-  local msg="::error title=${name}: unsupported list format::Invalid ${name} input: ${raw}"
-  msg+="%0A${kind} are no longer supported."
-  msg+="%0AUse a multiline block, one item per line (or a comma-separated line, or a JSON array)."
-  msg+="%0ABefore:%0A  ${name}: ${raw}%0AAfter:%0A  ${name}: |"
+  local msg="::error title=${name}: list format::Invalid ${name} input: ${raw}"
+  msg+="%0A${name} must be a multiline block (one item per line), a comma-separated line, or a JSON array."
+  msg+="%0AGot:%0A  ${name}: ${raw}%0AUse:%0A  ${name}: |"
   for item in "${items[@]}"; do msg+="%0A    ${item}"; done
   # GitHub's docs on step inputs (with:), including multiline values
   msg+="%0AMultiline input syntax: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepswith"
