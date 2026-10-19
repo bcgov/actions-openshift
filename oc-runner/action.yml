@@ -53,9 +53,9 @@ inputs:
     default: -1
     # pattern accepts -1 or any non-negative integer
     pattern: "^(-1|[0-9]+)$"
-  diff_branch:
+  diff_base:
     description: |
-      Branch to diff against
+      Base to diff triggers against (bcgov/actions diff-triggers diff_base)
       Example: main, master, SHA or tag
     default: ${{ github.event.repository.default_branch }}
   oc_version:
@@ -83,20 +83,13 @@ inputs:
     default: 10m
     pattern: "^[0-9]+[mhs]$"
   token:
-    description: Specify token (GH or PAT), instead of inheriting one from the calling workflow
+    description: 'Authentication token (defaults to github.token; override with PAT if needed).'
     default: ${{ github.token }}
-  verbose:
+  debug:
     description: |
-      Enable bash xtrace (`set -x`) for commands input debugging
+      Enable bash xtrace (`set -x`) for the commands block. Also on when the run is re-run with debug logging.
       Example: true, false
     default: "false"
-    pattern: "^(true|false)$"
-  login_attempts:
-    description: |
-      Maximum number of login attempts; values above 2 are capped at 2 (one retry)
-      Example: 1, 2
-    default: "2"
-    pattern: "^[1-9][0-9]*$"
 
 outputs:
   commands:
@@ -125,12 +118,25 @@ outputs:
 runs:
   using: composite
   steps:
-    # Send triggers to diff action
+    # Shared input rules (shared/inputs.sh); a bad value fails here
+    - name: Parse Inputs
+      id: inputs
+      shell: bash
+      env:
+        INPUT_DEBUG: ${{ inputs.debug }}
+        SHARED_INPUTS: ${{ github.action_path }}/../shared/inputs.sh
+      run: |
+        # shellcheck source=/dev/null
+        source "$SHARED_INPUTS"
+        debug="$(input_debug "$INPUT_DEBUG")"
+        echo "debug=${debug}" >> "$GITHUB_OUTPUT"
+
+    # Send triggers to diff action (diff-triggers v0.9.0 still names its input ref)
     - id: diff
       uses: bcgov/actions/diff-triggers@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
       with:
         triggers: ${{ inputs.triggers }}
-        ref: ${{ inputs.diff_branch }}
+        ref: ${{ inputs.diff_base }}
 
     - name: Cache OpenShift CLI
       if: steps.diff.outputs.triggered == 'true' && inputs.oc_version != 'latest'
@@ -146,7 +152,6 @@ runs:
         SERVER_URL: ${{ inputs.oc_server }}
         NAMESPACE: ${{ inputs.oc_namespace }}
         TOKEN_INPUT: ${{ inputs.oc_token }}
-        ATTEMPTS: ${{ inputs.login_attempts }}
         ACTION_PATH: ${{ github.action_path }}
       shell: bash
       working-directory: /usr/local/bin
@@ -167,7 +172,7 @@ runs:
       env:
         COMMANDS: ${{ inputs.commands }}
         COMMANDS_TIMEOUT: ${{ inputs.timeout }}
-        ENABLE_VERBOSE: ${{ inputs.verbose }}
+        DEBUG: ${{ steps.inputs.outputs.debug }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
         "${ACTION_PATH}/scripts/run_commands.sh"

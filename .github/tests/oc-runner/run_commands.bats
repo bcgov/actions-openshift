@@ -9,7 +9,7 @@ setup() {
   : > "$GITHUB_OUTPUT"
   : > "$GITHUB_STEP_SUMMARY"
   export COMMANDS_TIMEOUT=10s
-  export ENABLE_VERBOSE=false
+  export DEBUG=false
 }
 
 run_script() {
@@ -25,12 +25,12 @@ run_script() {
   grep -q 'Exit code: 7' "$GITHUB_STEP_SUMMARY"
 }
 
-@test "verbose mode prints xtrace" {
-  export ENABLE_VERBOSE=true
+@test "debug mode prints xtrace" {
+  export DEBUG=true
   export COMMANDS='echo hello-from-commands'
   run_script
   [ "$status" -eq 0 ]
-  [[ "$output" == *"::notice::[bcgov/actions-openshift/oc-runner] Verbose mode enabled"* ]]
+  [[ "$output" == *"::notice::[bcgov/actions-openshift/oc-runner] Debug mode enabled"* ]]
   [[ "$output" == *"echo hello-from-commands"* ]]
   [[ "$output" == *"+"*"echo hello-from-commands"* ]]
 }

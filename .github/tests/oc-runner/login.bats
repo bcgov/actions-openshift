@@ -14,7 +14,6 @@ setup() {
   export SERVER_URL=https://api.silver.devops.gov.bc.ca:6443
   export NAMESPACE=abc123-dev
   export TOKEN_INPUT=dummy-token-dummy-token-dummy-token
-  export ATTEMPTS=2
   export OC=stable-4.18
   export LOGIN_RETRY_DELAY=0
   # Stub behaviour: one word per /version call (answer, refused or timeout; the last word repeats)
