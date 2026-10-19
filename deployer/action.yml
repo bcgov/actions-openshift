@@ -104,9 +104,9 @@ runs:
       run: |
         # shellcheck source=/dev/null
         source "$SHARED_INPUTS"
-        debug="$(input_debug "$INPUT_DEBUG")"
-        overwrite="$(input_bool overwrite "$INPUT_OVERWRITE" true)"
-        lite_mode="$(input_bool lite_mode "$INPUT_LITE_MODE" false)"
+        debug="$(input_debug "$INPUT_DEBUG")" || { echo "$debug"; exit 1; }
+        overwrite="$(input_bool overwrite "$INPUT_OVERWRITE" true)" || { echo "$overwrite"; exit 1; }
+        lite_mode="$(input_bool lite_mode "$INPUT_LITE_MODE" false)" || { echo "$lite_mode"; exit 1; }
         {
           echo "debug=${debug}"
           echo "overwrite=${overwrite}"
