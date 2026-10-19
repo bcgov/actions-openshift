@@ -20,6 +20,7 @@ setup() {
   [[ "$output" == *"Invalid triggers input: ('backend/' 'frontend/')"* ]]
   [[ "$output" == *"Bash-style parenthesized lists are no longer supported"* ]]
   [[ "$output" == *"%0A  triggers: |%0A    backend/%0A    frontend/"* ]]
+  [[ "$output" == *"Multiline input syntax: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepswith" ]]
 }
 
 @test "list: space and semicolon separated lines fail" {
