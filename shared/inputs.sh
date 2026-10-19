@@ -45,6 +45,10 @@ input_list() {
   local name="$1" raw line item
   raw="$(_input_trim "${2:-}")"
   [ -n "$raw" ] || return 0
+  if [[ "$raw" == \(*\) ]]; then
+    _input_list_error "$name" "$raw"
+    return 1
+  fi
   if [[ "$raw" == \[*\] ]] && jq -e 'type == "array"' >/dev/null 2>&1 <<<"$raw"; then
     jq -r '.[] | tostring | gsub("^\\s+|\\s+$"; "") | select(. != "")' <<<"$raw"
     return 0
