@@ -14,11 +14,11 @@ setup() {
   [ -z "$(input_list triggers '')" ]
 }
 
-@test "list: bash parens fail with a before/after example" {
+@test "list: bash parens fail with a multiline example" {
   run input_list triggers "('backend/' 'frontend/')"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Invalid triggers input: ('backend/' 'frontend/')"* ]]
-  [[ "$output" == *"Bash-style parenthesized lists are no longer supported"* ]]
+  [[ "$output" == *"triggers must be a multiline block (one item per line), a comma-separated line, or a JSON array."* ]]
   [[ "$output" == *"%0A  triggers: |%0A    backend/%0A    frontend/"* ]]
   [[ "$output" == *"Multiline input syntax: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepswith" ]]
 }
