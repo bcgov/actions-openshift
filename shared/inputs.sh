@@ -43,6 +43,8 @@ _input_list_error() {
   msg+="%0AUse a multiline block, one item per line (or a comma-separated line, or a JSON array)."
   msg+="%0ABefore:%0A  ${name}: ${raw}%0AAfter:%0A  ${name}: |"
   for item in "${items[@]}"; do msg+="%0A    ${item}"; done
+  # GitHub's docs on step inputs (with:), including multiline values
+  msg+="%0AMultiline input syntax: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepswith"
   echo "$msg"
 }
 
