@@ -156,7 +156,7 @@ The action accepts the following inputs:
 | `repository` | Repository to take the chart from (e.g., org/repo); omit to use the chart bundled with this action | |
 | `ref` | Git ref of `repository` (e.g., branch, tag, SHA); used only when `repository` is set | main |
 | `release_name` | The release name to use, if provided overrides the computed pg-md5hash(1-8) of github repo name, if release_name is `pg-abc`,postgres cluster created will be `pg-abc-crunchy` | |
-| `diff_branch` | The branch to diff against (if not using default branch) Optional | |
+| `diff_base` | The branch to diff against (if not using default branch) Optional | |
 | `token` | (Optional) GitHub (built-in or PAT) token, otherwise inherited from workflow token | `github.token` |
 
 ### Outputs
@@ -165,11 +165,11 @@ The action accepts the following inputs:
 |--------|-------------|
 | `release` | The provided or generated release name |
 | `cluster` | The name of the deployed cluster |
-| `db_secret` | The secret name containing generated database credentials (`<cluster>-pguser-app[-<pr>]`) |
-| `db_host` | The pgBouncer database hostname (`<cluster>-pgbouncer`) |
-| `db_port` | The database port (`5432`) |
-| `db_user` | The database user name (`app[-<pr>]`) |
-| `db_name` | The database name (`app[-<pr>]`) |
+| `secret` | The secret name containing generated database credentials (`<cluster>-pguser-app[-<pr>]`) |
+| `host` | The pgBouncer database hostname (`<cluster>-pgbouncer`) |
+| `port` | The database port (`5432`) |
+| `user` | The database user name (`app[-<pr>]`) |
+| `dbname` | The database name (`app[-<pr>]`) |
 
 ### Overrides
 
@@ -282,7 +282,7 @@ jobs:
 
 ### Consuming Database Credentials in Application Deployments
 
-The action exports `db_secret` containing the operator-generated Secret name (`<cluster>-pguser-app[-<pr>]`). Application pods (e.g. backend, migrations) can consume this secret directly:
+The action exports `secret` containing the operator-generated Secret name (`<cluster>-pguser-app[-<pr>]`). Application pods (e.g. backend, migrations) can consume this secret directly:
 
 ```yaml
       - name: Deploy Crunchy Database
@@ -299,7 +299,7 @@ The action exports `db_secret` containing the operator-generated Secret name (`<
           oc_namespace: ${{ secrets.OC_NAMESPACE }}
           oc_token: ${{ secrets.OC_TOKEN }}
           oc_server: ${{ vars.OC_SERVER }}
-          parameters: -p DB_SECRET="${{ steps.crunchy.outputs.db_secret }}"
+          parameters: -p DB_SECRET="${{ steps.crunchy.outputs.secret }}"
 ```
 
 Inside your OpenShift template or Kubernetes manifest:

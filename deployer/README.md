@@ -53,12 +53,19 @@ Testing has only been done with public images (ghcr.io, hub.docker.com) so far.
     triggers: |
       frontend/
 
+    # Lite mode scales down and removes PodDisruptionBudgets to save quota
+    # Default: true on pull_request events, false otherwise
+    lite_mode: "false"
+
+    # Debug logging; also on when the run is re-run with debug logging
+    debug: "false"
+
 
     ### Usually a bad idea / not recommended
 
-    # Overrides the default branch to diff against
+    # Base to diff triggers against
     # Defaults to the default branch, usually `main`
-    ref: ${{ github.event.repository.default_branch }}
+    diff_base: ${{ github.event.repository.default_branch }}
 
     # Override default OpenShift CLI (oc) version; e.g. 4.13
 
