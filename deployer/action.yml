@@ -87,12 +87,6 @@ inputs:
     description: |
       Specify token (GH or PAT), instead of inheriting one from the calling workflow
     default: ${{ github.token }}
-  login_attempts:
-    description: |
-      Maximum number of login attempts; values above 2 are capped at 2 (one retry)
-      Example: 1, 2
-    default: "2"
-    pattern: "^[1-9][0-9]*$"
 
 outputs:
   triggered:
@@ -128,17 +122,6 @@ runs:
         ref: ${{ inputs.ref }}
         token: ${{ inputs.token }}
 
-    - name: Validate oc login retry inputs
-      if: steps.triggers.outputs.triggered == 'true'
-      shell: bash
-      env:
-        LOGIN_ATTEMPTS: ${{ inputs.login_attempts }}
-      run: |
-        if ! [[ "${LOGIN_ATTEMPTS}" =~ ^[1-9][0-9]*$ ]]; then
-          echo "::error::login_attempts must be a positive integer"
-          exit 1
-        fi
-
     - if: steps.triggers.outputs.triggered == 'true'
       uses: $/oc-runner
       with:
@@ -148,7 +131,6 @@ runs:
         repository: ${{ inputs.repository }}
         triggers: ${{ inputs.triggers }}
         token: ${{ inputs.token }}
-        login_attempts: ${{ inputs.login_attempts }}
 
     - if: steps.triggers.outputs.triggered == 'true'
       id: process
