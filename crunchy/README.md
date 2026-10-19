@@ -1,5 +1,7 @@
 # Crunchy Database Deployment Workflow via GitHub Actions
 
+> Upgrading to v1.0.0? See the [migration guide](../MIGRATION.md#crunchy-outputs).
+
 This GitHub Actions workflow automates the deployment and management of a Crunchy PostgreSQL database instance within an OpenShift environment. It's designed to support application development workflows, particularly by providing isolated database instances for Pull Requests and ensuring resources are cleaned up afterwards.
 
 ## Features

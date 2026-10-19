@@ -42,3 +42,14 @@ setup() {
   [ "$(input_debug '')" = false ]
   [ "$(RUNNER_DEBUG=1 input_debug '')" = true ]
 }
+
+@test "errors link the migration guide" {
+  run input_list triggers "('a/' 'b/')"
+  [[ "$output" == *"Migration guide: https://github.com/bcgov/actions/blob/main/MIGRATION.md#triggers"* ]]
+  run input_list remove_pvc 'a b'
+  [[ "$output" == *"MIGRATION.md#list-inputs"* ]]
+  run input_bool dry_run yes false
+  [[ "$output" == *"MIGRATION.md#boolean-and-enum-inputs"* ]]
+  run input_enum cleanup x 'helm label' label
+  [[ "$output" == *"MIGRATION.md#boolean-and-enum-inputs"* ]]
+}

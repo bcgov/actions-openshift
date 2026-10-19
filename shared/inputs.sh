@@ -8,6 +8,9 @@
 # Source it, then call: input_list NAME VALUE | input_bool NAME VALUE DEFAULT |
 # input_enum NAME VALUE "a b c" DEFAULT | input_debug VALUE. Errors print an annotation and return 1.
 
+# Shared rules are explained in the bcgov/actions guide; this repo's own renames in MIGRATION.md here
+INPUT_GUIDE="https://github.com/bcgov/actions/blob/main/MIGRATION.md"
+
 _input_strip_quotes() {
   local s="$1"
   if [[ ${#s} -ge 2 && ( ( "$s" == \'*\' ) || ( "$s" == \"*\" ) ) ]]; then
@@ -43,6 +46,9 @@ _input_list_error() {
   msg+="%0AUse a multiline block, one item per line (or a comma-separated line, or a JSON array)."
   msg+="%0ABefore:%0A  ${name}: ${raw}%0AAfter:%0A  ${name}: |"
   for item in "${items[@]}"; do msg+="%0A    ${item}"; done
+  local anchor=list-inputs
+  [ "$name" = "triggers" ] && anchor=triggers
+  msg+="%0AMigration guide: ${INPUT_GUIDE}#${anchor}"
   echo "$msg"
 }
 
@@ -92,7 +98,7 @@ input_bool() {
   [ -n "$v" ] || v="${3:-false}"
   case "$v" in
     true|false) echo "$v" ;;
-    *) echo "::error title=${name}: not a boolean::Invalid ${name} input: ${2:-}. Use true or false."; return 1 ;;
+    *) echo "::error title=${name}: not a boolean::Invalid ${name} input: ${2:-}. Use true or false. Migration guide: ${INPUT_GUIDE}#boolean-and-enum-inputs"; return 1 ;;
   esac
 }
 
@@ -104,7 +110,7 @@ input_enum() {
   for a in $allowed; do
     [ "$v" = "$a" ] && { echo "$v"; return 0; }
   done
-  echo "::error title=${name}: unsupported value::Invalid ${name} input: ${2:-}. Use one of: ${allowed// /, }."
+  echo "::error title=${name}: unsupported value::Invalid ${name} input: ${2:-}. Use one of: ${allowed// /, }. Migration guide: ${INPUT_GUIDE}#boolean-and-enum-inputs"
   return 1
 }
 

@@ -1,5 +1,7 @@
 # PR Cleanup
 
+> Upgrading to v1.0.0? See the [migration guide](../MIGRATION.md#lists).
+
 This composite action cleans up resources in a target OpenShift namespace on pull request close or merge. It handles Helm release uninstalls, label-based resource deletion, and selective PVC removals using the sibling [`oc-runner`](../oc-runner/README.md) action.
 
 ## Inputs

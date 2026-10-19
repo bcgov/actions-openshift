@@ -10,6 +10,8 @@
 
 # OpenShift Deployer
 
+> Upgrading to v1.0.0? See the [migration guide](../MIGRATION.md#diff_base).
+
 Deploy to OpenShift using templates.  This action is a wrapper around the OpenShift CLI (oc) and is intended to be used with OpenShift 4.x.
 
 Testing has only been done with public images (ghcr.io, hub.docker.com) so far.

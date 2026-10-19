@@ -10,6 +10,8 @@
 
 # OpenShift CLI (oc) Login and Runner
 
+> Upgrading to v1.0.0? See the [migration guide](../MIGRATION.md#debug).
+
 Action for running oc commands. Intended for use with the BC Government's OpenShift cluster.  We will do our best to keep the default oc runner version lined up with whatever the platform team currently has deployed to production.
 
 Provide as few as zero commands to login only.  There is a separate parameter for cronjobs, with the ability to report success or failure.
