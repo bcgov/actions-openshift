@@ -128,7 +128,7 @@ runs:
       run: |
         # shellcheck source=/dev/null
         source "$SHARED_INPUTS"
-        debug="$(input_debug "$INPUT_DEBUG")"
+        debug="$(input_debug "$INPUT_DEBUG")" || { echo "$debug"; exit 1; }
         echo "debug=${debug}" >> "$GITHUB_OUTPUT"
 
     # Send triggers to diff action (diff-triggers v0.9.0 still names its input ref)
