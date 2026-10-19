@@ -23,6 +23,11 @@ setup() {
   [[ "$output" == *"Multiline input syntax: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepswith" ]]
 }
 
+@test "list: multiline bash parens fail" {
+  run input_list triggers "$(printf "(\n'backend/'\n'frontend/'\n)")"
+  [ "$status" -eq 1 ]
+}
+
 @test "list: space and semicolon separated lines fail" {
   run input_list remove_pvc 'a b'
   [ "$status" -eq 1 ]
@@ -40,6 +45,6 @@ setup() {
   run input_enum mode x 'upgrade rehearse' upgrade
   [ "$status" -eq 1 ]
   [[ "$output" == *"Use one of: upgrade, rehearse"* ]]
-  [ "$(input_debug '')" = false ]
+  [ "$(RUNNER_DEBUG= input_debug '')" = false ]
   [ "$(RUNNER_DEBUG=1 input_debug '')" = true ]
 }

@@ -171,12 +171,12 @@ runs:
       run: |
         # shellcheck source=/dev/null
         source "$SHARED_INPUTS"
-        route_enabled="$(input_bool route_enabled "$INPUT_ROUTE_ENABLED" false)"
-        standby_enabled="$(input_bool standby_enabled "$INPUT_STANDBY_ENABLED" false)"
-        shutdown="$(input_bool shutdown "$INPUT_SHUTDOWN" false)"
-        dry_run="$(input_bool dry_run "$INPUT_DRY_RUN" false)"
-        self_heal_stuck_releases="$(input_bool self_heal_stuck_releases "$INPUT_SELF_HEAL_STUCK_RELEASES" false)"
-        force_cleanup="$(input_bool force_cleanup "$INPUT_FORCE_CLEANUP" false)"
+        route_enabled="$(input_bool route_enabled "$INPUT_ROUTE_ENABLED" false)" || { echo "$route_enabled"; exit 1; }
+        standby_enabled="$(input_bool standby_enabled "$INPUT_STANDBY_ENABLED" false)" || { echo "$standby_enabled"; exit 1; }
+        shutdown="$(input_bool shutdown "$INPUT_SHUTDOWN" false)" || { echo "$shutdown"; exit 1; }
+        dry_run="$(input_bool dry_run "$INPUT_DRY_RUN" false)" || { echo "$dry_run"; exit 1; }
+        self_heal_stuck_releases="$(input_bool self_heal_stuck_releases "$INPUT_SELF_HEAL_STUCK_RELEASES" false)" || { echo "$self_heal_stuck_releases"; exit 1; }
+        force_cleanup="$(input_bool force_cleanup "$INPUT_FORCE_CLEANUP" false)" || { echo "$force_cleanup"; exit 1; }
         {
           echo "route_enabled=${route_enabled}"
           echo "standby_enabled=${standby_enabled}"
