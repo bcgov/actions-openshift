@@ -72,8 +72,8 @@ runs:
       run: |
         # shellcheck source=/dev/null
         source "$SHARED_INPUTS"
-        components="$(input_list components "$INPUT_COMPONENTS")"
-        debug="$(input_debug "$INPUT_DEBUG")"
+        components="$(input_list components "$INPUT_COMPONENTS")" || { echo "$components"; exit 1; }
+        debug="$(input_debug "$INPUT_DEBUG")" || { echo "$debug"; exit 1; }
         {
           # apply.sh reads a comma-separated list
           echo "components=$(paste -sd, - <<< "$components")"

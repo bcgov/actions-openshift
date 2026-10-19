@@ -47,7 +47,7 @@ runs:
       run: |
         # shellcheck source=/dev/null
         source "$SHARED_INPUTS"
-        dry_run="$(input_bool dry_run "$INPUT_DRY_RUN" false)"
+        dry_run="$(input_bool dry_run "$INPUT_DRY_RUN" false)" || { echo "$dry_run"; exit 1; }
         echo "dry_run=${dry_run}" >> "$GITHUB_OUTPUT"
 
     - name: OpenShift CLI

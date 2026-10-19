@@ -47,9 +47,9 @@ runs:
       run: |
         # shellcheck source=/dev/null
         source "$SHARED_INPUTS"
-        cleanup="$(input_enum cleanup "$INPUT_CLEANUP" "helm label" label)"
-        names="$(input_list cleanup_name "$INPUT_CLEANUP_NAME")"
-        pvcs="$(input_list remove_pvc "$INPUT_REMOVE_PVC")"
+        cleanup="$(input_enum cleanup "$INPUT_CLEANUP" "helm label" label)" || { echo "$cleanup"; exit 1; }
+        names="$(input_list cleanup_name "$INPUT_CLEANUP_NAME")" || { echo "$names"; exit 1; }
+        pvcs="$(input_list remove_pvc "$INPUT_REMOVE_PVC")" || { echo "$pvcs"; exit 1; }
         {
           echo "cleanup=${cleanup}"
           printf 'cleanup_name<<EOF_NAMES\n%s\nEOF_NAMES\n' "$names"
