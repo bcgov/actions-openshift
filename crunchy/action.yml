@@ -18,7 +18,12 @@ inputs:
     required: false
     validation: "^.+$"
   triggers:
-    description: 'Paths used to trigger a deployment; e.g. (./backend/ ./frontend/).'
+    description: |
+      Paths used to trigger a deployment (one path per line).
+      Example:
+        triggers: |
+          backend/
+          frontend/
     required: false
     validation: "^(.+)$"
   oc_server:
