@@ -31,3 +31,9 @@ Repository facts and constraints for automated coding assistants.
 ## README usage examples
 
 - Usage examples in action READMEs show how `bcgov/quickstart-openshift` would call the action: its workflows (`pr-open.yml`, `pr-close.yml`, `merge.yml`, `scheduled.yml`), its packages (`backend`, `frontend`, `migrations`) and its job order. Add a separate example only when the quickstart shape does not fit. Never say quickstart uses an action it does not use; read its workflows first.
+
+## Release order with bcgov/actions
+
+- `deployer`, `crunchy` and `oc-runner` call `bcgov/actions/diff-triggers`, pinned to a release SHA. bcgov/actions does not use this repo.
+- When both repos release together: (1) release bcgov/actions; (2) merge the bcgov/actions bump here (Renovate or manual), pinned to that release SHA; (3) only then release actions-openshift.
+- Before any major bcgov/actions bump (e.g. v1.0.0), check that diff-triggers' inputs and outputs still match how these three actions call it.
