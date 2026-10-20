@@ -27,15 +27,21 @@ _input_list_error() {
   local name="$1" raw="$2" inner="$2" item
   local -a items=()
   [[ "$raw" == \(*\) || "$raw" == \[*\] ]] && inner="${raw:1:${#raw}-2}"
-  for item in ${inner//[,;]/ }; do
-    item="$(_input_strip_quotes "$item")"
+  # Tokens: '...' or "..." (spaces kept), else runs without spaces, commas or semicolons
+  local re="^[[:space:],;]*('[^']*'|\"[^\"]*\"|[^[:space:],;]+)(.*)$"
+  while [[ "$inner" =~ $re ]]; do
+    item="$(_input_strip_quotes "${BASH_REMATCH[1]}")"
+    inner="${BASH_REMATCH[2]}"
     [ -n "$item" ] && items+=("$item")
   done
   [ "${#items[@]}" -gt 0 ] || items=(backend/ frontend/)
   local msg="::error title=${name}: list format::Invalid ${name} input: ${raw}"
   msg+="%0A${name} takes one item per line, or a single value."
   msg+="%0AGot:%0A  ${name}: ${raw}%0AUse:%0A  ${name}: |"
-  for item in "${items[@]}"; do msg+="%0A    ${item}"; done
+  # Items with spaces keep their quotes, so the suggested block parses
+  for item in "${items[@]}"; do
+    if [[ "$item" =~ [[:space:]] ]]; then msg+="%0A    \"${item}\""; else msg+="%0A    ${item}"; fi
+  done
   # GitHub's docs on step inputs (with:), including multiline values
   msg+="%0AMultiline input syntax: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepswith"
   echo "$msg"

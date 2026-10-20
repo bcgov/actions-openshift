@@ -95,7 +95,7 @@ Adding/removing alert recipients is done by editing `spec.team.users[]` in the S
     # Default: monitoring/alerts
     alerts_dir: monitoring/alerts
 
-    # Deployment names: one per line, comma separated, or a JSON array. One alert per file per component.
+    # Deployment names: one per line, or a single name. One alert per file per component.
     # Default: frontend,backend
     components: frontend,backend
 

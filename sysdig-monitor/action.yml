@@ -39,7 +39,7 @@ inputs:
     default: 'monitoring/alerts'
   components:
     description: |
-      Deployment names to monitor: one per line, comma separated, or a JSON array.
+      Deployment names to monitor: one per line, or a single name.
       Each component gets one alert per file in alerts_dir.
       Example: frontend,backend
     default: 'frontend,backend'
