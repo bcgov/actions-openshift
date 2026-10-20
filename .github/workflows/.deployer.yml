@@ -32,12 +32,12 @@ on:
         required: false
         type: string
       promote_images:
-        description: 'List of images to promote with a new tag'
+        description: 'Packages to promote, one per line or a single package (image-tracker format). Their digests get promote_tags.'
         default: ''
         required: false
         type: string
       promote_tags:
-        description: 'Tag to apply to promoted images'
+        description: 'Tags to apply to the promoted digests, one per line or a single tag'
         default: ''
         required: false
         type: string
@@ -90,7 +90,6 @@ jobs:
       pull-requests: read
     runs-on: ubuntu-26.04
     outputs:
-      packages: ${{ steps.vars.outputs.packages }}
       tag: ${{ steps.vars.outputs.tag }}
       triggered: ${{ steps.deploy.outputs.triggered }}
     steps:
@@ -119,7 +118,6 @@ jobs:
         env:
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_ENVIRONMENT: ${{ inputs.environment }}
-          PROMOTE_IMAGES: ${{ inputs.promote_images }}
           REPOSITORY_NAME: ${{ github.event.repository.name }}
           RUN_NUMBER: ${{ github.run_number }}
           TRACKED_PR: ${{ steps.tracker.outputs.pr }}
@@ -164,10 +162,6 @@ jobs:
             echo "version=${version}"
           } >> "$GITHUB_OUTPUT"
 
-          # Convert packages to JSON array for job matrix
-          read -r -a pkgs <<< "$PROMOTE_IMAGES"
-          echo "packages=$(jq -cn '$ARGS.positional' --args "${pkgs[@]}")" >> "$GITHUB_OUTPUT"
-
       ### Deploy
       - name: Interrupt deployments (PR only)
         id: deploy
@@ -195,16 +189,20 @@ jobs:
     if: inputs.promote_images != '' && inputs.promote_tags != ''
     needs: [deploy]
     permissions:
+      contents: read
       packages: write
+      pull-requests: read
     runs-on: ubuntu-26.04
-    strategy:
-      matrix:
-        package: ${{ fromJson(needs.deploy.outputs.packages) }}
-    timeout-minutes: 1
+    timeout-minutes: 5
     steps:
-      - uses: shrink/actions-docker-registry-tag@e6aaef25c595b6e0edd18bf4c7dbfea3abd43299 # v5
+      - uses: actions/checkout@v7
         with:
-          registry: ghcr.io
-          repository: ${{ github.repository }}/${{ matrix.package }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # One call: resolve every package's digest and point promote_tags at it
+      - uses: bcgov/actions/image-tracker@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
+        with:
+          max_depth: 100
+          package: ${{ inputs.promote_images }}
           tags: ${{ inputs.promote_tags }}
-          target: ${{ needs.deploy.outputs.tag }}

@@ -64,9 +64,9 @@ inputs:
     default: "false"
 
   ### Usually a bad idea / not recommended
-  diff_base:
+  base:
     description: |
-      Base to diff triggers against (bcgov/actions diff-triggers diff_base)
+      Base to diff triggers against (same meaning as dorny/paths-filter `base`)
       Example: main
     default: ${{ github.event.repository.default_branch }}
   oc_version:
@@ -136,7 +136,7 @@ runs:
       uses: bcgov/actions/diff-triggers@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
       with:
         triggers: ${{ inputs.triggers }}
-        ref: ${{ inputs.diff_base }}
+        ref: ${{ inputs.base }}
         token: ${{ inputs.token }}
 
     - if: steps.triggers.outputs.triggered == 'true'
