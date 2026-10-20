@@ -3,7 +3,7 @@ name: "Cert Expiry"
 description: "Read-only TLS expiry check: reads each host's public certificate with openssl s_client and reports any that expire within a number of days."
 inputs:
   hosts:
-    description: "Hostnames to check, one per line (commas or spaces also work). host or host:port, no scheme. Port defaults to 443. Blank lines and # comments are ignored."
+    description: "Hostnames to check, one per line, or a single host. host or host:port, no scheme. Port defaults to 443. Blank lines and # comments are ignored."
     required: true
   days:
     description: "Warn when a certificate expires within this many days (whole number, 1 to 3650)."

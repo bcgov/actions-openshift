@@ -38,17 +38,23 @@ case "$FAIL_ON_FINDINGS" in
   *) fail "fail_on_findings must be true or false, got '${FAIL_ON_FINDINGS}'." "Set fail_on_findings: true or fail_on_findings: false." ;;
 esac
 
-LIST="$HOSTS"
+# Shared list rules (shared/inputs.sh): one host per line, or a single host.
+# '# comments' are dropped first.
+# shellcheck source=../shared/inputs.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../shared/inputs.sh"
+COMMENTLESS=""
+while IFS= read -r line; do
+  COMMENTLESS+="${line%%#*}"$'\n'
+done <<< "$HOSTS"
+LIST="$(input_list hosts "$COMMENTLESS")" || { echo "$LIST"; exit 1; }
 
-# Parse: drop comments, split on commas and whitespace, validate, de-duplicate
+# Validate and de-duplicate
 LABEL='[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
 ENTRIES=()
 declare -A SEEN=()
-while IFS= read -r line; do
-  line="${line%%#*}"
-  # read -a splits without pathname expansion, so '*' is rejected, not globbed
-  IFS=$' \t,' read -r -a parts <<< "$line"
-  for entry in "${parts[@]}"; do
+while IFS= read -r entry; do
+  [ -n "$entry" ] || continue
+  {
     if [[ "$entry" == *"://"* || "$entry" == */* ]]; then
       fail "'${entry}' is a URL, not a hostname." "List the hostname only, for example myapp.gov.bc.ca or myapp.gov.bc.ca:8443."
     fi
@@ -63,7 +69,7 @@ while IFS= read -r line; do
     [[ -n "${SEEN[$key]:-}" ]] && continue
     SEEN[$key]=1
     ENTRIES+=("$key")
-  done
+  }
 done <<< "$LIST"
 
 ((${#ENTRIES[@]} > 0)) || fail "No hostnames to check." "Set hosts to one or more hostnames, one per line."
