@@ -6,17 +6,14 @@ inputs:
   oc_namespace:
     description: 'OpenShift namespace'
     required: true
-    validation: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
   oc_token:
     description: 'OpenShift token'
     required: true
-    validation: "^[A-Za-z0-9-_]+$"
 
   # Typical / recommended
   environment:
     description: 'Environment name; omit for PRs'
     required: false
-    validation: "^.+$"
   triggers:
     description: |
       Paths used to trigger a deployment (one path per line).
@@ -25,15 +22,12 @@ inputs:
           backend/
           frontend/
     required: false
-    validation: "^(.+)$"
   oc_server:
     description: 'OpenShift server URL with port'
     required: true
-    validation: "^https?://.+:6443$"
   values_file:
     description: 'Path to a values.yml file in the calling repository; omit to use the bundled values.yml. Cannot be combined with the override inputs below'
     required: false
-    validation: "^.+\\.(yml|yaml)$"
 
   # Overrides for the bundled values.yml; unset inputs keep the bundled values
   pvc_size:
@@ -99,36 +93,31 @@ inputs:
 
   dry_run:
     description: 'When true, helm upgrade --dry-run=server --hide-secret validates the chart against the OpenShift API, then the action exits without deploying, waiting, or changing PR users'
-    default: false
+    default: 'false'
     required: false
-    type: boolean
 
   self_heal_stuck_releases:
     description: 'Purge a Helm release stuck in a non-deployed state (pending-*, failed, uninstalling) before reinstalling. Deletes the PostgresCluster and its data volumes'
-    default: false
+    default: 'false'
     required: false
-    type: boolean
 
   # Usually a bad idea / not recommended
   force_cleanup:
     description: 'Force cleanup of the database'
-    default: false
+    default: 'false'
     required: false
-    type: boolean
   directory:
     description: 'Chart directory inside repository; used only when repository is set'
     default: 'charts/crunchy'
-    validation: "^.+$"
     required: false
   token:
-    description: Specify token (GH or PAT), instead of inheriting one from the calling workflow
+    description: 'Authentication token (defaults to github.token; override with PAT if needed).'
     required: false
     default: ${{ github.token }}
   repository:
     description: 'Repository to take the chart from, e.g. org/repo; omit to use the chart bundled with this action'
     default: ''
     required: false
-    validation: "^([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)?$"
   ref:
     description: 'Git ref of repository; used only when repository is set. Empty means the repository default branch.'
     default: ''
@@ -137,9 +126,8 @@ inputs:
     description: 'Release name; e.g. pg-qsos-crunchy, make sure it is unique in the namespace you are deploying to'
     default: ''
     required: false
-  diff_branch:
-    description: 'Branch to compare against for diff triggers; defaults to the default branch of the repository'
-    required: false
+  base:
+    description: 'Base to diff triggers against (same meaning as dorny/paths-filter `base`); defaults to the default branch of the repository'
     required: false
     
 outputs:
@@ -149,25 +137,55 @@ outputs:
   cluster:
     description: 'Cluster name'
     value: ${{ steps.vars.outputs.CLUSTER_NAME }}
-  db_secret:
+  secret:
     description: 'Database credentials secret name'
     value: ${{ steps.deploy.outputs.DB_SECRET || steps.vars.outputs.DB_SECRET }}
-  db_host:
+  host:
     description: 'Database host (pgBouncer or primary service)'
     value: ${{ steps.deploy.outputs.DB_HOST || steps.vars.outputs.DB_HOST }}
-  db_port:
+  port:
     description: 'Database port'
     value: ${{ steps.deploy.outputs.DB_PORT || steps.vars.outputs.DB_PORT }}
-  db_user:
+  user:
     description: 'Database user'
     value: ${{ steps.deploy.outputs.DB_USER || steps.vars.outputs.DB_USER }}
-  db_name:
-    description: 'Database name'
+  dbname:
+    description: 'Database name (libpq dbname)'
     value: ${{ steps.deploy.outputs.DB_NAME || steps.vars.outputs.DB_NAME }}
 
 runs:
   using: "composite"
   steps:
+    # Shared input rules (shared/inputs.sh); a bad value fails here
+    - name: Parse Inputs
+      id: inputs
+      shell: bash
+      env:
+        INPUT_ROUTE_ENABLED: ${{ inputs.route_enabled }}
+        INPUT_STANDBY_ENABLED: ${{ inputs.standby_enabled }}
+        INPUT_SHUTDOWN: ${{ inputs.shutdown }}
+        INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        INPUT_SELF_HEAL_STUCK_RELEASES: ${{ inputs.self_heal_stuck_releases }}
+        INPUT_FORCE_CLEANUP: ${{ inputs.force_cleanup }}
+        SHARED_INPUTS: ${{ github.action_path }}/../shared/inputs.sh
+      run: |
+        # shellcheck source=/dev/null
+        source "$SHARED_INPUTS"
+        route_enabled="$(input_bool route_enabled "$INPUT_ROUTE_ENABLED" false)" || { echo "$route_enabled"; exit 1; }
+        standby_enabled="$(input_bool standby_enabled "$INPUT_STANDBY_ENABLED" false)" || { echo "$standby_enabled"; exit 1; }
+        shutdown="$(input_bool shutdown "$INPUT_SHUTDOWN" false)" || { echo "$shutdown"; exit 1; }
+        dry_run="$(input_bool dry_run "$INPUT_DRY_RUN" false)" || { echo "$dry_run"; exit 1; }
+        self_heal_stuck_releases="$(input_bool self_heal_stuck_releases "$INPUT_SELF_HEAL_STUCK_RELEASES" false)" || { echo "$self_heal_stuck_releases"; exit 1; }
+        force_cleanup="$(input_bool force_cleanup "$INPUT_FORCE_CLEANUP" false)" || { echo "$force_cleanup"; exit 1; }
+        {
+          echo "route_enabled=${route_enabled}"
+          echo "standby_enabled=${standby_enabled}"
+          echo "shutdown=${shutdown}"
+          echo "dry_run=${dry_run}"
+          echo "self_heal_stuck_releases=${self_heal_stuck_releases}"
+          echo "force_cleanup=${force_cleanup}"
+        } >> "$GITHUB_OUTPUT"
+
     - shell: bash
       id: vars
       env:
@@ -263,11 +281,12 @@ runs:
         echo "VALUES_URL=${VALUES_URL}"
         echo "VALUES_URL=${VALUES_URL}" >> $GITHUB_ENV
 
+    # diff-triggers v0.9.0 still names its diff base input ref
     - id: triggers
       uses: bcgov/actions/diff-triggers@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
       with:
         triggers: ${{ inputs.triggers }}
-        ref: ${{ inputs.diff_branch }} 
+        ref: ${{ inputs.base }}
     # Alway install don't consider triggers here.
     - uses: $/oc-runner
       with:
@@ -304,13 +323,13 @@ runs:
         REPLICAS: ${{ inputs.replicas }}
         CPU_REQUEST: ${{ inputs.cpu_request }}
         MEMORY_REQUEST: ${{ inputs.memory_request }}
-        ROUTE_ENABLED: ${{ inputs.route_enabled }}
+        ROUTE_ENABLED: ${{ steps.inputs.outputs.route_enabled }}
         ROUTE_HOST: ${{ inputs.route_host }}
-        STANDBY_ENABLED: ${{ inputs.standby_enabled }}
+        STANDBY_ENABLED: ${{ steps.inputs.outputs.standby_enabled }}
         STANDBY_REPO_NAME: ${{ inputs.standby_repo_name }}
-        SHUTDOWN: ${{ inputs.shutdown }}
-        SELF_HEAL_STUCK_RELEASES: ${{ inputs.self_heal_stuck_releases }}
-        DRY_RUN: ${{ inputs.dry_run }}
+        SHUTDOWN: ${{ steps.inputs.outputs.shutdown }}
+        SELF_HEAL_STUCK_RELEASES: ${{ steps.inputs.outputs.self_heal_stuck_releases }}
+        DRY_RUN: ${{ steps.inputs.outputs.dry_run }}
         CHART_REPOSITORY: ${{ inputs.repository }}
       run: |
         # Deploy the database
@@ -361,7 +380,7 @@ runs:
         echo "DB_SECRET=${DB_SECRET}" >> $GITHUB_OUTPUT
         echo "DB_PORT=${DB_PORT}" >> $GITHUB_OUTPUT
 
-    - if: github.event_name == 'pull_request' && github.event.action != 'closed' && inputs.dry_run != 'true'
+    - if: github.event_name == 'pull_request' && github.event.action != 'closed' && steps.inputs.outputs.dry_run != 'true'
       shell: bash
       env:
         EVENT_NUMBER: ${{ github.event.number }}
@@ -369,7 +388,7 @@ runs:
         # Add user to Crunchy DB
         "$GITHUB_ACTION_PATH/scripts/user_change.sh" add "${EVENT_NUMBER}" "${CLUSTER_NAME}"
 
-    - if: (github.event.action == 'closed' || inputs.force_cleanup == 'true') && inputs.dry_run != 'true'
+    - if: (github.event.action == 'closed' || steps.inputs.outputs.force_cleanup == 'true') && steps.inputs.outputs.dry_run != 'true'
       shell: bash
       env:
         EVENT_NUMBER: ${{ github.event.number }}
