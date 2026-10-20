@@ -13,6 +13,12 @@ Repository facts and constraints for automated coding assistants.
 - Unit tests: `bats .github/tests/crunchy .github/tests/route-tls .github/tests/image-import` and `bats .github/tests/oc-runner`. Chart: `helm lint crunchy/charts/crunchy --values crunchy/values.yml`
 - OpenShift deploys run from GitHub Actions, not a workstation. Same-repo pull requests exercise deployer and route-tls; `pr-close.yml` removes the deployer test resources. Workstation scripts live in [bcgov/devops-scripts](https://github.com/bcgov/devops-scripts)
 
+## Inputs and outputs
+
+- Read list, boolean, enum and debug inputs through `shared/inputs.sh` (same rules as bcgov/actions `shared/inputs.js`: lists are one item per line or a single value; booleans true/false; bad values fail with an annotation). It is this repo's own helper, not a copy of a bcgov/actions action.
+- `ref` keeps the actions/checkout meaning (what to check out). `base` is the base triggers are diffed against (dorny/paths-filter `base`). `debug` is the debug switch; `token` defaults to `github.token`. Names are snake_case.
+- Outputs: booleans `true`/`false`; lists are JSON arrays.
+
 ## Shared actions
 - Call a sibling action as `$/<name>`, never `./`. Use bcgov shared actions (`bcgov/actions/*`, `bcgov/action-*`) as provided; don't copy or fork them.
 

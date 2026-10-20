@@ -37,8 +37,8 @@ fi
 printf '%s\n' "$COMMANDS" > "$COMMANDS_FILE"
 
 VERBOSE_ARGS=()
-if [ "$ENABLE_VERBOSE" = "true" ]; then
-  echo "::notice::[${ACTION_SOURCE}] Verbose mode enabled for commands step (includes internal output processing)."
+if [ "${DEBUG:-false}" = "true" ]; then
+  echo "::notice::[${ACTION_SOURCE}] Debug mode enabled for commands step (includes internal output processing)."
   set -x
   VERBOSE_ARGS=(-x)
 fi
@@ -119,6 +119,6 @@ if [ -s "$ACTION_OUTPUT_FILE" ]; then
   } >> "$REAL_GITHUB_OUTPUT"
 fi
 
-if [ "$ENABLE_VERBOSE" = "true" ]; then
+if [ "${DEBUG:-false}" = "true" ]; then
   set +x
 fi

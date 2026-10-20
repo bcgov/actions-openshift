@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # oc-runner login: input gate, API pre-flight, oc install and service-account token login.
-# Env: SERVER_URL, NAMESPACE, TOKEN_INPUT, ATTEMPTS, OC (mirror channel, e.g. stable-4.18).
+# Env: SERVER_URL, NAMESPACE, TOKEN_INPUT, OC (mirror channel, e.g. stable-4.18).
 # Writes blocked=true|false and unreachable=true|false to $GITHUB_OUTPUT.
 # A runner whose IP is blocked from the API, or an API and router that both stop answering,
 # is reported as a titled annotation and a step summary, so the check shows it is not a code problem.
@@ -30,15 +30,8 @@ if [ -z "${TOKEN_INPUT:-}" ]; then
   echo "::error::Missing oc_token."
   exit 1
 fi
-if ! [[ "${ATTEMPTS:-}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "::error::Invalid login_attempts: '${ATTEMPTS:-}'. Must be a positive integer."
-  exit 1
-fi
-# At most one retry: a blocked runner IP stays blocked, so more attempts only burn minutes
-if [ "${ATTEMPTS}" -gt 2 ]; then
-  echo "::notice::login_attempts=${ATTEMPTS} capped at 2 (one retry)"
-  ATTEMPTS=2
-fi
+# One retry: a blocked runner IP stays blocked, so more attempts only burn minutes
+ATTEMPTS=2
 
 runner_ip() {
   curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo "unknown (lookup failed)"

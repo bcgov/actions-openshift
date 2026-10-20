@@ -52,8 +52,8 @@ Provide as few as zero commands to login only.  There is a separate parameter fo
     # Number of cronjob log lines to tail; use -1 for all
     cronjob_tail: 0
 
-    # Overrides the default branch to diff against
-    diff_branch: ${{ github.event.repository.default_branch }}
+    # Base to diff triggers against; defaults to the default branch
+    base: ${{ github.event.repository.default_branch }}
 
     # Override GitHub default oc version >= 4.0
     oc_version: "4.14"
@@ -67,11 +67,8 @@ Provide as few as zero commands to login only.  There is a separate parameter fo
     # Time limit for the commands block, and separately for the cronjob wait; e.g. 10m
     timeout: 10m
 
-    # Enable verbose command tracing with bash xtrace (set -x)
-    verbose: false
-
-    # Maximum number of login attempts; values above 2 are capped at 2 (one retry)
-    login_attempts: 2
+    # Enable command tracing with bash xtrace (set -x); also on for debug re-runs
+    debug: false
 ```
 
 # Example: Login only
@@ -185,7 +182,7 @@ To handle transient network drops, cluster API restarts, or runner configuration
 - **Blocked After Pre-flight:** A runner IP can be blocked after the pre-flight passes. If the last token request fails to connect and `/version` no longer answers either, the action reports the blocked or outage message above instead of the generic `Failed to log in to OpenShift after N attempts`.
 - **Early Input Validation:** Before executing any login attempts or downloading tools, the action validates that `oc_server`, `oc_namespace`, and `oc_token` are populated and that the server URL is properly formatted. If inputs are missing or malformed, the action fails fast immediately to prevent useless retries.
 - **Fail Fast:** If the OpenShift API returns a non-retryable client error (such as `401 Unauthorized`, `403 Forbidden`, or `404 Not Found`), the action aborts immediately on the first attempt to save runner billing minutes.
-- **Retry:** If the connection times out at the network layer (HTTP status `000`), hits a request timeout (`408`), gets rate-limited (`429`), or if the API returns a transient server error (HTTP status `5xx` during control-plane reboots), the action waits 2 seconds and retries once (`login_attempts` is capped at 2, since a blocked runner IP stays blocked).
+- **Retry:** If the connection times out at the network layer (HTTP status `000`), hits a request timeout (`408`), gets rate-limited (`429`), or if the API returns a transient server error (HTTP status `5xx` during control-plane reboots), the action waits 2 seconds and retries once (a blocked runner IP stays blocked, so there is no further retry).
 - **CLI Download Timeout:** Download of the `oc` CLI client archive from `mirror.openshift.com` is capped with a 15-second timeout and 3 retry attempts to prevent workflows from hanging indefinitely.
 
 # Troubleshooting
@@ -195,11 +192,11 @@ The `commands` block runs in strict shell mode. A command failure (including opt
 - For optional matches, use guards like `grep ... || true`
 - Prefer explicit conditional checks when an empty result is valid
 - `commands exceeded timeout <timeout>` means the `timeout` input stopped the `commands` block. A command inside the block that exits 124 on its own, such as one wrapped in its own `timeout`, is reported as `commands block failed with exit code 124` instead
-- Set `verbose: true` to enable `set -x` tracing for the `commands` block and internal output processing; enable it temporarily and only when you are confident sensitive values will not be printed
+- Set `debug: true` to enable `set -x` tracing for the `commands` block and internal output processing; enable it temporarily and only when you are confident sensitive values will not be printed
 
 ## Safe Debugging
 
-When `verbose: true` is enabled, shell tracing may show expanded command arguments, environment usage, and command output in logs. GitHub masks known secrets, but derived or partial secret values can still leak. Use this mode only for short-lived troubleshooting and avoid commands that print or interpolate sensitive values.
+When `debug: true` is enabled, shell tracing may show expanded command arguments, environment usage, and command output in logs. GitHub masks known secrets, but derived or partial secret values can still leak. Use this mode only for short-lived troubleshooting and avoid commands that print or interpolate sensitive values.
 
 # Feedback
 
