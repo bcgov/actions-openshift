@@ -37,6 +37,19 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # Shared input rules (shared/inputs.sh); a bad value fails here
+    - name: Parse Inputs
+      id: inputs
+      shell: bash
+      env:
+        INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        SHARED_INPUTS: ${{ github.action_path }}/../shared/inputs.sh
+      run: |
+        # shellcheck source=/dev/null
+        source "$SHARED_INPUTS"
+        dry_run="$(input_bool dry_run "$INPUT_DRY_RUN" false)" || { echo "$dry_run"; exit 1; }
+        echo "dry_run=${dry_run}" >> "$GITHUB_OUTPUT"
+
     - name: OpenShift CLI
       uses: $/oc-runner
       with:
@@ -57,5 +70,5 @@ runs:
         OC_NAMESPACE: ${{ inputs.oc_namespace }}
         OC_SERVER: ${{ inputs.oc_server }}
         OC_TOKEN: ${{ inputs.oc_token }}
-        DRY_RUN: ${{ inputs.dry_run }}
+        DRY_RUN: ${{ steps.inputs.outputs.dry_run }}
       run: bash "${ACTION_PATH}/provision.sh"

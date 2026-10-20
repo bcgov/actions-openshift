@@ -39,7 +39,7 @@ inputs:
     default: 'monitoring/alerts'
   components:
     description: |
-      Comma-separated list of Deployment names to monitor.
+      Deployment names to monitor: one per line, comma separated, or a JSON array.
       Each component gets one alert per file in alerts_dir.
       Example: frontend,backend
     default: 'frontend,backend'
@@ -61,6 +61,25 @@ inputs:
 runs:
   using: composite
   steps:
+    # Shared input rules (shared/inputs.sh); a bad value fails here
+    - name: Parse Inputs
+      id: inputs
+      shell: bash
+      env:
+        INPUT_COMPONENTS: ${{ inputs.components }}
+        INPUT_DEBUG: ${{ inputs.debug }}
+        SHARED_INPUTS: ${{ github.action_path }}/../shared/inputs.sh
+      run: |
+        # shellcheck source=/dev/null
+        source "$SHARED_INPUTS"
+        components="$(input_list components "$INPUT_COMPONENTS")" || { echo "$components"; exit 1; }
+        debug="$(input_debug "$INPUT_DEBUG")" || { echo "$debug"; exit 1; }
+        {
+          # apply.sh reads a comma-separated list
+          echo "components=$(paste -sd, - <<< "$components")"
+          echo "debug=${debug}"
+        } >> "$GITHUB_OUTPUT"
+
     - name: Apply Sysdig monitoring
       shell: bash
       env:
@@ -68,9 +87,9 @@ runs:
         SYSDIG_API_URL: ${{ inputs.sysdig_api_url }}
         OC_NAMESPACE: ${{ inputs.oc_namespace }}
         APP: ${{ inputs.app }}
-        COMPONENTS: ${{ inputs.components }}
+        COMPONENTS: ${{ steps.inputs.outputs.components }}
         ALERT_DURATION_MINUTES: ${{ inputs.alert_duration_minutes }}
-        DEBUG: ${{ inputs.debug }}
+        DEBUG: ${{ steps.inputs.outputs.debug }}
         CHANNEL_TEMPLATE: ${{ github.action_path }}/templates/channel.json
         ALERTS_DIR: ${{ github.workspace }}/${{ inputs.alerts_dir }}
         APPLY_SCRIPT: ${{ github.action_path }}/scripts/apply.sh

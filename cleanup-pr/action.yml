@@ -3,11 +3,11 @@ description: "Cleans up Helm releases, labeled resources, and PVCs in a target O
 
 inputs:
   cleanup:
-    description: "Type of cleanup; e.g. helm or label"
+    description: "Type of cleanup: helm or label"
     required: false
     default: "label"
   cleanup_name:
-    description: "Cleanup label app name (defaults to repository-target)"
+    description: "app label values to clean up: one per line, comma separated, or a JSON array (defaults to repository-target)"
     required: false
     default: ""
   repository:
@@ -19,7 +19,7 @@ inputs:
     required: false
     default: ${{ github.event.number }}
   remove_pvc:
-    description: "Comma-separated list of PVCs to remove"
+    description: "PVCs to remove: one per line, comma separated, or a JSON array"
     required: false
     default: ""
   oc_server:
@@ -35,14 +35,35 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # Shared input rules (shared/inputs.sh); a bad value fails here
+    - name: Parse Inputs
+      id: inputs
+      shell: bash
+      env:
+        INPUT_CLEANUP: ${{ inputs.cleanup }}
+        INPUT_CLEANUP_NAME: ${{ inputs.cleanup_name }}
+        INPUT_REMOVE_PVC: ${{ inputs.remove_pvc }}
+        SHARED_INPUTS: ${{ github.action_path }}/../shared/inputs.sh
+      run: |
+        # shellcheck source=/dev/null
+        source "$SHARED_INPUTS"
+        cleanup="$(input_enum cleanup "$INPUT_CLEANUP" "helm label" label)" || { echo "$cleanup"; exit 1; }
+        names="$(input_list cleanup_name "$INPUT_CLEANUP_NAME")" || { echo "$names"; exit 1; }
+        pvcs="$(input_list remove_pvc "$INPUT_REMOVE_PVC")" || { echo "$pvcs"; exit 1; }
+        {
+          echo "cleanup=${cleanup}"
+          printf 'cleanup_name<<EOF_NAMES\n%s\nEOF_NAMES\n' "$names"
+          printf 'remove_pvc<<EOF_PVCS\n%s\nEOF_PVCS\n' "$pvcs"
+        } >> "$GITHUB_OUTPUT"
+
     - name: Run Cleanup Commands
       uses: $/oc-runner
       env:
-        CLEANUP: ${{ inputs.cleanup }}
-        CLEANUP_NAME: ${{ inputs.cleanup_name }}
+        CLEANUP: ${{ steps.inputs.outputs.cleanup }}
+        CLEANUP_NAME: ${{ steps.inputs.outputs.cleanup_name }}
         REPOSITORY: ${{ inputs.repository }}
         TARGET: ${{ inputs.target }}
-        REMOVE_PVC: ${{ inputs.remove_pvc }}
+        REMOVE_PVC: ${{ steps.inputs.outputs.remove_pvc }}
       with:
         oc_namespace: ${{ inputs.oc_namespace }}
         oc_token: ${{ inputs.oc_token }}
@@ -62,10 +83,11 @@ runs:
           # 2. Label Cleanup
           if [ "$CLEANUP" = "label" ]; then
             if [ -n "$CLEANUP_NAME" ]; then
-              for name in $CLEANUP_NAME; do
+              while IFS= read -r name; do
+                [ -n "$name" ] || continue
                 echo "Deleting resources for label: app=${name}"
                 oc delete all,jobs,cronjobs,cm,pvc,secret,networkpolicy,routes,hpa -l "app=${name}" || echo "Not found: ${name}"
-              done
+              done <<< "$CLEANUP_NAME"
             else
               target_label="${REPOSITORY}-${TARGET}"
               echo "Deleting resources for label: app=${target_label}"
@@ -75,8 +97,9 @@ runs:
 
           # 3. Remove PVCs
           if [ -n "$REMOVE_PVC" ]; then
-            for pvc in $(echo "$REMOVE_PVC" | tr ',' ' '); do
+            while IFS= read -r pvc; do
+              [ -n "$pvc" ] || continue
               echo "Deleting PVC: ${pvc}"
               oc delete pvc "$pvc" || echo "Not found: $pvc"
-            done
+            done <<< "$REMOVE_PVC"
           fi
