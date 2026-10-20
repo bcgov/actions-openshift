@@ -65,7 +65,7 @@ Testing has only been done with public images (ghcr.io, hub.docker.com) so far.
 
     # Base to diff triggers against
     # Defaults to the default branch, usually `main`
-    diff_base: ${{ github.event.repository.default_branch }}
+    base: ${{ github.event.repository.default_branch }}
 
     # Override default OpenShift CLI (oc) version; e.g. 4.13
 

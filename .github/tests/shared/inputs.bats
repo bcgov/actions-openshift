@@ -6,33 +6,29 @@ setup() {
   source "${BATS_TEST_DIRNAME}/../../../shared/inputs.sh"
 }
 
-@test "list: multiline, comma, JSON, single" {
+@test "list: one item per line, or a single value" {
   [ "$(input_list triggers $'backend/\n\n frontend/ ')" = $'backend/\nfrontend/' ]
-  [ "$(input_list triggers 'backend/, frontend/')" = $'backend/\nfrontend/' ]
-  [ "$(input_list triggers '["backend/", "frontend/"]')" = $'backend/\nfrontend/' ]
+  [ "$(input_list triggers $'src/{a,b}/**\nc/')" = $'src/{a,b}/**\nc/' ]
+  [ "$(input_list triggers 'backend/')" = 'backend/' ]
   [ "$(input_list triggers "'my path/'")" = 'my path/' ]
   [ -z "$(input_list triggers '')" ]
 }
 
-@test "list: bash parens fail with a multiline example" {
-  run input_list triggers "('backend/' 'frontend/')"
+@test "list: comma separated line fails with a one-per-line example" {
+  run input_list triggers 'backend/, frontend/'
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Invalid triggers input: ('backend/' 'frontend/')"* ]]
-  [[ "$output" == *"triggers must be a multiline block (one item per line), a comma-separated line, or a JSON array."* ]]
+  [[ "$output" == *"Invalid triggers input: backend/, frontend/"* ]]
+  [[ "$output" == *"triggers takes one item per line, or a single value."* ]]
   [[ "$output" == *"%0A  triggers: |%0A    backend/%0A    frontend/"* ]]
   [[ "$output" == *"Multiline input syntax: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepswith" ]]
 }
 
-@test "list: multiline bash parens fail" {
-  run input_list triggers "$(printf "(\n'backend/'\n'frontend/'\n)")"
-  [ "$status" -eq 1 ]
-}
-
-@test "list: space and semicolon separated lines fail" {
-  run input_list remove_pvc 'a b'
-  [ "$status" -eq 1 ]
-  run input_list remove_pvc 'a;b'
-  [ "$status" -eq 1 ]
+@test "list: other formats fail" {
+  for raw in "('backend/' 'frontend/')" '["backend/", "frontend/"]' 'a b' 'a;b' 'a,b' \
+    "$(printf "(\n'backend/'\n'frontend/'\n)")" $'a/\nb/, c/' $'a/\nb/ c/'; do
+    run input_list triggers "$raw"
+    [ "$status" -eq 1 ]
+  done
 }
 
 @test "bool, enum and debug" {

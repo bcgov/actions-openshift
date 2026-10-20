@@ -53,7 +53,7 @@ Provide as few as zero commands to login only.  There is a separate parameter fo
     cronjob_tail: 0
 
     # Base to diff triggers against; defaults to the default branch
-    diff_base: ${{ github.event.repository.default_branch }}
+    base: ${{ github.event.repository.default_branch }}
 
     # Override GitHub default oc version >= 4.0
     oc_version: "4.14"

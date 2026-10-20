@@ -15,8 +15,8 @@ Repository facts and constraints for automated coding assistants.
 
 ## Inputs and outputs
 
-- Read list, boolean, enum and debug inputs through `shared/inputs.sh` (same rules as bcgov/actions `shared/inputs.js`: lists are newline, comma or JSON; booleans true/false; bad values fail with an annotation). It is this repo's own helper, not a copy of a bcgov/actions action.
-- `ref` keeps the actions/checkout meaning (what to check out). `diff_base` is the base triggers are diffed against. `debug` is the debug switch; `token` defaults to `github.token`. Names are snake_case.
+- Read list, boolean, enum and debug inputs through `shared/inputs.sh` (same rules as bcgov/actions `shared/inputs.js`: lists are one item per line or a single value; booleans true/false; bad values fail with an annotation). It is this repo's own helper, not a copy of a bcgov/actions action.
+- `ref` keeps the actions/checkout meaning (what to check out). `base` is the base triggers are diffed against (dorny/paths-filter `base`). `debug` is the debug switch; `token` defaults to `github.token`. Names are snake_case.
 - Outputs: booleans `true`/`false`; lists are JSON arrays.
 
 ## Shared actions

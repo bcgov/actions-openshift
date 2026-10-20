@@ -156,7 +156,7 @@ The action accepts the following inputs:
 | `repository` | Repository to take the chart from (e.g., org/repo); omit to use the chart bundled with this action | |
 | `ref` | Git ref of `repository` (e.g., branch, tag, SHA); used only when `repository` is set | main |
 | `release_name` | The release name to use, if provided overrides the computed pg-md5hash(1-8) of github repo name, if release_name is `pg-abc`,postgres cluster created will be `pg-abc-crunchy` | |
-| `diff_base` | The branch to diff against (if not using default branch) Optional | |
+| `base` | The branch to diff against (if not using default branch) Optional | |
 | `token` | (Optional) GitHub (built-in or PAT) token, otherwise inherited from workflow token | `github.token` |
 
 ### Outputs
