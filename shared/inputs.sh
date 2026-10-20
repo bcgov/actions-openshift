@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared input parsing for actions-openshift, same rules as bcgov/actions shared/inputs.js:
-#   list:  one item per line (preferred), "a, b" on one line, or a JSON array
-#          (anything else, e.g. "('a' 'b')" or "a b", fails with a multiline example)
+#   list:  one item per line, or a single value
+#          (anything else, e.g. "a, b", a JSON array or "a b", fails with a multiline example)
 #   bool:  true or false, any case
 #   enum:  one of the listed values, any case
 #   debug: the debug input, or RUNNER_DEBUG=1 (a re-run with debug logging)
@@ -26,14 +26,14 @@ _input_trim() {
 _input_list_error() {
   local name="$1" raw="$2" inner="$2" item
   local -a items=()
-  [[ "$raw" == \(*\) ]] && inner="${raw:1:${#raw}-2}"
+  [[ "$raw" == \(*\) || "$raw" == \[*\] ]] && inner="${raw:1:${#raw}-2}"
   for item in ${inner//[,;]/ }; do
     item="$(_input_strip_quotes "$item")"
     [ -n "$item" ] && items+=("$item")
   done
   [ "${#items[@]}" -gt 0 ] || items=(backend/ frontend/)
   local msg="::error title=${name}: list format::Invalid ${name} input: ${raw}"
-  msg+="%0A${name} must be a multiline block (one item per line), a comma-separated line, or a JSON array."
+  msg+="%0A${name} takes one item per line, or a single value."
   msg+="%0AGot:%0A  ${name}: ${raw}%0AUse:%0A  ${name}: |"
   for item in "${items[@]}"; do msg+="%0A    ${item}"; done
   # GitHub's docs on step inputs (with:), including multiline values
@@ -41,47 +41,45 @@ _input_list_error() {
   echo "$msg"
 }
 
+# True when $1 has a comma outside {...}, so globs like src/{a,b}/** are one item
+_input_has_list_comma() {
+  local s="$1" ch depth=0 i
+  for ((i = 0; i < ${#s}; i++)); do
+    ch="${s:i:1}"
+    case "$ch" in
+      '{') depth=$((depth + 1)) ;;
+      '}') [ "$depth" -gt 0 ] && depth=$((depth - 1)) ;;
+      ',') [ "$depth" -eq 0 ] && return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# One item per line, or a single value. Blank lines are ignored and one layer
+# of quotes around each item is removed. An item holding a list of its own
+# (commas outside {...}, semicolons, spaces outside quotes, brackets) fails.
 input_list() {
   local name="$1" raw line item
+  local -a items=()
   raw="$(_input_trim "${2:-}")"
   [ -n "$raw" ] || return 0
-  if [[ "$raw" == \(*\) ]]; then
+  if [[ "$raw" =~ ^[\(\[] && "$raw" =~ [\)\]]$ ]]; then
     _input_list_error "$name" "$raw"
     return 1
   fi
-  if [[ "$raw" == \[*\] ]] && jq -e 'type == "array"' >/dev/null 2>&1 <<<"$raw"; then
-    jq -r '.[] | tostring | gsub("^\\s+|\\s+$"; "") | select(. != "")' <<<"$raw"
-    return 0
-  fi
-  if [[ "$raw" == *$'\n'* ]]; then
-    while IFS= read -r line; do
-      line="$(_input_strip_quotes "$(_input_trim "${line%$'\r'}")")"
-      [ -n "$line" ] && printf '%s\n' "$line"
-    done <<<"$raw"
-    return 0
-  fi
-  local quoted=false
-  [ "$(_input_strip_quotes "$raw")" != "$raw" ] && quoted=true
-  local quotes="${raw//[^\'\"]/}"
-  if [[ "$raw" == \(*\) || "$raw" == *';'* || ${#quotes} -ge 4 ]] ||
-     [[ "$raw" != *,* && "$raw" =~ [[:space:]] && "$quoted" == false ]]; then
-    _input_list_error "$name" "$raw"
-    return 1
-  fi
-  if [[ "$raw" == *,* && "$quoted" == false ]]; then
-    local -a parts
-    IFS=',' read -r -a parts <<<"$raw"
-    for item in "${parts[@]}"; do
-      item="$(_input_strip_quotes "$(_input_trim "$item")")"
-      if [[ "$item" =~ [[:space:]] ]]; then
+  while IFS= read -r line; do
+    line="$(_input_trim "${line%$'\r'}")"
+    [ -n "$line" ] || continue
+    if ! [[ "$line" =~ ^\'[^\']*\'$ || "$line" =~ ^\"[^\"]*\"$ ]]; then
+      if [[ "$line" =~ [[:space:]\;\'\"] || "$line" =~ ^[\(\[] || "$line" =~ [\)\]]$ ]] || _input_has_list_comma "$line"; then
         _input_list_error "$name" "$raw"
         return 1
       fi
-      [ -n "$item" ] && printf '%s\n' "$item"
-    done
-    return 0
-  fi
-  printf '%s\n' "$(_input_strip_quotes "$raw")"
+    fi
+    item="$(_input_strip_quotes "$line")"
+    [ -n "$item" ] && items+=("$item")
+  done <<<"$raw"
+  [ "${#items[@]}" -eq 0 ] || printf '%s\n' "${items[@]}"
 }
 
 input_bool() {
