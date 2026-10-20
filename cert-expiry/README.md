@@ -65,7 +65,7 @@ To notify only on certificate findings (not on an input error), give the check s
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `hosts` | required | Hostnames, one per line (commas or spaces also work). `host` or `host:port`, no scheme; port defaults to 443. Blank lines and `#` comments are skipped. |
+| `hosts` | required | Hostnames, one per line, or a single host. `host` or `host:port`, no scheme; port defaults to 443. Blank lines and `#` comments are skipped. |
 | `days` | `30` | Warn when a certificate expires within this many days. Whole number, 1 to 3650. |
 | `timeout` | `10` | Seconds to wait for each handshake. Whole number, 1 to 120. |
 | `fail_on_findings` | `true` | Fail the step when any host needs attention, so the next step can notify with `if: failure()`. Outputs are written either way. |

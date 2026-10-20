@@ -13,7 +13,7 @@ on:
         required: false
         type: string
       packages:
-        description: "Space-separated list of packages to promote"
+        description: "Packages to promote, one per line or a single package"
         required: false
         type: string
       remove_pvc:
@@ -78,9 +78,14 @@ jobs:
         env:
           INPUT_PACKAGES: ${{ inputs.packages }}
         run: |
-          # Convert packages to JSON array for job matrix
-          read -r -a pkgs <<< "$INPUT_PACKAGES"
-          echo "packages=$(jq -cn '$ARGS.positional' --args "${pkgs[@]}")" >> "$GITHUB_OUTPUT"
+          # One package per line, or a single package (same rules as shared/inputs.sh;
+          # a reusable workflow can't read files from this repository)
+          packages=$(jq -cRn '[inputs | gsub("^\\s+|\\s+$"; "") | select(. != "")]' <<< "$INPUT_PACKAGES")
+          if jq -e 'any(.[]; test("[\\s,;\"'"'"'()\\[\\]]"))' <<< "$packages" > /dev/null; then
+            echo "::error title=packages: list format::Invalid packages input: ${INPUT_PACKAGES//$'\n'/ }%0Apackages takes one item per line, or a single value.%0AUse:%0A  packages: |%0A    backend%0A    frontend%0AMultiline input syntax: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepswith"
+            exit 1
+          fi
+          echo "packages=${packages}" >> "$GITHUB_OUTPUT"
 
       - env:
           INPUT_PACKAGES: ${{ inputs.packages }}
@@ -89,8 +94,7 @@ jobs:
           MERGE_BRANCH: ${{ inputs.merge_branch }}
         run: |
           # Diagnostic vars
-          read -r -a pkgs <<< "$INPUT_PACKAGES"
-          echo "packages=$(jq -cn '$ARGS.positional' --args "${pkgs[@]}")"
+          printf 'packages=%s\n' "${INPUT_PACKAGES//$'\n'/ }"
           echo "github.event.pull_request.merged=$PR_MERGED"
           echo "github.event.pull_request.base.ref=$PR_BASE_REF"
           echo "inputs.merge_branch=$MERGE_BRANCH"
