@@ -78,9 +78,9 @@ jobs:
         env:
           INPUT_PACKAGES: ${{ inputs.packages }}
         run: |
-          # One package per line, or a single package (same rules as shared/inputs.sh;
+          # One package per line, or a single package; outer quotes stripped (same rules as shared/inputs.sh;
           # a reusable workflow can't read files from this repository)
-          packages=$(jq -cRn '[inputs | gsub("^\\s+|\\s+$"; "") | select(. != "")]' <<< "$INPUT_PACKAGES")
+          packages=$(jq -cRn '[inputs | gsub("^\\s+|\\s+$"; "") | sub("^(?<q>[\"'"'"'])(?<v>.*)\\k<q>$"; "\(.v)") | select(. != "")]' <<< "$INPUT_PACKAGES")
           if jq -e 'any(.[]; test("[\\s,;\"'"'"'()\\[\\]]"))' <<< "$packages" > /dev/null; then
             echo "::error title=packages: list format::Invalid packages input: ${INPUT_PACKAGES//$'\n'/ }%0Apackages takes one item per line, or a single value.%0AUse:%0A  packages: |%0A    backend%0A    frontend%0AMultiline input syntax: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepswith"
             exit 1
