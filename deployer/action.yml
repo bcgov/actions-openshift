@@ -28,15 +28,13 @@ inputs:
       OpenShift access token for authentication
       Should be stored as a GitHub secret
     required: true
-    minLength: 32
 
   ### Typical / recommended
   overwrite:
     description: |
       Replace existing objects/artifacts?
       Example: true, false
-    default: true
-    type: boolean
+    default: "true"
   parameters:
     description: |
       Template parameters/variables to pass
@@ -55,21 +53,20 @@ inputs:
           ./frontend/
   lite_mode:
     description: |
-      Apply 'lite mode' modifications (scaling down, removing PDBs) for pull requests?
+      Apply lite mode (scale down, remove PodDisruptionBudgets) to save quota.
+      Default: true on pull_request events, false otherwise.
       Example: true, false
     default: ${{ github.event.pull_request != '' }}
-    type: boolean
   debug:
     description: |
-      Enable debug logging?
+      Enable debug logging. Also on when the run is re-run with debug logging.
       Example: true, false
-    default: false
-    type: boolean
+    default: "false"
 
   ### Usually a bad idea / not recommended
-  ref:
+  base:
     description: |
-      Branch to diff against
+      Base to diff triggers against (same meaning as dorny/paths-filter `base`)
       Example: main
     default: ${{ github.event.repository.default_branch }}
   oc_version:
@@ -84,8 +81,7 @@ inputs:
     default: ${{ github.repository }}
     pattern: "^[a-zA-Z0-9-_]+/[a-zA-Z0-9-_]+$"
   token:
-    description: |
-      Specify token (GH or PAT), instead of inheriting one from the calling workflow
+    description: 'Authentication token (defaults to github.token; override with PAT if needed).'
     default: ${{ github.token }}
 
 outputs:
@@ -96,15 +92,36 @@ outputs:
 runs:
   using: composite
   steps:
+    # Shared input rules (shared/inputs.sh); a bad value fails here
+    - name: Parse Inputs
+      id: inputs
+      shell: bash
+      env:
+        INPUT_DEBUG: ${{ inputs.debug }}
+        INPUT_OVERWRITE: ${{ inputs.overwrite }}
+        INPUT_LITE_MODE: ${{ inputs.lite_mode }}
+        SHARED_INPUTS: ${{ github.action_path }}/../shared/inputs.sh
+      run: |
+        # shellcheck source=/dev/null
+        source "$SHARED_INPUTS"
+        debug="$(input_debug "$INPUT_DEBUG")" || { echo "$debug"; exit 1; }
+        overwrite="$(input_bool overwrite "$INPUT_OVERWRITE" true)" || { echo "$overwrite"; exit 1; }
+        lite_mode="$(input_bool lite_mode "$INPUT_LITE_MODE" false)" || { echo "$lite_mode"; exit 1; }
+        {
+          echo "debug=${debug}"
+          echo "overwrite=${overwrite}"
+          echo "lite_mode=${lite_mode}"
+        } >> "$GITHUB_OUTPUT"
+
     - name: Context Diagnostics
-      if: inputs.debug
+      if: steps.inputs.outputs.debug == 'true'
       shell: bash
       env:
         DIAG_EVENT_NAME: ${{ github.event_name }}
         DIAG_PULL_REQUEST: ${{ github.event.pull_request != '' }}
         DIAG_BASE_REF: ${{ github.base_ref }}
-        DIAG_LITE_MODE: ${{ inputs.lite_mode }}
-        DIAG_DEBUG_MODE: ${{ inputs.debug }}
+        DIAG_LITE_MODE: ${{ steps.inputs.outputs.lite_mode }}
+        DIAG_DEBUG_MODE: ${{ steps.inputs.outputs.debug }}
       run: |
         echo "---- CONTEXT DIAGNOSTICS ----"
         echo "Event Name:   ${DIAG_EVENT_NAME}"
@@ -114,12 +131,12 @@ runs:
         echo "Debug Mode:   ${DIAG_DEBUG_MODE}"
         echo "---------------------------"
 
-    # Send triggers to diff action
+    # Send triggers to diff action (diff-triggers v0.9.0 still names its input ref)
     - id: triggers
       uses: bcgov/actions/diff-triggers@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
       with:
         triggers: ${{ inputs.triggers }}
-        ref: ${{ inputs.ref }}
+        ref: ${{ inputs.base }}
         token: ${{ inputs.token }}
 
     - if: steps.triggers.outputs.triggered == 'true'
@@ -138,8 +155,8 @@ runs:
       env:
         FILE: ${{ inputs.file }}
         PARAMETERS: ${{ inputs.parameters }}
-        LITE_MODE: ${{ inputs.lite_mode }}
-        DEBUG: ${{ inputs.debug }}
+        LITE_MODE: ${{ steps.inputs.outputs.lite_mode }}
+        DEBUG: ${{ steps.inputs.outputs.debug }}
       run: |
         # Process template and variables
         # Rendered templates hold secrets that log masking can miss (JSON escapes & < > etc.),
@@ -198,7 +215,7 @@ runs:
     - if: steps.triggers.outputs.triggered == 'true'
       shell: bash
       env:
-        OVERWRITE: ${{ inputs.overwrite }}
+        OVERWRITE: ${{ steps.inputs.outputs.overwrite }}
         TIMEOUT: ${{ inputs.timeout || '15m' }}
         TEMPLATE_FILE: ${{ steps.process.outputs.template_file }}
       run: |
