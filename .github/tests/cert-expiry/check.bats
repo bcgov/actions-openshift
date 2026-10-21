@@ -84,14 +84,14 @@ findings() {
 }
 
 @test "fail_on_findings false reports findings without failing" {
-  INPUT_HOSTS="localhost:${OK_PORT} localhost:${SOON_PORT}" INPUT_FAIL_ON_FINDINGS=false run bash "$SCRIPT"
+  INPUT_HOSTS=$'localhost:'"${OK_PORT}"$'\nlocalhost:'"${SOON_PORT}" INPUT_FAIL_ON_FINDINGS=false run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$(findings | jq length)" -eq 1 ]
   grep -qx "checked=2" "$GITHUB_OUTPUT"
 }
 
 @test "never prints certificate or key material" {
-  INPUT_HOSTS="localhost:${OK_PORT} localhost:${SOON_PORT} localhost:${OLD_PORT}" run bash "$SCRIPT"
+  INPUT_HOSTS=$'localhost:'"${OK_PORT}"$'\nlocalhost:'"${SOON_PORT}"$'\nlocalhost:'"${OLD_PORT}" run bash "$SCRIPT"
   [[ "$output" != *"BEGIN"* ]]
   ! grep -q "BEGIN" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY"
 }
@@ -129,7 +129,15 @@ findings() {
 }
 
 @test "multi-line hosts: blank lines and comments skipped, duplicates removed" {
-  INPUT_HOSTS=$'localhost:'"${OK_PORT}"$'\n\n# vanity host unset\nLOCALHOST:'"${OK_PORT}"$', localhost:'"${SOON_PORT}" INPUT_DAYS=1 run bash "$SCRIPT"
+  INPUT_HOSTS=$'localhost:'"${OK_PORT}"$'\n\n# vanity host unset\nLOCALHOST:'"${OK_PORT}"$'\nlocalhost:'"${SOON_PORT}" INPUT_DAYS=1 run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   grep -qx "checked=2" "$GITHUB_OUTPUT"
+}
+
+@test "comma or space separated hosts fail with the one-per-line format" {
+  for h in "localhost:${OK_PORT}, localhost:${SOON_PORT}" "localhost:${OK_PORT} localhost:${SOON_PORT}"; do
+    INPUT_HOSTS="$h" run bash "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"hosts takes one item per line, or a single value."* ]]
+  done
 }

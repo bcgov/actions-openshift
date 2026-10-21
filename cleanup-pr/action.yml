@@ -7,7 +7,7 @@ inputs:
     required: false
     default: "label"
   cleanup_name:
-    description: "app label values to clean up: one per line, comma separated, or a JSON array (defaults to repository-target)"
+    description: "app label values to clean up: one per line, or a single value (defaults to repository-target)"
     required: false
     default: ""
   repository:
@@ -19,7 +19,7 @@ inputs:
     required: false
     default: ${{ github.event.number }}
   remove_pvc:
-    description: "PVCs to remove: one per line, comma separated, or a JSON array"
+    description: "PVCs to remove: one per line, or a single PVC"
     required: false
     default: ""
   oc_server:

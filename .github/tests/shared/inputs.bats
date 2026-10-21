@@ -31,6 +31,13 @@ setup() {
   done
 }
 
+@test "list: error keeps quotes on items with spaces" {
+  run input_list triggers '["my path/", "other path/"]'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'%0A  triggers: |%0A    "my path/"%0A    "other path/"%0A'* ]]
+  [ "$(input_list triggers $'"my path/"\n"other path/"')" = $'my path/\nother path/' ]
+}
+
 @test "bool, enum and debug" {
   [ "$(input_bool dry_run TRUE false)" = true ]
   [ "$(input_bool dry_run '' true)" = true ]

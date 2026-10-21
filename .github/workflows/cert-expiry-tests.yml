@@ -51,6 +51,7 @@ jobs:
           ref: ${{ steps.base.outputs.sha || github.event.before }}
           triggers: |
             cert-expiry/
+            shared/inputs.sh
             .github/tests/cert-expiry/
             .github/workflows/cert-expiry-tests.yml
             !*.md

@@ -7,10 +7,10 @@ This composite action cleans up resources in a target OpenShift namespace on pul
 | Input | Description | Required | Default |
 |---|---|---|---|
 | `cleanup` | Type of cleanup to run (`helm` or `label`) | No | `label` |
-| `cleanup_name` | App labels to delete: one per line, comma separated, or a JSON array (if `cleanup` is `label`). Defaults to `repository-target` | No | `""` |
+| `cleanup_name` | App labels to delete: one per line, or a single label (if `cleanup` is `label`). Defaults to `repository-target` | No | `""` |
 | `repository` | The GitHub repository name | No | `${{ github.event.repository.name }}` |
 | `target` | Environment target identifier (e.g. PR number) | No | `${{ github.event.number }}` |
-| `remove_pvc` | PVCs to delete: one per line, comma separated, or a JSON array | No | `""` |
+| `remove_pvc` | PVCs to delete: one per line, or a single PVC | No | `""` |
 | `oc_server` | OpenShift API server URL with port | Yes | |
 | `oc_namespace` | Target OpenShift namespace | **Yes** | N/A |
 | `oc_token` | OpenShift Service Account token | **Yes** | N/A |
