@@ -281,12 +281,11 @@ runs:
         echo "VALUES_URL=${VALUES_URL}"
         echo "VALUES_URL=${VALUES_URL}" >> $GITHUB_ENV
 
-    # diff-triggers v0.9.0 still names its diff base input ref
     - id: triggers
-      uses: bcgov/actions/diff-triggers@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
+      uses: bcgov/actions/diff-triggers@77e7b21eda7c99a2230a6dfb4db3b33947678307 # v0.11.0
       with:
         triggers: ${{ inputs.triggers }}
-        ref: ${{ inputs.base }}
+        base: ${{ inputs.base }}
     # Alway install don't consider triggers here.
     - uses: $/oc-runner
       with:

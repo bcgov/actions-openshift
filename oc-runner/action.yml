@@ -131,12 +131,12 @@ runs:
         debug="$(input_debug "$INPUT_DEBUG")" || { echo "$debug"; exit 1; }
         echo "debug=${debug}" >> "$GITHUB_OUTPUT"
 
-    # Send triggers to diff action (diff-triggers v0.9.0 still names its input ref)
+    # Send triggers to diff action
     - id: diff
-      uses: bcgov/actions/diff-triggers@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
+      uses: bcgov/actions/diff-triggers@77e7b21eda7c99a2230a6dfb4db3b33947678307 # v0.11.0
       with:
         triggers: ${{ inputs.triggers }}
-        ref: ${{ inputs.base }}
+        base: ${{ inputs.base }}
 
     - name: Cache OpenShift CLI
       if: steps.diff.outputs.triggered == 'true' && inputs.oc_version != 'latest'
