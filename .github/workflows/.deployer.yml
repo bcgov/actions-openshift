@@ -110,8 +110,7 @@ jobs:
         if: inputs.tag == '' && inputs.promote_images != ''
         uses: bcgov/actions/image-tracker@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
         with:
-          max_depth: 100
-          package: ${{ inputs.promote_images }}
+          packages: ${{ inputs.promote_images }}
 
       - name: Vars
         id: vars
@@ -203,6 +202,5 @@ jobs:
       # One call: resolve every package's digest and point promote_tags at it
       - uses: bcgov/actions/image-tracker@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
         with:
-          max_depth: 100
-          package: ${{ inputs.promote_images }}
+          packages: ${{ inputs.promote_images }}
           tags: ${{ inputs.promote_tags }}
