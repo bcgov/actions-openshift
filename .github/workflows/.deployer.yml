@@ -108,7 +108,7 @@ jobs:
       - name: Resolve PR from images
         id: tracker
         if: inputs.tag == '' && inputs.promote_images != ''
-        uses: bcgov/actions/image-tracker@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
+        uses: bcgov/actions/image-tracker@122a9b1c6c082b1b1f18c300020fbdc417b6b0b2 # v0.10.0
         with:
           max_depth: 100
           package: ${{ inputs.promote_images }}
@@ -201,7 +201,7 @@ jobs:
           persist-credentials: false
 
       # One call: resolve every package's digest and point promote_tags at it
-      - uses: bcgov/actions/image-tracker@79aefe3a7abb2d0d00b1b3ea4cfbf12727a10638 # v0.9.0
+      - uses: bcgov/actions/image-tracker@122a9b1c6c082b1b1f18c300020fbdc417b6b0b2 # v0.10.0
         with:
           max_depth: 100
           package: ${{ inputs.promote_images }}
