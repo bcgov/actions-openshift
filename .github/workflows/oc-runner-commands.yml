@@ -39,7 +39,7 @@ jobs:
           echo "sha=${sha}" >> "$GITHUB_OUTPUT"
 
       - id: diff
-        uses: bcgov/actions/diff-triggers@8843560d44aa717798dacb6831bf87161d0658ca # v0.11.0
+        uses: bcgov/actions/diff-triggers@091f1da89c669d36bf4899830381e5b12d2c889a # v0.11.0
         with:
           base: ${{ steps.base.outputs.sha || github.event.before }}
           triggers: |
@@ -123,6 +123,6 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
-      - uses: bcgov/actions/workflow-results@8843560d44aa717798dacb6831bf87161d0658ca # v0.11.0
+      - uses: bcgov/actions/workflow-results@091f1da89c669d36bf4899830381e5b12d2c889a # v0.11.0
         with:
           needs: ${{ toJson(needs) }}
