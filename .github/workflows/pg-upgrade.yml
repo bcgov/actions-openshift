@@ -132,7 +132,10 @@ jobs:
       - unit
       - containers
     if: always()
-    permissions: {}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:

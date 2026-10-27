@@ -687,7 +687,10 @@ jobs:
       - test-fork-token-degradation
       - test-image-import
     if: always()
-    permissions: {}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
