@@ -5,9 +5,8 @@ inputs:
     description: "Route spec.host (e.g. myapp.gov.bc.ca). Hostname only, no scheme."
     required: true
   route_name:
-    description: "OpenShift Route name. Defaults to <repository>-vanity-url so it is not swept up with app= label cleanup."
-    required: false
-    default: ${{ github.event.repository.name }}-vanity-url
+    description: "OpenShift Route name (e.g. <repository>-prod-frontend-vanity or <repository>-vanity-url)."
+    required: true
   target_service:
     description: "The OpenShift Service to send traffic to"
     required: true
