@@ -25,6 +25,7 @@ Repository facts and constraints for automated coding assistants.
 ## Action Architecture & Rules
 
 - **`route-tls` is standalone only**: When assisting downstream repositories with custom vanity Route TLS, always implement it as an independent on-demand workflow (`.github/workflows/route-tls.yml` on `workflow_dispatch` with `dry_run` choice defaulting to `true`). **NEVER** embed `route-tls` into `merge.yml`, `release.yml`, or continuous deployment pipelines.
+- **`route_name` is required on `route-tls`**: Never assume a default route name. Check the target repository's deployment templates or existing OpenShift routes. For existing repositories migrated from legacy templates, pass `route_name: ${{ github.event.repository.name }}-prod-frontend-vanity` explicitly; for new standalone routes, use `<repository>-vanity-url` so PR-close sweeps do not delete it.
 - **Secret Management**: Certificates belong in the `prod` GitHub Environment (`TLS_CERTIFICATE`, `TLS_PRIVATE_KEY`, `TLS_CA_CERTIFICATE`). Automated assistants must never manage secrets directly; draft copy-pasteable `gh secret set` commands in chat for human maintainers.
 - **Entrust Certificate Mapping**:
   - `TLS_CERTIFICATE`: leaf only (`<host>.pem`).

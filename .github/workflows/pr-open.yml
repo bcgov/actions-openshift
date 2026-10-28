@@ -423,6 +423,7 @@ jobs:
         uses: $/route-tls
         with:
           hostname: myapp.bcgov.ca
+          route_name: actions-openshift-vanity-url
           target_service: my-test-service
           tls_certificate: ${{ env.DUMMY_CERT }}
           tls_private_key: ${{ env.DUMMY_KEY }}
@@ -589,6 +590,7 @@ jobs:
         uses: $/route-tls
         with:
           hostname: myapp.bcgov.ca
+          route_name: actions-openshift-vanity-url
           target_service: my-test-service
           tls_certificate: ${{ env.FORK_CERT }}
           tls_private_key: ${{ env.FORK_KEY }}
