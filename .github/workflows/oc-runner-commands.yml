@@ -45,6 +45,10 @@ jobs:
           triggers: |
             oc-runner/
             shared/
+            cert-expiry/action.yml
+            cert-expiry/check.sh
+            cleanup-pr/action.yml
+            sysdig-monitor/action.yml
             .github/tests/oc-runner/
             .github/tests/shared/
             .github/workflows/oc-runner-commands.yml
