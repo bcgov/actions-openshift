@@ -138,10 +138,11 @@ if [[ "$INTERACTIVE" = true ]]; then
   if [[ ! "${ACCEPT}" =~ [Yy] ]]; then
     echo "Enter custom subject (leave blank to skip): "
     while true; do
-      read CUSTOM_SUBJECT
-      # Trim whitespace
-      CUSTOM_SUBJECT_TRIMMED="$(echo "${CUSTOM_SUBJECT}" | xargs)"
-      
+      read -r CUSTOM_SUBJECT
+      # Trim surrounding whitespace without word-splitting (apostrophes safe)
+      CUSTOM_SUBJECT_TRIMMED="${CUSTOM_SUBJECT#"${CUSTOM_SUBJECT%%[![:space:]]*}"}"
+      CUSTOM_SUBJECT_TRIMMED="${CUSTOM_SUBJECT_TRIMMED%"${CUSTOM_SUBJECT_TRIMMED##*[![:space:]]}"}"
+
       # If empty after trimming, skip subject (let OpenSSL prompt)
       if [[ -z "${CUSTOM_SUBJECT_TRIMMED}" ]]; then
         USE_SUBJECT="false"

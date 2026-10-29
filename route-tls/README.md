@@ -45,7 +45,7 @@ Add the standalone workflow from [Usage](#usage), set the `prod` environment sec
 
 ### Renewals
 
-Keep the private key. Re-issue with the same key (`./csr_generator.sh <host> <host>.key`) or a new keypair, then repeat secrets + dry_run/apply. `route-tls` snapshots the live Route TLS to a Secret before overwrite.
+Keep the private key. Re-issue with the same key (`./csr_generator.sh --force <host> <host>.key` — `--force` overwrites an existing CSR without replacing the key you passed) or a new keypair, then repeat secrets + dry_run/apply. `route-tls` snapshots the live Route TLS to a Secret before overwrite.
 
 ## GitHub secrets
 
