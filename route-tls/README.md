@@ -100,8 +100,6 @@ Do not embed `route-tls` into `merge.yml`, `release.yml`, or continuous deployme
 
 Copy this workflow into the app repo. `hostname`, `route_name`, and `target_service` are per app. The action `dry_run` input defaults to `false`; the workflow form should expose `dry_run` as a choice that defaults to `true`, so a manual run validates first.
 
-Do **not** add a required free-text input (such as `description`). If a required string is left blank, GitHub's **Run workflow** UI fails with "Workflow dispatch failed / Workflow could not be run" and gives no useful hint. Any extra UI input must be optional or have a default. Working consumers (nr-silva, nr-waste-plus, nr-fta, nr-epd-organics-info, quickstart-openshift) use only `dry_run`.
-
 ```yaml
 name: Route TLS
 
