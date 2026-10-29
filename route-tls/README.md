@@ -6,9 +6,50 @@ The Route uses `termination: edge` and `insecureEdgeTerminationPolicy: Redirect`
 
 Pin a tag or commit SHA, not `@main`. This action does not use `GITHUB_TOKEN` itself. Every run, `dry_run` included, logs in through the sibling [`oc-runner`](../oc-runner/README.md) action, which checks out the caller repo (that step needs `contents: read` if the repository is private).
 
+Flow when you need a cert (or a new one): [no cert → CSR → Entrust/ACME → secrets → this action](#no-cert-yet-csr-and-update). If you already have PEMs, skip to [GitHub secrets](#github-secrets) and [Usage](#usage).
+
+## No cert yet (CSR and update)
+
+When you have no certificate (or need a new one for a vanity/`gov.bc.ca` hostname), generate a CSR here, get the cert from your issuer, put the PEMs in GitHub secrets, then run this action. Do **not** hunt in `bcgov/devops-scripts` for install — that path is retired in favour of `route-tls`.
+
+**Constraints (explicit):** Entrust / ministry vanity certificates for `*.gov.bc.ca` (and similar) are typically paid and ordered manually. This folder does not automate Entrust ordering or ministry ACME policy approval. Natural Resources uses the Service Desk JIRA path below; other ministries use their own process.
+
+### 1. Generate a CSR and private key
+
+From a clone of this repository (or a copy of the script):
+
+```bash
+cd route-tls
+./csr_generator.sh app.example.gov.bc.ca
+# optional: reuse an existing key
+./csr_generator.sh app.example.gov.bc.ca /path/to/existing.key
+# optional: overwrite existing files
+./csr_generator.sh --force app.example.gov.bc.ca
+```
+
+That writes `app.example.gov.bc.ca.csr` and (unless you passed a key) `app.example.gov.bc.ca.key`. Keep the **private key**; you need it for secrets and renewals. The default subject is BC Gov (`/C=CA/ST=British Columbia/L=Victoria/O=Government of the Province of British Columbia/CN=<domain>`). Run with no domain for interactive prompts.
+
+### 2. Order the certificate (Entrust / ACME)
+
+**Natural Resources:** create a Service Desk (SD) Service Request — the script prints the field checklist (title, component, assignee, iStore billing codes). Attach the **CSR only**, not the private key. Wait for the Entrust package.
+
+**Other ministries:** use your ACME or certificate desk process. Same outcome: a leaf PEM, the matching private key you already have, and the issuing CA PEM.
+
+### 3. Map the package to secrets
+
+Use the table in [GitHub secrets](#github-secrets): leaf → `TLS_CERTIFICATE`, key → `TLS_PRIVATE_KEY`, issuing CA only → `TLS_CA_CERTIFICATE`. Leave roots and the `.csr` out of secrets.
+
+### 4. Run route-tls
+
+Add the standalone workflow from [Usage](#usage), set the `prod` environment secrets, run with `dry_run=true`, then `dry_run=false`.
+
+### Renewals
+
+Keep the private key. Re-issue with the same key (`./csr_generator.sh <host> <host>.key`) or a new keypair, then repeat secrets + dry_run/apply. `route-tls` snapshots the live Route TLS to a Secret before overwrite.
+
 ## GitHub secrets
 
-Put the PEMs on a **prod** GitHub Environment (not repository secrets), so pull-request jobs cannot read them. The job that calls this action must use that environment. OpenShift login uses environment secrets `OC_NAMESPACE` and `OC_TOKEN`, and variable `OC_SERVER`.
+Need a cert first? Start at [No cert yet (CSR and update)](#no-cert-yet-csr-and-update). Put the PEMs on a **prod** GitHub Environment (not repository secrets), so pull-request jobs cannot read them. The job that calls this action must use that environment. OpenShift login uses environment secrets `OC_NAMESPACE` and `OC_TOKEN`, and variable `OC_SERVER`.
 
 NR cert packages from Entrust look like `app.example.gov.bc.ca/`. Map them like this:
 
