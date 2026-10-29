@@ -96,8 +96,10 @@ Adding/removing alert recipients is done by editing `spec.team.users[]` in the S
     alerts_dir: monitoring/alerts
 
     # Deployment names: one per line, or a single name. One alert per file per component.
-    # Default: frontend,backend
-    components: frontend,backend
+    # Default: frontend and backend
+    components: |
+      frontend
+      backend
 
     # Minutes a condition must hold before alerting. Acts as the debounce
     # that absorbs rolling-deploy noise.

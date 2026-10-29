@@ -41,8 +41,13 @@ inputs:
     description: |
       Deployment names to monitor: one per line, or a single name.
       Each component gets one alert per file in alerts_dir.
-      Example: frontend,backend
-    default: 'frontend,backend'
+      Example:
+        components: |
+          frontend
+          backend
+    default: |
+      frontend
+      backend
   alert_duration_minutes:
     description: |
       Minutes a condition must hold before an alert fires.

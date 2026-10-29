@@ -51,3 +51,25 @@ setup() {
   [ "$(RUNNER_DEBUG= input_debug '')" = false ]
   [ "$(RUNNER_DEBUG=1 input_debug '')" = true ]
 }
+
+@test "list: every list input's declared default parses with input_list" {
+  root="${BATS_TEST_DIRNAME}/../../.."
+  checked=0
+  for action in "$root"/*/action.yml; do
+    dir="$(dirname "$action")"
+    # List inputs: names passed to input_list in the action or its scripts
+    names="$(grep -rhoE 'input_list [a-z_]+ ' "$dir" --include=action.yml --include='*.sh' | awk '{print $2}' | sort -u)"
+    for name in $names; do
+      [ "$(yq ".inputs | has(\"${name}\")" "$action")" = true ] || continue
+      default="$(yq ".inputs.${name}.default // \"\"" "$action")"
+      [[ -n "$default" && "$default" != *'${{'* ]] || continue
+      run input_list "$name" "$default"
+      if [ "$status" -ne 0 ]; then
+        echo "${action#"$root"/}: ${name} default does not parse: ${output}"
+        return 1
+      fi
+      checked=$((checked + 1))
+    done
+  done
+  [ "$checked" -gt 0 ]
+}
