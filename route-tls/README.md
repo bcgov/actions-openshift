@@ -98,11 +98,10 @@ Do not embed `route-tls` into `merge.yml`, `release.yml`, or continuous deployme
 
 `route_name` is required. For existing repositories migrated from legacy templates, use the existing OpenShift Route name (typically `<repository>-prod-frontend-vanity`). For new greenfield routes, use `<repository>-vanity-url` so PR-close `app=` sweeps do not delete it.
 
-The action `dry_run` input defaults to `false`. For a manual **Run workflow** form, keep `dry_run` as a choice that defaults to `true`. GitHub shows one `description` string for that input; the dropdown options are still `true` and `false`. Copy this workflow into the app repo (hostname, route, and service are per app). `run-name` and the extra `description` input are workflow UI. They are not action inputs.
+Copy this workflow into the app repo. `hostname`, `route_name`, and `target_service` are per app. The action `dry_run` input defaults to `false`; the workflow form should expose `dry_run` as a choice that defaults to `true`, so a manual run validates first.
 
 ```yaml
 name: Route TLS
-run-name: "Route TLS dry_run=${{ inputs.dry_run }} — ${{ inputs.description }}"
 
 on:
   workflow_dispatch:
@@ -115,10 +114,10 @@ on:
         options:
           - "true"
           - "false"
-      description:
-        description: "Shown on this workflow run."
-        required: true
-        type: string
+
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
 
 permissions: {}
 
