@@ -35,6 +35,13 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # Unknown or renamed inputs fail here; GitHub only warns (shared/assert-known.sh)
+    - name: Check inputs
+      shell: bash
+      env:
+        INPUTS_JSON: ${{ toJSON(inputs) }}
+      run: bash "$GITHUB_ACTION_PATH/../shared/assert-known.sh" "$GITHUB_ACTION_PATH"
+
     # Shared input rules (shared/inputs.sh); a bad value fails here
     - name: Parse Inputs
       id: inputs

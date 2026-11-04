@@ -676,6 +676,50 @@ jobs:
 
   # Single merge gate for this workflow. Skipped jobs count as passing, so path-filtered
   # and same-repo-only jobs still let it report; it fails on any failed or cancelled job.
+  # GitHub only warns on undeclared `with:` keys; these must fail at the input check
+  test-unknown-inputs:
+    name: Test Unknown Inputs Fail Loud
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Shared check unit tests
+        run: bash shared/assert-known.test.sh
+
+      - name: oc-runner with renamed verbose / diff_branch
+        id: oc_runner
+        continue-on-error: true
+        uses: $/oc-runner
+        with:
+          oc_namespace: none
+          oc_server: https://example.invalid:6443
+          oc_token: none
+          commands: oc version
+          verbose: true
+          diff_branch: main
+
+      - name: cert-expiry with unknown key
+        id: cert_expiry
+        continue-on-error: true
+        uses: $/cert-expiry
+        with:
+          hosts: example.com
+          not_an_input: x
+
+      - name: Require failures
+        env:
+          OC_RUNNER: ${{ steps.oc_runner.outcome }}
+          CERT_EXPIRY: ${{ steps.cert_expiry.outcome }}
+        run: |
+          echo "oc-runner=$OC_RUNNER cert-expiry=$CERT_EXPIRY"
+          [ "$OC_RUNNER" = failure ] && [ "$CERT_EXPIRY" = failure ] || {
+            echo "::error::An action accepted an unknown or renamed input"; exit 1; }
+
   results:
     name: PR Results
     needs:
@@ -688,6 +732,7 @@ jobs:
       - test-route-tls-logs
       - test-fork-token-degradation
       - test-image-import
+      - test-unknown-inputs
     if: always()
     permissions:
       contents: read
