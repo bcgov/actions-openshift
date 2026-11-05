@@ -148,6 +148,8 @@ jobs:
               - .github/tests/route-tls/
               - .github/tests/image-import/
               - route-tls/
+              - acme-http01/
+              - .github/tests/acme-http01/
               - image-import/
               - .github/workflows/pr-open.yml
               - "!*.md"
@@ -174,7 +176,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq bats openssl
-          bats .github/tests/crunchy .github/tests/route-tls .github/tests/image-import
+          bats .github/tests/crunchy .github/tests/route-tls .github/tests/image-import .github/tests/acme-http01
 
       - name: Helm lint
         run: helm lint crunchy/charts/crunchy --values crunchy/values.yml
