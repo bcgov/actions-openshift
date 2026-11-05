@@ -3,7 +3,7 @@ Consolidated repo for bcgov-specific openshift actions. Please feel free to cont
 
 ## Unknown inputs
 
-Every action fails at its first step when a caller passes an input it does not declare (GitHub on its own only warns), naming the key and listing the declared inputs (see bcgov/actions [shared/README.md](https://github.com/bcgov/actions/blob/main/shared/README.md#unknown-inputs)). The check, [shared/assert-known.sh](./shared/assert-known.sh), is a copy of bcgov/actions `shared/inputs.js` `assert-known`; bcgov/actions is the source of truth.
+Every action fails at its first step when a caller passes an input it does not declare (GitHub on its own only warns), naming the key and listing the declared inputs. The check is the [bcgov/actions input-enforcer](https://github.com/bcgov/actions/tree/main/input-enforcer) action, pinned by SHA like `diff-triggers`.
 
 
 ## Workflows and Actions

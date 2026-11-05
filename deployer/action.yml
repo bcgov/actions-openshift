@@ -92,12 +92,12 @@ outputs:
 runs:
   using: composite
   steps:
-    # Undeclared inputs fail here; GitHub only warns (shared/assert-known.sh)
+    # Undeclared inputs fail here; GitHub only warns
     - name: Check inputs
-      shell: bash
-      env:
-        INPUTS_JSON: ${{ toJSON(inputs) }}
-      run: bash "$GITHUB_ACTION_PATH/../shared/assert-known.sh" "$GITHUB_ACTION_PATH"
+      uses: bcgov/actions/input-enforcer@166399c6b83ef0da73437c7caed9f5ea0966a392 # feat/assert-known-inputs (bcgov/actions#346)
+      with:
+        inputs: ${{ toJSON(inputs) }}
+        action_path: ${{ github.action_path }}
 
     # Shared input rules (shared/inputs.sh); a bad value fails here
     - name: Parse Inputs

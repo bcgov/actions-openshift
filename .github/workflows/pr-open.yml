@@ -674,8 +674,6 @@ jobs:
           commands: |
             oc delete imagestreamtag "image-import:${PR}" --ignore-not-found
 
-  # Single merge gate for this workflow. Skipped jobs count as passing, so path-filtered
-  # and same-repo-only jobs still let it report; it fails on any failed or cancelled job.
   # GitHub only warns on undeclared `with:` keys; these must fail at the input check
   test-unknown-inputs:
     name: Test Unknown Inputs Fail Loud
@@ -688,8 +686,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Shared check unit tests
-        run: bash shared/assert-known.test.sh
+      # Same enforcer the actions pin, for its CLI
+      - uses: actions/checkout@v7
+        with:
+          repository: bcgov/actions
+          ref: 166399c6b83ef0da73437c7caed9f5ea0966a392
+          path: .input-enforcer
+          persist-credentials: false
 
       - name: oc-runner with undeclared verbose / diff_branch
         id: oc_runner
@@ -724,21 +727,23 @@ jobs:
       # check for every action, with its declared inputs plus one extra key.
       - name: Require unknown-input diagnostic (every action)
         run: |
-          source shared/assert-known.sh
+          enforce=.input-enforcer/input-enforcer/enforce.js
           fail=0
           for yml in */action.yml; do
             dir=${yml%/action.yml}
-            json=$'{\n'"$(_declared_inputs "$yml" | sed 's/.*/  "&": "x",/')"$'\n  "not_an_input": "x"\n}'
-            if out=$(assert_known_inputs "$dir" "$json"); then
+            json=$(node -e 'const {declaredInputs}=require(process.argv[2]);const o={};for(const k of declaredInputs(require("fs").readFileSync(process.argv[1],"utf8")))o[k]="x";o.not_an_input="x";console.log(JSON.stringify(o))' "$yml" "./$enforce")
+            if out=$(node "$enforce" "$dir" "$json" 2>&1); then
               echo "::error::$dir accepted not_an_input"; fail=1; continue
             fi
             case "$out" in
-              "::error title=$dir: unknown input::Unknown input(s) for $dir: not_an_input%0A"*"not_an_input: not an input of $dir"*) echo "ok $dir" ;;
-              *) echo "::error::$dir: wrong diagnostic"; fail=1 ;;
+              "::error title=$dir: unknown input::Unknown input(s) for $dir: not_an_input%0A"*"not_an_input: not an input of $dir"*"bcgov/actions-openshift/blob/main/$dir/README.md"*) echo "ok $dir" ;;
+              *) echo "::error::$dir: wrong diagnostic"; printf '%s\n' "$out" | sed 's/::/: :/g'; fail=1 ;;
             esac
           done
           exit $fail
 
+  # Single merge gate for this workflow. Skipped jobs count as passing, so path-filtered
+  # and same-repo-only jobs still let it report; it fails on any failed or cancelled job.
   results:
     name: PR Results
     needs:
