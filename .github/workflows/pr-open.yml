@@ -157,7 +157,6 @@ jobs:
               - image-import/
               - oc-runner/action.yml
               - oc-runner/scripts/
-              - .github/workflows/pr-open.yml
               - "!*.md"
 
   test-crunchy:
