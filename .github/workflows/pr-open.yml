@@ -674,6 +674,77 @@ jobs:
           commands: |
             oc delete imagestreamtag "image-import:${PR}" --ignore-not-found
 
+  # GitHub only warns on undeclared `with:` keys; these must fail at the input check
+  test-unknown-inputs:
+    name: Test Unknown Inputs Fail Loud
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same enforcer the actions pin, for its CLI
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: bcgov/actions
+          ref: d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+          path: .input-enforcer
+          persist-credentials: false
+
+      - name: oc-runner with undeclared verbose / diff_branch
+        id: oc_runner
+        continue-on-error: true
+        uses: $/oc-runner
+        with:
+          oc_namespace: none
+          oc_server: https://example.invalid:6443
+          oc_token: none
+          commands: oc version
+          # Nonmatching trigger skips login, so only input rejection can fail this
+          triggers: ./no-such-path/
+          verbose: true
+          diff_branch: main
+
+      - name: cert-expiry with unknown key
+        id: cert_expiry
+        continue-on-error: true
+        uses: $/cert-expiry
+        with:
+          hosts: example.com
+          fail_on_findings: "false"
+          not_an_input: x
+
+      - name: Require failures
+        env:
+          OC_RUNNER: ${{ steps.oc_runner.outcome }}
+          CERT_EXPIRY: ${{ steps.cert_expiry.outcome }}
+        run: |
+          echo "oc-runner=$OC_RUNNER cert-expiry=$CERT_EXPIRY"
+          [ "$OC_RUNNER" = failure ] && [ "$CERT_EXPIRY" = failure ] || {
+            echo "::error::An action accepted an undeclared input"; exit 1; }
+
+      # The failures above must be the unknown-input diagnostic: run the same
+      # check for every action, with its declared inputs plus one extra key.
+      - name: Require unknown-input diagnostic (every action)
+        run: |
+          enforce=.input-enforcer/input-enforcer/enforce.js
+          fail=0
+          for yml in */action.yml; do
+            dir=${yml%/action.yml}
+            json=$(node -e 'const {declaredInputs}=require(process.argv[2]);const o={};for(const k of declaredInputs(require("fs").readFileSync(process.argv[1],"utf8")))o[k]="x";o.not_an_input="x";console.log(JSON.stringify(o))' "$yml" "./$enforce")
+            if out=$(node "$enforce" "$dir" "$json" 2>&1); then
+              echo "::error::$dir accepted not_an_input"; fail=1; continue
+            fi
+            case "$out" in
+              "::error title=$dir: unknown input::Unknown input(s) for $dir: not_an_input%0A"*"not_an_input: not an input of $dir"*"bcgov/actions-openshift/blob/main/$dir/README.md"*) echo "ok $dir" ;;
+              *) echo "::error::$dir: wrong diagnostic"; printf '%s\n' "$out" | sed 's/::/: :/g'; fail=1 ;;
+            esac
+          done
+          exit $fail
+
   # Single merge gate for this workflow. Skipped jobs count as passing, so path-filtered
   # and same-repo-only jobs still let it report; it fails on any failed or cancelled job.
   results:
@@ -688,6 +759,7 @@ jobs:
       - test-route-tls-logs
       - test-fork-token-degradation
       - test-image-import
+      - test-unknown-inputs
     if: always()
     permissions:
       contents: read
