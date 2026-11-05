@@ -691,7 +691,7 @@ jobs:
       - name: Shared check unit tests
         run: bash shared/assert-known.test.sh
 
-      - name: oc-runner with renamed verbose / diff_branch
+      - name: oc-runner with undeclared verbose / diff_branch
         id: oc_runner
         continue-on-error: true
         uses: $/oc-runner
@@ -718,7 +718,26 @@ jobs:
         run: |
           echo "oc-runner=$OC_RUNNER cert-expiry=$CERT_EXPIRY"
           [ "$OC_RUNNER" = failure ] && [ "$CERT_EXPIRY" = failure ] || {
-            echo "::error::An action accepted an unknown or renamed input"; exit 1; }
+            echo "::error::An action accepted an undeclared input"; exit 1; }
+
+      # The failures above must be the unknown-input diagnostic: run the same
+      # check for every action, with its declared inputs plus one extra key.
+      - name: Require unknown-input diagnostic (every action)
+        run: |
+          source shared/assert-known.sh
+          fail=0
+          for yml in */action.yml; do
+            dir=${yml%/action.yml}
+            json=$'{\n'"$(_declared_inputs "$yml" | sed 's/.*/  "&": "x",/')"$'\n  "not_an_input": "x"\n}'
+            if out=$(assert_known_inputs "$dir" "$json"); then
+              echo "::error::$dir accepted not_an_input"; fail=1; continue
+            fi
+            case "$out" in
+              "::error title=$dir: unknown input::Unknown input(s) for $dir: not_an_input%0A"*"not_an_input: not an input of $dir"*) echo "ok $dir" ;;
+              *) echo "::error::$dir: wrong diagnostic"; fail=1 ;;
+            esac
+          done
+          exit $fail
 
   results:
     name: PR Results

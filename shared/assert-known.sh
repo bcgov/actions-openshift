@@ -1,29 +1,16 @@
 #!/usr/bin/env bash
-# Fail on unknown or renamed inputs. Copy of bcgov/actions shared/inputs.js
-# `assert-known`; bcgov/actions is the source of truth for behaviour and the
-# inputs reference:
-#   https://github.com/bcgov/actions/blob/main/shared/inputs.js
-#   https://github.com/bcgov/actions/blob/main/docs/INPUTS.md
+# Fail on inputs an action does not declare. Copy of bcgov/actions
+# shared/inputs.js `assert-known`; bcgov/actions is the source of truth:
+#   https://github.com/bcgov/actions/blob/main/shared/README.md#unknown-inputs
 #
 # GitHub only warns ("Unexpected input(s)") on a `with:` key an action does
 # not declare and keeps going. Composite actions run this as their first step:
 #   env:
 #     INPUTS_JSON: ${{ toJSON(inputs) }}   # holds undeclared keys too
 #   run: bash "$GITHUB_ACTION_PATH/../shared/assert-known.sh" "$GITHUB_ACTION_PATH"
-#
-# The rename map only improves the error text; old names are never accepted.
-# Estimated removal: v2.
+# Keys compare case-insensitively as written; nothing per action beyond action.yml.
 
-INPUTS_DOCS='https://github.com/bcgov/actions/blob/main/docs/INPUTS.md'
-
-# Renamed (old=new) or removed (old=) inputs, per action, since v0.5.
-_renamed() {
-  case "$1" in
-    crunchy) echo 'diff_branch=base' ;;
-    deployer) echo 'ref=base login_attempts=' ;;
-    oc-runner) echo 'diff_branch=base verbose=debug login_attempts=' ;;
-  esac
-}
+INPUTS_DOCS='https://github.com/bcgov/actions/blob/main/shared/README.md#unknown-inputs'
 
 # Declared input names from action.yml (top-level `inputs:` block).
 _declared_inputs() {
@@ -47,7 +34,7 @@ _given_inputs() {
 
 # assert_known_inputs ACTION_DIR [INPUTS_JSON]
 assert_known_inputs() {
-  local dir="$1" json="${2-${INPUTS_JSON-}}" action yml key k new found msg
+  local dir="$1" json="${2-${INPUTS_JSON-}}" action yml key k found msg
   action=$(basename "$(cd "$dir" && pwd)")
   yml="$dir/action.yml"; [[ -f "$yml" ]] || yml="$dir/action.yaml"
   [[ -f "$yml" ]] || { echo "::error::no action.yml in $dir"; return 1; }
@@ -62,18 +49,10 @@ assert_known_inputs() {
   [[ ${#unknown[@]} -eq 0 ]] && return 0
 
   msg="::error title=${action}: unknown input::Unknown input(s) for ${action}: $(IFS=,; echo "${unknown[*]}" | sed 's/,/, /g')"
-  for key in "${unknown[@]}"; do
-    new=; found=
-    for k in $(_renamed "$action"); do
-      [[ "${k%%=*}" == "${key,,}" ]] && found=1 && new="${k#*=}" && break
-    done
-    if [[ -n "$new" ]]; then msg+="%0A  ${key}: renamed to ${new}"
-    elif [[ -n "$found" ]]; then msg+="%0A  ${key}: removed (no replacement)"
-    else msg+="%0A  ${key}: not an input of ${action}"; fi
-  done
+  for key in "${unknown[@]}"; do msg+="%0A  ${key}: not an input of ${action}"; done
   msg+="%0AInputs: $(IFS=,; echo "${declared[*]}" | sed 's/,/, /g')"
   msg+="%0ADocs: https://github.com/bcgov/actions-openshift/blob/main/${action}/README.md"
-  msg+="%0AReference: ${INPUTS_DOCS}"
+  msg+="%0ACheck: ${INPUTS_DOCS}"
   echo "$msg"
   return 1
 }

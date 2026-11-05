@@ -1,9 +1,9 @@
 # actions-openshift
 Consolidated repo for bcgov-specific openshift actions. Please feel free to contribute!
 
-## Unknown and renamed inputs
+## Unknown inputs
 
-Every action fails at its first step when a caller passes an input it does not declare (GitHub on its own only warns), naming the key and its replacement when known. Renames and removals are listed in the bcgov/actions [inputs reference](https://github.com/bcgov/actions/blob/main/docs/INPUTS.md#bcgovactions-openshift). The check, [shared/assert-known.sh](./shared/assert-known.sh), is a copy of bcgov/actions `shared/inputs.js` `assert-known`; bcgov/actions is the source of truth.
+Every action fails at its first step when a caller passes an input it does not declare (GitHub on its own only warns), naming the key and listing the declared inputs (see bcgov/actions [shared/README.md](https://github.com/bcgov/actions/blob/main/shared/README.md#unknown-inputs)). The check, [shared/assert-known.sh](./shared/assert-known.sh), is a copy of bcgov/actions `shared/inputs.js` `assert-known`; bcgov/actions is the source of truth.
 
 
 ## Workflows and Actions
