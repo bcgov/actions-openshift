@@ -77,6 +77,8 @@ jobs:
     name: Issue and apply
     environment: prod
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - id: acme

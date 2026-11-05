@@ -21,6 +21,15 @@ die() {
   exit 1
 }
 
+# Escape a value for a double-quoted YAML scalar so it stays one array element
+# even if the email local-part contains quotes, commas or backslashes.
+yaml_dq() {
+  local s=$1
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  printf '%s' "$s"
+}
+
 # Validation (also runs without a cluster)
 [[ "$ACME_HOST" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]] \
   || die "hostname must be one lowercase FQDN, no scheme, port, path or wildcard."
@@ -33,6 +42,8 @@ case "$ACME_SERVER" in
 esac
 KEY_TYPE="${KEY_TYPE^^}"
 case "$KEY_TYPE" in EC256|EC384|RSA2048|RSA3072|RSA4096) ;; *) die "unsupported key_type." ;; esac
+
+email_yaml="$(yaml_dq "$ACME_EMAIL")"
 
 # Short unique name; label used for cleanup sweeps
 suffix="$(printf '%s' "${ACME_HOST}${GITHUB_RUN_ID:-}${RANDOM}" | sha256sum | cut -c1-8)"
@@ -55,7 +66,7 @@ items:
     containers:
     - name: lego
       image: ${LEGO_IMAGE}
-      args: [run, --accept-tos, --email, "${ACME_EMAIL}", --server, "${server_url}",
+      args: [run, --accept-tos, --email, "${email_yaml}", --server, "${server_url}",
              --domains, "${ACME_HOST}", --key-type, "${KEY_TYPE}", --http, --http.address, ":8080",
              --path, /data/lego]
       ports: [{containerPort: 8080}]
@@ -113,6 +124,15 @@ done
 "$OC" logs "pod/${NAME}" -c lego --tail=40 2>/dev/null | grep -v -- '-----' || true
 [ -n "$state" ] || die "lego did not finish within ${TIMEOUT}s (DNS for ${ACME_HOST} must reach this cluster's router)."
 [ "$state" = "0" ] || die "lego exited ${state}; see log above."
+
+# Issuance can finish while the helper image is still pulling; wait before oc exec.
+helper=""
+while [ "$SECONDS" -lt "$deadline" ]; do
+  helper="$("$OC" get "pod/${NAME}" -o jsonpath='{.status.containerStatuses[?(@.name=="helper")].state.running.startedAt}' 2>/dev/null || true)"
+  [ -n "$helper" ] && break
+  sleep 2
+done
+[ -n "$helper" ] || die "helper container not running within ${TIMEOUT}s; cannot copy issued PEMs."
 
 mkdir -p "$OUT_DIR" && chmod 700 "$OUT_DIR"
 fetch() { "$OC" exec "pod/${NAME}" -c helper -- sh -c "cat \$(ls /data/lego/certificates/*$1 | head -1)"; }
