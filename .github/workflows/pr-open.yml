@@ -682,12 +682,12 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       # Same enforcer the actions pin, for its CLI
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: bcgov/actions
           ref: d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
@@ -703,6 +703,8 @@ jobs:
           oc_server: https://example.invalid:6443
           oc_token: none
           commands: oc version
+          # Nonmatching trigger skips login, so only input rejection can fail this
+          triggers: ./no-such-path/
           verbose: true
           diff_branch: main
 
@@ -712,6 +714,7 @@ jobs:
         uses: $/cert-expiry
         with:
           hosts: example.com
+          fail_on_findings: "false"
           not_an_input: x
 
       - name: Require failures
