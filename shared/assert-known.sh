@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Fail on unknown or renamed inputs. Copy of bcgov/actions shared/inputs.js
 # `assert-known`; bcgov/actions is the source of truth for behaviour and the
-# migration guide:
+# inputs reference:
 #   https://github.com/bcgov/actions/blob/main/shared/inputs.js
-#   https://github.com/bcgov/actions/blob/main/docs/MIGRATION.md
+#   https://github.com/bcgov/actions/blob/main/docs/INPUTS.md
 #
 # GitHub only warns ("Unexpected input(s)") on a `with:` key an action does
 # not declare and keeps going. Composite actions run this as their first step:
@@ -14,7 +14,7 @@
 # The rename map only improves the error text; old names are never accepted.
 # Estimated removal: v2.
 
-MIGRATION_DOCS='https://github.com/bcgov/actions/blob/main/docs/MIGRATION.md'
+INPUTS_DOCS='https://github.com/bcgov/actions/blob/main/docs/INPUTS.md'
 
 # Renamed (old=new) or removed (old=) inputs, per action, since v0.5.
 _renamed() {
@@ -73,7 +73,7 @@ assert_known_inputs() {
   done
   msg+="%0AInputs: $(IFS=,; echo "${declared[*]}" | sed 's/,/, /g')"
   msg+="%0ADocs: https://github.com/bcgov/actions-openshift/blob/main/${action}/README.md"
-  msg+="%0AMigration: ${MIGRATION_DOCS}"
+  msg+="%0AReference: ${INPUTS_DOCS}"
   echo "$msg"
   return 1
 }

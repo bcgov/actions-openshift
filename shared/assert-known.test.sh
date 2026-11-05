@@ -19,7 +19,7 @@ out=$(assert_known_inputs oc-runner "$renamed_json"); rc=$?
 check 'renamed input fails' '[[ $rc -eq 1 ]]'
 check 'error annotation' '[[ "$out" == "::error title=oc-runner: unknown input::"* ]]'
 check 'names replacement' '[[ "$out" == *"verbose: renamed to debug"* && "$out" == *"diff_branch: renamed to base"* ]]'
-check 'links migration guide' '[[ "$out" == *"bcgov/actions/blob/main/docs/MIGRATION.md"* ]]'
+check 'links inputs reference' '[[ "$out" == *"bcgov/actions/blob/main/docs/INPUTS.md"* ]]'
 out=$(assert_known_inputs oc-runner "$unknown_json"); rc=$?
 check 'unknown input fails and names key' '[[ $rc -eq 1 && "$out" == *"not_an_input: not an input of oc-runner"* ]]'
 check 'value text is not read as a key' '[[ "$out" != *" b: "* ]]'
