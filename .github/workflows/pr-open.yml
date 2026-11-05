@@ -690,7 +690,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: bcgov/actions
-          ref: 9e5ab833899f5c5050847f3a165967dfbe2afb4f
+          ref: f2775df1301751db08f3c1c743a6dcb9bbb0bf3b # main (bcgov/actions#346)
           path: .input-enforcer
           persist-credentials: false
 

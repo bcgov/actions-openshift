@@ -81,7 +81,7 @@ runs:
   steps:
     # Undeclared inputs fail here; GitHub only warns
     - name: Check inputs
-      uses: bcgov/actions/input-enforcer@9e5ab833899f5c5050847f3a165967dfbe2afb4f # feat/assert-known-inputs (bcgov/actions#346)
+      uses: bcgov/actions/input-enforcer@f2775df1301751db08f3c1c743a6dcb9bbb0bf3b # main (bcgov/actions#346)
       with:
         inputs: ${{ toJSON(inputs) }}
         action_path: ${{ github.action_path }}
