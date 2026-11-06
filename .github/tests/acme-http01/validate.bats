@@ -124,9 +124,26 @@ issue() {
 
 @test "challenge Route is path-scoped with no tls block" {
   RENDER_ONLY=true run bash "$SCRIPT"
-  [[ "$output" == *"path: /.well-known/acme-challenge/"* ]]
+  [[ "$output" == *"path: /.well-known/acme-challenge"* ]]
   [[ "$output" != *"tls:"* ]]
   [[ "$output" == *"host: app.example.gov.bc.ca"* ]]
+}
+
+@test "NetworkPolicy admits the router to the challenge Pod" {
+  RENDER_ONLY=true run bash "$SCRIPT"
+  [[ "$output" == *"kind: NetworkPolicy"* ]]
+  [[ "$output" == *"network.openshift.io/policy-group: ingress"* ]]
+}
+
+@test "lego delays validation so the router can load the Route" {
+  RENDER_ONLY=true run bash "$SCRIPT"
+  [[ "$output" == *'--http.delay, "20s"'* ]]
+}
+
+@test "both containers use the digest-pinned lego image" {
+  RENDER_ONLY=true run bash "$SCRIPT"
+  [ "$(grep -c 'image: docker.io/goacme/lego:.*@sha256:' <<<"$output")" -eq 2 ]
+  [ "$(grep -c 'image: ' <<<"$output")" -eq 2 ]
 }
 
 @test "email with quotes is YAML-escaped so it stays one arg" {
@@ -153,6 +170,7 @@ issue() {
   grep -E '^delete route/acme-http01-' "$OC_LOG"
   grep -E 'service/acme-http01-' "$OC_LOG"
   grep -E 'pod/acme-http01-' "$OC_LOG"
+  grep -E 'networkpolicy/acme-http01-' "$OC_LOG"
   grep -E '^apply ' "$OC_LOG"
   grep -F 'helper' "$OC_LOG" | grep -F 'running.startedAt'
   grep -E '^exec ' "$OC_LOG"
@@ -165,6 +183,7 @@ issue() {
   grep -E '^delete route/acme-http01-' "$OC_LOG"
   grep -E 'service/acme-http01-' "$OC_LOG"
   grep -E 'pod/acme-http01-' "$OC_LOG"
+  grep -E 'networkpolicy/acme-http01-' "$OC_LOG"
   ! grep -E '^exec ' "$OC_LOG"
 }
 
@@ -176,6 +195,7 @@ issue() {
   grep -E '^delete route/acme-http01-' "$OC_LOG"
   grep -E 'service/acme-http01-' "$OC_LOG"
   grep -E 'pod/acme-http01-' "$OC_LOG"
+  grep -E 'networkpolicy/acme-http01-' "$OC_LOG"
   ! grep -E '^exec ' "$OC_LOG"
 }
 

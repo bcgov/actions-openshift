@@ -7,13 +7,15 @@ Out of scope: wildcards and DNS-01 (see `bcgov/cert-manager-proxy`), multiple ho
 ## How it works
 
 1. Logs in through [`oc-runner`](../oc-runner).
-2. Creates a throwaway Pod (`lego` + an idle helper), Service and Route named `acme-http01-<hash>` in `oc_namespace`, labelled `app.kubernetes.io/managed-by=acme-http01`.
-   - The Route is **plain HTTP** with `path: /.well-known/acme-challenge/` on the same host. The router prefers the longer path, so the vanity Route (edge + `Redirect`) keeps serving everything else; the challenge path is not redirected to HTTPS.
+2. Creates a throwaway Pod (`lego` + an idle helper), Service, NetworkPolicy and Route named `acme-http01-<hash>` in `oc_namespace`, labelled `app.kubernetes.io/managed-by=acme-http01`.
+   - The Route is **plain HTTP** with `path: /.well-known/acme-challenge` on the same host. The router prefers the longer path, so the vanity Route (edge + `Redirect`) keeps serving everything else; the challenge path is not redirected to HTTPS.
+   - The NetworkPolicy lets the OpenShift router reach the Pod in default-deny namespaces.
+   - lego waits 20 s after starting so the router can load the Route before validation; a miss counts against the failed-validation limit.
    - If the host is owned by a Route in another namespace the challenge Route is not admitted and the action fails fast.
 3. Waits for lego (`timeout`, default 300 s), copies the PEMs out with `oc exec`, checks the leaf matches `hostname`.
-4. Deletes the Pod, Service and Route on success **and** failure (`trap EXIT`). The Pod also has `activeDeadlineSeconds`, so a cancelled job does not leave it running; if a runner dies mid-run, sweep with `oc delete route,service,pod -l app.kubernetes.io/managed-by=acme-http01`.
+4. Deletes the Pod, Service, NetworkPolicy and Route on success **and** failure (`trap EXIT`). The Pod also has `activeDeadlineSeconds`, so a cancelled job does not leave it running; if a runner dies mid-run, sweep with `oc delete route,service,pod,networkpolicy -l app.kubernetes.io/managed-by=acme-http01`.
 
-The ACME account key is ephemeral (one per run). Images: `goacme/lego` pinned by digest; helper `ubi9/ubi-minimal`.
+The ACME account key is ephemeral (one per run). Both containers use `goacme/lego`, pinned by digest.
 
 ## Inputs
 
@@ -24,7 +26,7 @@ The ACME account key is ephemeral (one per run). Images: `goacme/lego` pinned by
 | `acme_server` | no | `staging` | `staging` or `production` |
 | `key_type` | no | `rsa2048` | `ec256`, `ec384`, `rsa2048`, `rsa3072`, `rsa4096` |
 | `timeout` | no | `300` | Seconds, >= 30 |
-| `oc_namespace`, `oc_server`, `oc_token` | yes | | Token needs create/delete on pods, services, routes and `pods/exec` |
+| `oc_namespace`, `oc_server`, `oc_token` | yes | | Token needs create/delete on pods, services, routes, networkpolicies and `pods/exec` |
 
 ## Outputs
 

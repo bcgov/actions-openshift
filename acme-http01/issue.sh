@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ACME HTTP-01 issuance for one host. GitHub Action wrapper: action.yml.
-# Creates a throwaway Pod (lego + idle helper), Service and plain-HTTP Route on
-# path /.well-known/acme-challenge/ for ACME_HOST, waits for lego, copies the
+# Creates a throwaway Pod (lego + idle helper), Service, NetworkPolicy and plain-HTTP
+# Route on path /.well-known/acme-challenge for ACME_HOST, waits for lego, copies the
 # PEMs out, then deletes everything it created (also on failure).
 set -euo pipefail
 
@@ -11,10 +11,12 @@ ACME_SERVER="${ACME_SERVER:-staging}"
 KEY_TYPE="${KEY_TYPE:-rsa2048}"
 TIMEOUT="${TIMEOUT:-300}"
 OUT_DIR="${OUT_DIR:-${RUNNER_TEMP:-/tmp}/acme-http01}"
-# Pinned images; override only for mirrors
+# Pinned image; override only for mirrors
 LEGO_IMAGE="${LEGO_IMAGE:-docker.io/goacme/lego:v5.6.0@sha256:6f1583fc026a455ea46a7a5858c576105bb69c2e2de69db391cab7f14750350c}"
-HELPER_IMAGE="${HELPER_IMAGE:-registry.access.redhat.com/ubi9/ubi-minimal:latest}"
 OC="${OC:-oc}"
+# Time for the router to load the Route before ACME validates; a miss counts
+# against the 5 failed validations per host per hour limit
+CHALLENGE_DELAY=20s
 
 die() {
   if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::error title=ACME HTTP-01::$*"; else echo "error: $*" >&2; fi
@@ -54,6 +56,18 @@ render() {
 apiVersion: v1
 kind: List
 items:
+# Lets the OpenShift router reach the Pod in default-deny namespaces
+- apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: ${NAME}
+    labels: {app.kubernetes.io/managed-by: acme-http01}
+  spec:
+    podSelector: {matchLabels: {acme-http01/name: ${NAME}}}
+    ingress:
+    - from:
+      - namespaceSelector: {matchLabels: {network.openshift.io/policy-group: ingress}}
+    policyTypes: [Ingress]
 - apiVersion: v1
   kind: Pod
   metadata:
@@ -68,13 +82,13 @@ items:
       image: ${LEGO_IMAGE}
       args: [run, --accept-tos, --email, "${email_yaml}", --server, "${server_url}",
              --domains, "${ACME_HOST}", --key-type, "${KEY_TYPE}", --http, --http.address, ":8080",
-             --path, /data/lego]
+             --http.delay, "${CHALLENGE_DELAY}", --path, /data/lego]
       ports: [{containerPort: 8080}]
       volumeMounts: [{name: data, mountPath: /data}]
       resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
       securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, runAsNonRoot: true}
     - name: helper
-      image: ${HELPER_IMAGE}
+      image: ${LEGO_IMAGE}
       command: [sleep, "$((TIMEOUT + 60))"]
       volumeMounts: [{name: data, mountPath: /data}]
       resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 64Mi}}
@@ -94,7 +108,7 @@ items:
     labels: {app.kubernetes.io/managed-by: acme-http01}
   spec:
     host: ${ACME_HOST}
-    path: /.well-known/acme-challenge/
+    path: /.well-known/acme-challenge
     to: {kind: Service, name: ${NAME}}
     port: {targetPort: http}
 YAML
@@ -103,7 +117,7 @@ YAML
 if [ "${RENDER_ONLY:-false}" = "true" ]; then render; exit 0; fi
 
 cleanup() {
-  "$OC" delete "route/${NAME}" "service/${NAME}" "pod/${NAME}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  "$OC" delete "route/${NAME}" "service/${NAME}" "pod/${NAME}" "networkpolicy/${NAME}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
