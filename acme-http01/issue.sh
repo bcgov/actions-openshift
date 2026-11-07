@@ -116,6 +116,14 @@ YAML
 
 if [ "${RENDER_ONLY:-false}" = "true" ]; then render; exit 0; fi
 
+# Why the Pod is stuck; cleanup deletes it, so this is the only record
+diagnostics() {
+  echo "--- Pod ${NAME} containers"
+  "$OC" get "pod/${NAME}" -o jsonpath='{range .status.containerStatuses[*]}{.name}{": "}{.state}{"\n"}{end}' 2>&1 || true
+  echo "--- Pod ${NAME} events"
+  "$OC" get events --field-selector "involvedObject.name=${NAME}" 2>&1 || true
+}
+
 cleanup() {
   "$OC" delete "route/${NAME}" "service/${NAME}" "pod/${NAME}" "networkpolicy/${NAME}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
@@ -133,9 +141,18 @@ while [ "$SECONDS" -lt "$deadline" ]; do
   [ -n "$state" ] && break
   admitted="$("$OC" get "route/${NAME}" -o jsonpath='{.status.ingress[0].conditions[?(@.type=="Admitted")].status}' 2>/dev/null || true)"
   [ "$admitted" != "False" ] || die "challenge Route for ${ACME_HOST} was not admitted (host owned by another namespace?)."
+  # A Pod that can't start never logs, so stop rather than wait out the timeout
+  waiting="$("$OC" get "pod/${NAME}" -o jsonpath='{.status.containerStatuses[*].state.waiting.reason}' 2>/dev/null || true)"
+  case " $waiting " in
+    *" ImagePullBackOff "*|*" ErrImagePull "*|*" InvalidImageName "*|*" CreateContainerError "*|*" CreateContainerConfigError "*)
+      diagnostics
+      die "Pod ${NAME} cannot start: ${waiting}."
+      ;;
+  esac
   sleep 5
 done
 "$OC" logs "pod/${NAME}" -c lego --tail=40 2>/dev/null | grep -v -- '-----' || true
+[ -n "$state" ] || diagnostics
 [ -n "$state" ] || die "lego did not finish within ${TIMEOUT}s (DNS for ${ACME_HOST} must reach this cluster's router)."
 [ "$state" = "0" ] || die "lego exited ${state}; see log above."
 

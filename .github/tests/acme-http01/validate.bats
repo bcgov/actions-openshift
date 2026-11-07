@@ -38,6 +38,15 @@ case "$1" in
       *Admitted*)
         printf '%s' "${ADMITTED-True}"
         ;;
+      *waiting.reason*)
+        printf '%s' "${WAITING-}"
+        ;;
+      *containerStatuses*name*state*)
+        echo "mock container state"
+        ;;
+      events*|*" events "*)
+        echo "mock event"
+        ;;
       *helper*running*startedAt*)
         if [ "${HELPER_READY-1}" = "1" ]; then
           printf '2026-01-01T00:00:00Z'
@@ -76,6 +85,7 @@ issue() {
     LEGO_EXIT="${LEGO_EXIT-0}" \
     ADMITTED="${ADMITTED-True}" \
     HELPER_READY="${HELPER_READY-1}" \
+    WAITING="${WAITING-}" \
     MOCK_KEY="${D}/leaf.key" \
     MOCK_CA="${D}/ca.pem" \
     MOCK_FULLCHAIN="${D}/fullchain.pem" \
@@ -199,3 +209,20 @@ issue() {
   ! grep -E '^exec ' "$OC_LOG"
 }
 
+@test "mocked image pull failure stops early, explains and cleans up" {
+  LEGO_EXIT='' WAITING='ImagePullBackOff ContainerCreating' issue
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot start: ImagePullBackOff"* ]]
+  [[ "$output" == *"mock container state"* ]]
+  [[ "$output" == *"mock event"* ]]
+  grep -E '^delete route/acme-http01-' "$OC_LOG"
+  ! grep -E '^exec ' "$OC_LOG"
+}
+
+@test "mocked timeout prints why the Pod did not finish" {
+  LEGO_EXIT='' TIMEOUT=30 issue
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"did not finish within"* ]]
+  [[ "$output" == *"mock event"* ]]
+  grep -E '^delete route/acme-http01-' "$OC_LOG"
+}
