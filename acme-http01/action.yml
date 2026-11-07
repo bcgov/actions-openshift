@@ -1,0 +1,89 @@
+name: "ACME HTTP-01"
+description: "Issues a certificate for one hostname with ACME HTTP-01 (Let's Encrypt staging by default) using a throwaway challenge Route and Pod, then outputs PEMs for route-tls."
+inputs:
+  hostname:
+    description: "Hostname to certify (e.g. myapp.gov.bc.ca). One host, no scheme, no wildcard. Its A/CNAME must already reach the OpenShift router."
+    required: true
+  email:
+    description: "ACME account contact email."
+    required: true
+  acme_server:
+    description: "staging or production. staging uses Let's Encrypt staging (untrusted, generous rate limits). production issues a browser-trusted cert; see README rate limits."
+    required: false
+    default: "staging"
+  key_type:
+    description: "Certificate key type: EC256, EC384, RSA2048, RSA3072, RSA4096."
+    required: false
+    default: "RSA2048"
+  oc_namespace:
+    description: "OpenShift namespace."
+    required: true
+  oc_server:
+    description: "OpenShift API URL."
+    required: true
+  oc_token:
+    description: "OpenShift token."
+    required: true
+  timeout:
+    description: "Seconds to wait for issuance before cleanup and failure."
+    required: false
+    default: "300"
+outputs:
+  tls_certificate:
+    description: "Leaf certificate PEM (masked)."
+    value: ${{ steps.issue.outputs.tls_certificate }}
+  tls_ca_certificate:
+    description: "Issuer chain PEM, intermediates only (masked)."
+    value: ${{ steps.issue.outputs.tls_ca_certificate }}
+  tls_private_key:
+    description: "Private key PEM (masked)."
+    value: ${{ steps.issue.outputs.tls_private_key }}
+  not_after:
+    description: "Leaf notAfter date from openssl."
+    value: ${{ steps.issue.outputs.not_after }}
+
+runs:
+  using: "composite"
+  steps:
+    # Undeclared inputs fail here; GitHub only warns
+    - name: Check inputs
+      uses: bcgov/actions/input-enforcer@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+      with:
+        inputs: ${{ toJSON(inputs) }}
+        action_path: ${{ github.action_path }}
+
+    # Shared input rules (shared/inputs.sh); a bad value fails here
+    - name: Parse Inputs
+      id: inputs
+      shell: bash
+      env:
+        INPUT_ACME_SERVER: ${{ inputs.acme_server }}
+        INPUT_KEY_TYPE: ${{ inputs.key_type }}
+        SHARED_INPUTS: ${{ github.action_path }}/../shared/inputs.sh
+      run: |
+        # shellcheck source=/dev/null
+        source "$SHARED_INPUTS"
+        acme_server="$(input_enum acme_server "$INPUT_ACME_SERVER" "staging production" staging)" || { echo "$acme_server"; exit 1; }
+        key_type="$(input_enum key_type "$INPUT_KEY_TYPE" "ec256 ec384 rsa2048 rsa3072 rsa4096" rsa2048)" || { echo "$key_type"; exit 1; }
+        echo "acme_server=${acme_server}" >> "$GITHUB_OUTPUT"
+        echo "key_type=${key_type}" >> "$GITHUB_OUTPUT"
+
+    - name: OpenShift CLI
+      uses: $/oc-runner
+      with:
+        oc_namespace: ${{ inputs.oc_namespace }}
+        oc_server: ${{ inputs.oc_server }}
+        oc_token: ${{ inputs.oc_token }}
+
+    - name: Issue certificate
+      id: issue
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        ACME_HOST: ${{ inputs.hostname }}
+        ACME_EMAIL: ${{ inputs.email }}
+        ACME_SERVER: ${{ steps.inputs.outputs.acme_server }}
+        KEY_TYPE: ${{ steps.inputs.outputs.key_type }}
+        TIMEOUT: ${{ inputs.timeout }}
+        OC_NAMESPACE: ${{ inputs.oc_namespace }}
+      run: bash "${ACTION_PATH}/issue.sh"

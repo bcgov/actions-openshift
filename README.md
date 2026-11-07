@@ -16,6 +16,10 @@ Cleans up Helm releases, labeled resources, and PVCs in a target OpenShift names
 GitHub Action that applies an OpenShift Route with a custom TLS certificate (openssl checks and archival backups).
 * See [route-tls/README.md](./route-tls/README.md) for secrets, inputs, and usage.
 
+### 2a. [ACME HTTP-01](./acme-http01) (Composite Action)
+Issues a per-host certificate via ACME HTTP-01 (Let's Encrypt staging by default) with a throwaway challenge Route, and outputs PEMs for `route-tls`.
+* See [acme-http01/README.md](./acme-http01/README.md) for the standalone workflow, staging/production and rate limits.
+
 
 ### 3. [Image Import](./image-import) (Composite Action)
 Imports one GHCR image into a namespace ImageStream (`referencePolicy: Local`, `importMode: PreserveOriginal`) and checks the imported digest against GHCR.

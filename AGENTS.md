@@ -3,7 +3,7 @@
 Repository facts and constraints for automated coding assistants.
 
 ## Layout
-- Composite actions: `cert-expiry/`, `cleanup-pr/`, `crunchy/`, `deployer/`, `image-import/`, `oc-runner/`, `pg-upgrade/`, `route-tls/`, `sysdig-monitor/`
+- Composite actions: `cert-expiry/`, `cleanup-pr/`, `crunchy/`, `deployer/`, `image-import/`, `oc-runner/`, `pg-upgrade/`, `route-tls/`, `acme-http01/`, `sysdig-monitor/`
 - Helm chart: `crunchy/charts/crunchy` (`crunchy/values.yml`). OpenShift templates: `deployer/templates/`, `oc-runner/cronjob/openshift.deploy.yml`
 - Workflows: `.github/workflows/` (checks: `pr-open.yml`, `pr-close.yml`, `cert-expiry-tests.yml`, `oc-runner-commands.yml`, `pg-upgrade.yml`; reachability records: `probe-runner-reachability.yml`, weekly report `probe-runner-report.yml`; reusable: `.deployer.yml`, `.pr-close.yml`, `.schema-spy.yml`)
 - Tests: `.github/tests/` (bats). Script-injection audit: `scripts/audit_composite_actions.py`
