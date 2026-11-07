@@ -168,7 +168,7 @@ A finished run records `dry_run=true` or `dry_run=false` on the workflow summary
 3. Unless `dry_run`, snapshot the live Route's TLS (cert, key, CA) into a Secret named `<route>-backup-<sha256-prefix>`, labeled `backup-type=route-tls` (no `app` label). Re-applying the same cert is a no-op on that Secret. Restore from that Secret if an apply goes wrong. A Route with no inline key has nothing to back up, and the log says so.
 4. Unless `dry_run`, `oc apply` the Route (the sibling `oc-runner` action installs `oc`), then read the live certificate and fail unless its public key matches the certificate that was applied. Private keys are never printed.
 
-Short OpenShift API outages are retried for about two minutes (network failures only), so a brief drop does not waste a certificate issued earlier in the job.
+Short OpenShift API outages are retried up to 12 times, 10 seconds apart (network failures only), so a brief drop does not waste a certificate issued earlier in the job. Each attempt can also wait for its own network timeout, so a full outage takes several minutes to fail.
 
 ## Common fixes
 

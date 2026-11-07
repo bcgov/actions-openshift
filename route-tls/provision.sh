@@ -227,7 +227,8 @@ grep -q '^  caCertificate:' "$ROUTE_OUT" && die "caCertificate was written as a 
 command -v oc >/dev/null || die "oc is not on PATH"
 
 # The API can drop for a minute or two, and losing the run here wastes an issued
-# certificate. Retry network failures only; anything else is a real error.
+# certificate. Retry network failures only; anything else, including TLS
+# verification errors, is a real error.
 OC_ATTEMPTS="${OC_ATTEMPTS:-12}"
 RETRY_DELAY="${RETRY_DELAY:-10}"
 oc() {
@@ -237,7 +238,7 @@ oc() {
     rc=0
     command oc "$@" 2>"$err_file" || rc=$?
     if [ "$rc" -eq 0 ] || [ "$attempt" -ge "$OC_ATTEMPTS" ] \
-      || ! grep -qE 'i/o timeout|connection refused|connection reset|no route to host|Unable to connect to the server|TLS handshake timeout' "$err_file"; then
+      || ! grep -qE 'i/o timeout|connection refused|connection reset|no route to host|TLS handshake timeout' "$err_file"; then
       cat "$err_file" >&2
       rm -f "$err_file"
       return "$rc"

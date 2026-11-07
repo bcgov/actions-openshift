@@ -34,6 +34,10 @@ if [ "$1" = "get" ] && [ "$(grep -c '^get ' "$OC_LOG")" -le "${OC_GET_DROPS:-0}"
   echo "dial tcp 192.0.2.1:6443: connect: connection refused" >&2
   exit 1
 fi
+if [ -n "${OC_X509_APPLY-}" ] && [ "$1" = "apply" ]; then
+  echo "Unable to connect to the server: x509: certificate signed by unknown authority" >&2
+  exit 1
+fi
 if [ -n "${OC_FORBID_APPLY-}" ] && [ "$1" = "apply" ]; then
   echo "Error from server (Forbidden): routes are forbidden" >&2
   exit 1
@@ -65,6 +69,7 @@ provision() {
     OC_DROPS="${OC_DROPS:-0}" \
     OC_GET_DROPS="${OC_GET_DROPS:-0}" \
     OC_FORBID_APPLY="${OC_FORBID_APPLY-}" \
+    OC_X509_APPLY="${OC_X509_APPLY-}" \
     OC_ATTEMPTS="${OC_ATTEMPTS:-12}" \
     RETRY_DELAY=0 \
     LEAF="${D}/leaf.pem" \
@@ -235,6 +240,12 @@ provision() {
   OC_GET_DROPS=99 OC_ATTEMPTS=2 provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/int.pem" false
   [ "$status" -ne 0 ]
   ! grep -q '^apply ' "$OC_LOG"
+}
+
+@test "a TLS verification failure is not retried" {
+  OC_X509_APPLY=1 provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/int.pem" false
+  [ "$status" -ne 0 ]
+  [ "$(grep -c '^apply ' "$OC_LOG")" -eq 1 ]
 }
 
 @test "a non-network oc failure is not retried" {
