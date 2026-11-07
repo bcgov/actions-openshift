@@ -26,6 +26,18 @@ setup() {
   cat > "${bin}/oc" << 'STUB'
 #!/bin/bash
 echo "$1 $2 $3" >> "$OC_LOG"
+if [ "$(wc -l < "$OC_LOG")" -le "${OC_DROPS:-0}" ]; then
+  echo "Unable to connect to the server: dial tcp 192.0.2.1:6443: i/o timeout" >&2
+  exit 1
+fi
+if [ "$1" = "get" ] && [ "$(grep -c '^get ' "$OC_LOG")" -le "${OC_GET_DROPS:-0}" ]; then
+  echo "dial tcp 192.0.2.1:6443: connect: connection refused" >&2
+  exit 1
+fi
+if [ -n "${OC_FORBID_APPLY-}" ] && [ "$1" = "apply" ]; then
+  echo "Error from server (Forbidden): routes are forbidden" >&2
+  exit 1
+fi
 case "$1" in
   whoami) exit 1 ;;
   get)
@@ -50,6 +62,11 @@ provision() {
   run env \
     PATH="${D}/bin:${PATH}" \
     OC_LOG="$OC_LOG" \
+    OC_DROPS="${OC_DROPS:-0}" \
+    OC_GET_DROPS="${OC_GET_DROPS:-0}" \
+    OC_FORBID_APPLY="${OC_FORBID_APPLY-}" \
+    OC_ATTEMPTS="${OC_ATTEMPTS:-12}" \
+    RETRY_DELAY=0 \
     LEAF="${D}/leaf.pem" \
     ROUTE_KEY="${ROUTE_KEY-present}" \
     ROUTE_HOST="${ROUTE_HOST_OVERRIDE:-app.example.gov.bc.ca}" \
@@ -203,4 +220,26 @@ provision() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Route app-vanity has no inline key. Nothing to back up."* ]]
   ! grep -q '^create ' "$OC_LOG"
+}
+
+@test "API drops are retried and the route is still applied" {
+  OC_GET_DROPS=3 provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/int.pem" false
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"attempt 3 of 12"* ]]
+  # The warning must not leak into a captured value
+  [[ "$output" == *"Existing route found"* ]]
+  grep -q '^apply ' "$OC_LOG"
+}
+
+@test "an API outage past the last attempt fails" {
+  OC_GET_DROPS=99 OC_ATTEMPTS=2 provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/int.pem" false
+  [ "$status" -ne 0 ]
+  ! grep -q '^apply ' "$OC_LOG"
+}
+
+@test "a non-network oc failure is not retried" {
+  OC_FORBID_APPLY=1 provision "${D}/leaf.pem" "${D}/leaf.key" "${D}/int.pem" false
+  [ "$status" -ne 0 ]
+  [ "$(grep -c '^apply ' "$OC_LOG")" -eq 1 ]
+  [[ "$output" == *"Forbidden"* ]]
 }

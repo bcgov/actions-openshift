@@ -226,6 +226,28 @@ grep -q '^  caCertificate:' "$ROUTE_OUT" && die "caCertificate was written as a 
 [ -n "$OC_TOKEN" ] || die "OC_TOKEN is required"
 command -v oc >/dev/null || die "oc is not on PATH"
 
+# The API can drop for a minute or two, and losing the run here wastes an issued
+# certificate. Retry network failures only; anything else is a real error.
+OC_ATTEMPTS="${OC_ATTEMPTS:-12}"
+RETRY_DELAY="${RETRY_DELAY:-10}"
+oc() {
+  local attempt=1 rc err_file
+  err_file="$(mktemp)"
+  while true; do
+    rc=0
+    command oc "$@" 2>"$err_file" || rc=$?
+    if [ "$rc" -eq 0 ] || [ "$attempt" -ge "$OC_ATTEMPTS" ] \
+      || ! grep -qE 'i/o timeout|connection refused|connection reset|no route to host|Unable to connect to the server|TLS handshake timeout' "$err_file"; then
+      cat "$err_file" >&2
+      rm -f "$err_file"
+      return "$rc"
+    fi
+    echo "::warning title=Route TLS::OpenShift API unreachable (attempt ${attempt} of ${OC_ATTEMPTS}); retrying." >&2
+    attempt=$((attempt + 1))
+    sleep "$RETRY_DELAY"
+  done
+}
+
 if oc whoami >/dev/null 2>&1; then
   oc project "$OC_NAMESPACE" >/dev/null || die "oc is logged in, but not to namespace $OC_NAMESPACE"
 else
