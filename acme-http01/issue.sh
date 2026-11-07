@@ -14,6 +14,7 @@ OUT_DIR="${OUT_DIR:-${RUNNER_TEMP:-/tmp}/acme-http01}"
 # Pinned image; override only for mirrors
 LEGO_IMAGE="${LEGO_IMAGE:-docker.io/goacme/lego:v5.6.0@sha256:6f1583fc026a455ea46a7a5858c576105bb69c2e2de69db391cab7f14750350c}"
 OC="${OC:-oc}"
+RETRY_DELAY="${RETRY_DELAY:-10}"
 # Time for the router to load the Route before ACME validates; a miss counts
 # against the 5 failed validations per host per hour limit
 CHALLENGE_DELAY=20s
@@ -21,6 +22,16 @@ CHALLENGE_DELAY=20s
 die() {
   if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::error title=ACME HTTP-01::$*"; else echo "error: $*" >&2; fi
   exit 1
+}
+
+# The API can drop for a minute or two; an issued certificate must survive that
+retry() {
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    "$@" && return 0
+    [ "$attempt" -eq 12 ] || sleep "$RETRY_DELAY"
+  done
+  return 1
 }
 
 # Escape a value for a double-quoted YAML scalar so it stays one array element
@@ -126,7 +137,8 @@ diagnostics() {
 }
 
 cleanup() {
-  "$OC" delete "route/${NAME}" "service/${NAME}" "pod/${NAME}" "networkpolicy/${NAME}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  retry "$OC" delete "route/${NAME}" "service/${NAME}" "pod/${NAME}" "networkpolicy/${NAME}" --ignore-not-found --wait=false >/dev/null 2>&1 \
+    || echo "::warning title=ACME HTTP-01::could not delete ${NAME}; sweep with: oc delete route,service,pod,networkpolicy -l app.kubernetes.io/managed-by=acme-http01"
 }
 trap cleanup EXIT
 
@@ -167,10 +179,10 @@ done
 [ -n "$helper" ] || die "helper container not running within ${TIMEOUT}s; cannot copy issued PEMs."
 
 mkdir -p "$OUT_DIR" && chmod 700 "$OUT_DIR"
-fetch() { "$OC" exec "pod/${NAME}" -c helper -- sh -c "cat \$(ls /data/lego/certificates/*$1 | head -1)"; }
-fetch "${ACME_HOST}.key" > "${OUT_DIR}/tls.key"
-fetch "${ACME_HOST}.crt" > "${OUT_DIR}/fullchain.pem"
-fetch "${ACME_HOST}.issuer.crt" > "${OUT_DIR}/ca.pem"
+fetch() { "$OC" exec "pod/${NAME}" -c helper -- sh -c "cat \$(ls /data/lego/certificates/*$1 | head -1)" > "$2"; }
+retry fetch "${ACME_HOST}.key" "${OUT_DIR}/tls.key" || die "could not copy the private key from ${NAME}."
+retry fetch "${ACME_HOST}.crt" "${OUT_DIR}/fullchain.pem" || die "could not copy the certificate from ${NAME}."
+retry fetch "${ACME_HOST}.issuer.crt" "${OUT_DIR}/ca.pem" || die "could not copy the issuer chain from ${NAME}."
 # Leaf = first cert of the bundle
 awk '/BEGIN CERTIFICATE/{n++} n==1' "${OUT_DIR}/fullchain.pem" > "${OUT_DIR}/tls.crt"
 chmod 600 "${OUT_DIR}"/*

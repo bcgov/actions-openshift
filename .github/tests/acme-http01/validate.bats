@@ -60,6 +60,9 @@ case "$1" in
     exit 0
     ;;
   exec)
+    if [ -n "${EXEC_FAILS-}" ] && [ "$(grep -c '^exec ' "$OC_LOG")" -le "$EXEC_FAILS" ]; then
+      exit 1
+    fi
     case "$*" in
       *.issuer.crt*) cat "$MOCK_CA" ;;
       *.key*) cat "$MOCK_KEY" ;;
@@ -69,7 +72,7 @@ case "$1" in
     exit 0
     ;;
   delete)
-    exit 0
+    exit "${DELETE_RC-0}"
     ;;
 esac
 exit 0
@@ -86,6 +89,9 @@ issue() {
     ADMITTED="${ADMITTED-True}" \
     HELPER_READY="${HELPER_READY-1}" \
     WAITING="${WAITING-}" \
+    EXEC_FAILS="${EXEC_FAILS-}" \
+    DELETE_RC="${DELETE_RC-0}" \
+    RETRY_DELAY=0 \
     MOCK_KEY="${D}/leaf.key" \
     MOCK_CA="${D}/ca.pem" \
     MOCK_FULLCHAIN="${D}/fullchain.pem" \
@@ -231,4 +237,23 @@ issue() {
   [[ "$output" == *"did not finish within"* ]]
   [[ "$output" == *"mock event"* ]]
   grep -E '^delete route/acme-http01-' "$OC_LOG"
+}
+
+@test "mocked API drop during copy retries and keeps the certificate" {
+  EXEC_FAILS=2 issue
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Issued app.example.gov.bc.ca"* ]]
+  cmp -s "${D}/out/tls.key" "${D}/leaf.key"
+}
+
+@test "mocked API loss during copy fails with a clear error" {
+  EXEC_FAILS=99 issue
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not copy the private key"* ]]
+}
+
+@test "failed cleanup warns with the sweep command" {
+  DELETE_RC=1 LEGO_EXIT=1 issue
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"oc delete route,service,pod,networkpolicy -l app.kubernetes.io/managed-by=acme-http01"* ]]
 }
