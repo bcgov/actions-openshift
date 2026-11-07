@@ -156,6 +156,12 @@ issue() {
   [ "$(grep -c 'image: ' <<<"$output")" -eq 2 ]
 }
 
+@test "containers keep hardening without runAsNonRoot" {
+  RENDER_ONLY=true run bash "$SCRIPT"
+  [ "$(grep -c 'allowPrivilegeEscalation: false, capabilities: {drop: \[ALL\]}' <<<"$output")" -eq 2 ]
+  [[ "$output" != *"runAsNonRoot: true"* ]]
+}
+
 @test "email with quotes is YAML-escaped so it stays one arg" {
   ACME_EMAIL='ops"evil@example.gov.bc.ca' RENDER_ONLY=true run bash "$SCRIPT"
   [ "$status" -eq 0 ]

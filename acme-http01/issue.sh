@@ -77,6 +77,7 @@ items:
     restartPolicy: Never
     activeDeadlineSeconds: $((TIMEOUT + 120))
     volumes: [{name: data, emptyDir: {}}]
+    # No runAsNonRoot: the lego image sets no user, so the kubelet refuses to start it
     containers:
     - name: lego
       image: ${LEGO_IMAGE}
@@ -86,13 +87,13 @@ items:
       ports: [{containerPort: 8080}]
       volumeMounts: [{name: data, mountPath: /data}]
       resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}
-      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, runAsNonRoot: true}
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
     - name: helper
       image: ${LEGO_IMAGE}
       command: [sleep, "$((TIMEOUT + 60))"]
       volumeMounts: [{name: data, mountPath: /data}]
       resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 64Mi}}
-      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, runAsNonRoot: true}
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
 - apiVersion: v1
   kind: Service
   metadata:
