@@ -16,9 +16,9 @@ Cleans up Helm releases, labeled resources, and PVCs in a target OpenShift names
 GitHub Action that applies an OpenShift Route with a custom TLS certificate (openssl checks and archival backups).
 * See [route-tls/README.md](./route-tls/README.md) for secrets, inputs, and usage.
 
-### 2a. [ACME HTTP-01](./acme-http01) (Composite Action)
-Issues a per-host certificate via ACME HTTP-01 (Let's Encrypt staging by default) with a throwaway challenge Route, and outputs PEMs for `route-tls`.
-* See [acme-http01/README.md](./acme-http01/README.md) for the standalone workflow, staging/production and rate limits.
+### 2a. [cert-keeper](./cert-keeper) (Composite Action)
+Keeps a host's SSL/TLS certificate valid on an OpenShift Route: gets a free Let's Encrypt certificate when the host has none or is running low, installs it with `route-tls`, and cleans up.
+* See [cert-keeper/README.md](./cert-keeper/README.md) for the daily workflow, how it decides, and rate limits.
 
 
 ### 3. [Image Import](./image-import) (Composite Action)

@@ -6,23 +6,26 @@
 setup_file() {
   D="$BATS_FILE_TMPDIR"
   openssl req -x509 -newkey rsa:2048 -keyout "${D}/key.pem" -out "${D}/ok.pem" -days 365 -nodes -subj "/CN=localhost" 2> /dev/null
-  openssl req -x509 -key "${D}/key.pem" -out "${D}/soon.pem" -days 5 -subj "/CN=localhost" 2> /dev/null
+  # 90-day certificate with 20 days left: due at a third of its lifetime (30 days)
+  openssl req -x509 -key "${D}/key.pem" -out "${D}/soon.pem" -not_before "$(date -u -d '70 days ago' +%Y%m%d%H%M%SZ)" -not_after "$(date -u -d '20 days' +%Y%m%d%H%M%SZ)" -subj "/CN=localhost" 2> /dev/null
+  # A certificate for another name, like the router default served to a host with no Route
+  openssl req -x509 -key "${D}/key.pem" -out "${D}/other.pem" -days 365 -subj "/CN=example.invalid" 2> /dev/null
   openssl req -x509 -key "${D}/key.pem" -out "${D}/old.pem" -not_before 20200101000000Z -not_after 20210101000000Z -subj "/CN=localhost" 2> /dev/null
 
   # Free ports: bind, read the number, release
-  read -r OK_PORT SOON_PORT OLD_PORT CLOSED_PORT < <(python3 -c '
+  read -r OK_PORT SOON_PORT OLD_PORT OTHER_PORT CLOSED_PORT < <(python3 -c '
 import socket
-s=[socket.socket() for _ in range(4)]
+s=[socket.socket() for _ in range(5)]
 for x in s: x.bind(("127.0.0.1",0))
 print(*[x.getsockname()[1] for x in s])
 for x in s: x.close()')
-  export OK_PORT SOON_PORT OLD_PORT CLOSED_PORT
+  export OK_PORT SOON_PORT OLD_PORT OTHER_PORT CLOSED_PORT
 
-  for pair in "ok:${OK_PORT}" "soon:${SOON_PORT}" "old:${OLD_PORT}"; do
+  for pair in "ok:${OK_PORT}" "soon:${SOON_PORT}" "old:${OLD_PORT}" "other:${OTHER_PORT}"; do
     openssl s_server -quiet -accept "127.0.0.1:${pair#*:}" -cert "${D}/${pair%%:*}.pem" -key "${D}/key.pem" -www < /dev/null > /dev/null 2>&1 &
     echo "$!" >> "${D}/pids"
   done
-  for port in "$OK_PORT" "$SOON_PORT" "$OLD_PORT"; do
+  for port in "$OK_PORT" "$SOON_PORT" "$OLD_PORT" "$OTHER_PORT"; do
     for _ in $(seq 50); do
       (exec 3<> "/dev/tcp/127.0.0.1/${port}") 2> /dev/null && break
       sleep 0.1
@@ -39,7 +42,7 @@ setup() {
   export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/output"
   export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary"
   : > "$GITHUB_OUTPUT"
-  export INPUT_HOSTS="" INPUT_DAYS=30 INPUT_TIMEOUT=5 INPUT_FAIL_ON_FINDINGS=true
+  export INPUT_HOSTS="" INPUT_LIFETIME_DIVISOR=3 INPUT_MARGIN_DAYS=0 INPUT_TIMEOUT=5 INPUT_FAIL_ON_FINDINGS=true
 }
 
 findings() {
@@ -55,19 +58,40 @@ findings() {
   grep -q "| localhost:${OK_PORT} | ok |" "$GITHUB_STEP_SUMMARY"
 }
 
-@test "certificate expiring within days is a finding and fails" {
+@test "certificate with a third of its lifetime or less left is a finding and fails" {
   INPUT_HOSTS="localhost:${SOON_PORT}" run bash "$SCRIPT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"::warning::localhost:${SOON_PORT} certificate expires"* ]]
   [[ "$output" == *"Fix: "* ]]
   [ "$(findings | jq -r '.[0].status')" = "expiring" ]
-  [ "$(findings | jq -r '.[0].days_left')" -le 5 ]
+  [ "$(findings | jq -r '.[0].days_left')" -ge 19 ]
+  [ "$(findings | jq -r '.[0].days_left')" -le 20 ]
+  [ "$(findings | jq -r '.[0].lifetime_days')" = "90" ]
+  [ -n "$(findings | jq -r '.[0].not_before')" ]
 }
 
-@test "days threshold decides: 5-day certificate is fine with days: 1" {
-  INPUT_HOSTS="localhost:${SOON_PORT}" INPUT_DAYS=1 run bash "$SCRIPT"
+@test "lifetime_divisor decides: 20 of 90 days left is fine at 1/100" {
+  INPUT_HOSTS="localhost:${SOON_PORT}" INPUT_LIFETIME_DIVISOR=100 run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$(findings)" = "[]" ]
+}
+
+@test "margin_days delays the report: 20 days left is fine at 1/3 minus 15 days, not minus 3" {
+  INPUT_HOSTS="localhost:${SOON_PORT}" INPUT_MARGIN_DAYS=15 run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(findings)" = "[]" ]
+  : > "$GITHUB_OUTPUT"
+  INPUT_HOSTS="localhost:${SOON_PORT}" INPUT_MARGIN_DAYS=3 run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [ "$(findings | jq -r '.[0].status')" = "expiring" ]
+}
+
+@test "a certificate for another name is uncovered even though it is far from expiry" {
+  INPUT_HOSTS="localhost:${OTHER_PORT}" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::warning::localhost:${OTHER_PORT} serves a certificate that does not cover it"* ]]
+  [ "$(findings | jq -r '.[0].status')" = "uncovered" ]
+  [ "$(findings | jq -r '.[0].days_left')" -gt 300 ]
 }
 
 @test "expired certificate is a finding" {
@@ -96,11 +120,17 @@ findings() {
   ! grep -q "BEGIN" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY"
 }
 
-@test "invalid days fails with a Fix line" {
-  for d in 0 abc 3651 "" 1.5; do
-    INPUT_HOSTS="localhost:${OK_PORT}" INPUT_DAYS="$d" run bash "$SCRIPT"
+@test "invalid lifetime_divisor and margin_days fail with Fix lines" {
+  for d in 0 1 abc 101 "" 1.5; do
+    INPUT_HOSTS="localhost:${OK_PORT}" INPUT_LIFETIME_DIVISOR="$d" run bash "$SCRIPT"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"::error::days must be a whole number"* ]]
+    [[ "$output" == *"::error::lifetime_divisor must be a whole number"* ]]
+    [[ "$output" == *"Fix: "* ]]
+  done
+  for m in abc -1 3651 "" 1.5; do
+    INPUT_HOSTS="localhost:${OK_PORT}" INPUT_MARGIN_DAYS="$m" run bash "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error::margin_days must be a whole number"* ]]
     [[ "$output" == *"Fix: "* ]]
   done
 }
@@ -129,7 +159,7 @@ findings() {
 }
 
 @test "multi-line hosts: blank lines and comments skipped, duplicates removed" {
-  INPUT_HOSTS=$'localhost:'"${OK_PORT}"$'\n\n# vanity host unset\nLOCALHOST:'"${OK_PORT}"$'\nlocalhost:'"${SOON_PORT}" INPUT_DAYS=1 run bash "$SCRIPT"
+  INPUT_HOSTS=$'localhost:'"${OK_PORT}"$'\n\n# vanity host unset\nLOCALHOST:'"${OK_PORT}"$'\nlocalhost:'"${SOON_PORT}" INPUT_LIFETIME_DIVISOR=100 run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   grep -qx "checked=2" "$GITHUB_OUTPUT"
 }

@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
-# acme-http01 rejects bad input before touching a cluster, renders a
+# cert-keeper issuing rejects bad input before touching a cluster, renders a
 # plain-HTTP path-scoped challenge Route, and (with a mocked oc) exercises
 # apply → poll → PEM extract → outputs → EXIT cleanup.
 
 setup() {
-  SCRIPT="${BATS_TEST_DIRNAME}/../../../acme-http01/issue.sh"
+  SCRIPT="${BATS_TEST_DIRNAME}/../../../cert-keeper/issue.sh"
   D="$BATS_TEST_TMPDIR"
   export ACME_HOST=app.example.gov.bc.ca ACME_EMAIL=ops@example.gov.bc.ca OC=false
   unset GITHUB_ACTIONS GITHUB_OUTPUT GITHUB_STEP_SUMMARY
@@ -97,7 +97,7 @@ issue() {
     MOCK_FULLCHAIN="${D}/fullchain.pem" \
     ACME_HOST="${ACME_HOST}" \
     ACME_EMAIL="${ACME_EMAIL}" \
-    ACME_SERVER="${ACME_SERVER:-staging}" \
+    CA="${CA:-letsencrypt-staging}" \
     TIMEOUT="${TIMEOUT:-30}" \
     OUT_DIR="${D}/out" \
     RUNNER_TEMP="$D" \
@@ -122,20 +122,21 @@ issue() {
   [ "$status" -eq 1 ]
 }
 
-@test "rejects unknown acme_server" {
-  ACME_SERVER=other run bash "$SCRIPT"
+@test "rejects unknown ca" {
+  CA=other run bash "$SCRIPT"
   [ "$status" -eq 1 ]
 }
 
-@test "staging is the default server" {
+@test "production is the default CA" {
   RENDER_ONLY=true run bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  [[ "$output" == *acme-staging-v02* ]]
+  [[ "$output" == *"https://acme-v02.api.letsencrypt.org/directory"* ]]
+  [[ "$output" != *acme-staging* ]]
 }
 
-@test "production uses the production directory" {
-  ACME_SERVER=production RENDER_ONLY=true run bash "$SCRIPT"
-  [[ "$output" == *"https://acme-v02.api.letsencrypt.org/directory"* ]]
+@test "letsencrypt-staging uses the staging directory" {
+  CA=letsencrypt-staging RENDER_ONLY=true run bash "$SCRIPT"
+  [[ "$output" == *"https://acme-staging-v02.api.letsencrypt.org/directory"* ]]
 }
 
 @test "challenge Route is path-scoped with no tls block" {
@@ -189,10 +190,10 @@ issue() {
   cmp -s "${D}/out/tls.crt" "${D}/leaf.pem"
   cmp -s "${D}/out/ca.pem" "${D}/ca.pem"
   cmp -s "${D}/out/tls.key" "${D}/leaf.key"
-  grep -E '^delete route/acme-http01-' "$OC_LOG"
-  grep -E 'service/acme-http01-' "$OC_LOG"
-  grep -E 'pod/acme-http01-' "$OC_LOG"
-  grep -E 'networkpolicy/acme-http01-' "$OC_LOG"
+  grep -E '^delete route/cert-keeper-' "$OC_LOG"
+  grep -E 'service/cert-keeper-' "$OC_LOG"
+  grep -E 'pod/cert-keeper-' "$OC_LOG"
+  grep -E 'networkpolicy/cert-keeper-' "$OC_LOG"
   grep -E '^apply ' "$OC_LOG"
   grep -F 'helper' "$OC_LOG" | grep -F 'running.startedAt'
   grep -E '^exec ' "$OC_LOG"
@@ -202,10 +203,10 @@ issue() {
   LEGO_EXIT=1 issue
   [ "$status" -eq 1 ]
   [[ "$output" == *"lego exited 1"* ]]
-  grep -E '^delete route/acme-http01-' "$OC_LOG"
-  grep -E 'service/acme-http01-' "$OC_LOG"
-  grep -E 'pod/acme-http01-' "$OC_LOG"
-  grep -E 'networkpolicy/acme-http01-' "$OC_LOG"
+  grep -E '^delete route/cert-keeper-' "$OC_LOG"
+  grep -E 'service/cert-keeper-' "$OC_LOG"
+  grep -E 'pod/cert-keeper-' "$OC_LOG"
+  grep -E 'networkpolicy/cert-keeper-' "$OC_LOG"
   ! grep -E '^exec ' "$OC_LOG"
 }
 
@@ -214,10 +215,10 @@ issue() {
   LEGO_EXIT='' ADMITTED=False issue
   [ "$status" -eq 1 ]
   [[ "$output" == *"was not admitted"* ]]
-  grep -E '^delete route/acme-http01-' "$OC_LOG"
-  grep -E 'service/acme-http01-' "$OC_LOG"
-  grep -E 'pod/acme-http01-' "$OC_LOG"
-  grep -E 'networkpolicy/acme-http01-' "$OC_LOG"
+  grep -E '^delete route/cert-keeper-' "$OC_LOG"
+  grep -E 'service/cert-keeper-' "$OC_LOG"
+  grep -E 'pod/cert-keeper-' "$OC_LOG"
+  grep -E 'networkpolicy/cert-keeper-' "$OC_LOG"
   ! grep -E '^exec ' "$OC_LOG"
 }
 
@@ -227,7 +228,7 @@ issue() {
   [[ "$output" == *"cannot start: ImagePullBackOff"* ]]
   [[ "$output" == *"mock container state"* ]]
   [[ "$output" == *"mock event"* ]]
-  grep -E '^delete route/acme-http01-' "$OC_LOG"
+  grep -E '^delete route/cert-keeper-' "$OC_LOG"
   ! grep -E '^exec ' "$OC_LOG"
 }
 
@@ -236,7 +237,7 @@ issue() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"did not finish within"* ]]
   [[ "$output" == *"mock event"* ]]
-  grep -E '^delete route/acme-http01-' "$OC_LOG"
+  grep -E '^delete route/cert-keeper-' "$OC_LOG"
 }
 
 @test "mocked API drop during copy retries and keeps the certificate" {
@@ -255,5 +256,5 @@ issue() {
 @test "failed cleanup warns with the sweep command" {
   DELETE_RC=1 LEGO_EXIT=1 issue
   [ "$status" -eq 1 ]
-  [[ "$output" == *"oc delete route,service,pod,networkpolicy -l app.kubernetes.io/managed-by=acme-http01"* ]]
+  [[ "$output" == *"oc delete route,service,pod,networkpolicy -l app.kubernetes.io/managed-by=cert-keeper"* ]]
 }

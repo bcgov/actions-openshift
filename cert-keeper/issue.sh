@@ -7,10 +7,10 @@ set -euo pipefail
 
 ACME_HOST="${ACME_HOST:-}"
 ACME_EMAIL="${ACME_EMAIL:-}"
-ACME_SERVER="${ACME_SERVER:-staging}"
+CA="${CA:-letsencrypt}"
 KEY_TYPE="${KEY_TYPE:-rsa2048}"
 TIMEOUT="${TIMEOUT:-300}"
-OUT_DIR="${OUT_DIR:-${RUNNER_TEMP:-/tmp}/acme-http01}"
+OUT_DIR="${OUT_DIR:-${RUNNER_TEMP:-/tmp}/cert-keeper}"
 # Pinned image; override only for mirrors
 LEGO_IMAGE="${LEGO_IMAGE:-docker.io/goacme/lego:v5.6.0@sha256:6f1583fc026a455ea46a7a5858c576105bb69c2e2de69db391cab7f14750350c}"
 OC="${OC:-oc}"
@@ -20,7 +20,7 @@ RETRY_DELAY="${RETRY_DELAY:-10}"
 CHALLENGE_DELAY=20s
 
 die() {
-  if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::error title=ACME HTTP-01::$*"; else echo "error: $*" >&2; fi
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::error title=cert-keeper::$*"; else echo "error: $*" >&2; fi
   exit 1
 }
 
@@ -48,10 +48,10 @@ yaml_dq() {
   || die "hostname must be one lowercase FQDN, no scheme, port, path or wildcard."
 [[ "$ACME_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || die "email is not an address."
 [[ "$TIMEOUT" =~ ^[0-9]+$ ]] && [ "$TIMEOUT" -ge 30 ] || die "timeout must be an integer >= 30."
-case "$ACME_SERVER" in
-  staging) server_url="https://acme-staging-v02.api.letsencrypt.org/directory" ;;
-  production) server_url="https://acme-v02.api.letsencrypt.org/directory" ;;
-  *) die "acme_server must be staging or production." ;;
+case "$CA" in
+  letsencrypt-staging) server_url="https://acme-staging-v02.api.letsencrypt.org/directory" ;;
+  letsencrypt) server_url="https://acme-v02.api.letsencrypt.org/directory" ;;
+  *) die "ca must be letsencrypt or letsencrypt-staging." ;;
 esac
 KEY_TYPE="${KEY_TYPE^^}"
 case "$KEY_TYPE" in EC256|EC384|RSA2048|RSA3072|RSA4096) ;; *) die "unsupported key_type." ;; esac
@@ -60,7 +60,7 @@ email_yaml="$(yaml_dq "$ACME_EMAIL")"
 
 # Short unique name; label used for cleanup sweeps
 suffix="$(printf '%s' "${ACME_HOST}${GITHUB_RUN_ID:-}${RANDOM}" | sha256sum | cut -c1-8)"
-NAME="acme-http01-${suffix}"
+NAME="cert-keeper-${suffix}"
 
 render() {
   cat <<YAML
@@ -72,9 +72,9 @@ items:
   kind: NetworkPolicy
   metadata:
     name: ${NAME}
-    labels: {app.kubernetes.io/managed-by: acme-http01}
+    labels: {app.kubernetes.io/managed-by: cert-keeper}
   spec:
-    podSelector: {matchLabels: {acme-http01/name: ${NAME}}}
+    podSelector: {matchLabels: {cert-keeper/name: ${NAME}}}
     ingress:
     - from:
       - namespaceSelector: {matchLabels: {network.openshift.io/policy-group: ingress}}
@@ -83,7 +83,7 @@ items:
   kind: Pod
   metadata:
     name: ${NAME}
-    labels: {app.kubernetes.io/managed-by: acme-http01, acme-http01/name: ${NAME}}
+    labels: {app.kubernetes.io/managed-by: cert-keeper, cert-keeper/name: ${NAME}}
   spec:
     restartPolicy: Never
     activeDeadlineSeconds: $((TIMEOUT + 120))
@@ -109,15 +109,15 @@ items:
   kind: Service
   metadata:
     name: ${NAME}
-    labels: {app.kubernetes.io/managed-by: acme-http01}
+    labels: {app.kubernetes.io/managed-by: cert-keeper}
   spec:
-    selector: {acme-http01/name: ${NAME}}
+    selector: {cert-keeper/name: ${NAME}}
     ports: [{name: http, port: 8080, targetPort: 8080}]
 - apiVersion: route.openshift.io/v1
   kind: Route
   metadata:
     name: ${NAME}
-    labels: {app.kubernetes.io/managed-by: acme-http01}
+    labels: {app.kubernetes.io/managed-by: cert-keeper}
   spec:
     host: ${ACME_HOST}
     path: /.well-known/acme-challenge
@@ -138,7 +138,7 @@ diagnostics() {
 
 cleanup() {
   retry "$OC" delete "route/${NAME}" "service/${NAME}" "pod/${NAME}" "networkpolicy/${NAME}" --ignore-not-found --wait=false >/dev/null 2>&1 \
-    || echo "::warning title=ACME HTTP-01::could not delete ${NAME}; sweep with: oc delete route,service,pod,networkpolicy -l app.kubernetes.io/managed-by=acme-http01"
+    || echo "::warning title=cert-keeper::could not delete ${NAME}; sweep with: oc delete route,service,pod,networkpolicy -l app.kubernetes.io/managed-by=cert-keeper"
 }
 trap cleanup EXIT
 
@@ -146,7 +146,7 @@ trap cleanup EXIT
 # vanity Route (edge + Redirect) keeps serving everything else.
 render | "$OC" apply -f - >/dev/null
 
-echo "Waiting up to ${TIMEOUT}s for lego (${ACME_SERVER}) on ${ACME_HOST}"
+echo "Waiting up to ${TIMEOUT}s for lego (${CA}) on ${ACME_HOST}"
 deadline=$((SECONDS + TIMEOUT))
 state=""
 while [ "$SECONDS" -lt "$deadline" ]; do
@@ -201,5 +201,5 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "not_after=${not_after}"
   } >> "$GITHUB_OUTPUT"
 fi
-[ -z "${GITHUB_STEP_SUMMARY:-}" ] || printf '%s\n' "### ACME HTTP-01" "" "- host=${ACME_HOST} server=${ACME_SERVER} notAfter=${not_after}" >> "$GITHUB_STEP_SUMMARY"
-echo "Issued ${ACME_HOST} (${ACME_SERVER}), notAfter ${not_after}; PEMs in ${OUT_DIR}"
+[ -z "${GITHUB_STEP_SUMMARY:-}" ] || printf '%s\n' "### cert-keeper" "" "- host=${ACME_HOST} ca=${CA} notAfter=${not_after}" >> "$GITHUB_STEP_SUMMARY"
+echo "Issued ${ACME_HOST} (${CA}), notAfter ${not_after}; PEMs in ${OUT_DIR}"
