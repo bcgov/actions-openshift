@@ -92,6 +92,8 @@ issue() {
     EXEC_FAILS="${EXEC_FAILS-}" \
     DELETE_RC="${DELETE_RC-0}" \
     RETRY_DELAY=0 \
+    COPY_WINDOW="${COPY_WINDOW-1}" \
+    CLEANUP_WINDOW="${CLEANUP_WINDOW-1}" \
     MOCK_KEY="${D}/leaf.key" \
     MOCK_CA="${D}/ca.pem" \
     MOCK_FULLCHAIN="${D}/fullchain.pem" \
@@ -161,6 +163,16 @@ issue() {
   RENDER_ONLY=true run bash "$SCRIPT"
   [ "$(grep -c 'image: docker.io/goacme/lego:.*@sha256:' <<<"$output")" -eq 2 ]
   [ "$(grep -c 'image: ' <<<"$output")" -eq 2 ]
+}
+
+@test "the Pod and its helper outlive the retry window, so a slow API cannot lose the certificate" {
+  RENDER_ONLY=true run bash "$SCRIPT"
+  # TIMEOUT 300 + COPY_WINDOW 900, plus 120 for the Pod and 60 for the helper
+  [[ "$output" == *"activeDeadlineSeconds: 1320"* ]]
+  [[ "$output" == *'command: [sleep, "1260"]'* ]]
+  COPY_WINDOW=1800 TIMEOUT=60 RENDER_ONLY=true run bash "$SCRIPT"
+  [[ "$output" == *"activeDeadlineSeconds: 1980"* ]]
+  [[ "$output" == *'command: [sleep, "1920"]'* ]]
 }
 
 @test "containers keep hardening without runAsNonRoot" {

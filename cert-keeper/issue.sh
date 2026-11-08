@@ -15,6 +15,11 @@ OUT_DIR="${OUT_DIR:-${RUNNER_TEMP:-/tmp}/cert-keeper}"
 LEGO_IMAGE="${LEGO_IMAGE:-docker.io/goacme/lego:v5.6.0@sha256:6f1583fc026a455ea46a7a5858c576105bb69c2e2de69db391cab7f14750350c}"
 OC="${OC:-oc}"
 RETRY_DELAY="${RETRY_DELAY:-10}"
+# How long to keep retrying the PEM copy, and the Pod outlives it: the API can
+# refuse connections for minutes after issuance, and a finished Pod cannot be
+# exec'd into, which loses the certificate
+COPY_WINDOW="${COPY_WINDOW:-900}"
+CLEANUP_WINDOW="${CLEANUP_WINDOW:-300}"
 # Time for the router to load the Route before ACME validates; a miss counts
 # against the 5 failed validations per host per hour limit
 CHALLENGE_DELAY=20s
@@ -26,12 +31,13 @@ die() {
 
 # The API can drop for a minute or two; an issued certificate must survive that
 retry() {
-  local attempt
-  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  local until=$((SECONDS + $1))
+  shift
+  while true; do
     "$@" && return 0
-    [ "$attempt" -eq 12 ] || sleep "$RETRY_DELAY"
+    [ "$SECONDS" -lt "$until" ] || return 1
+    sleep "$RETRY_DELAY"
   done
-  return 1
 }
 
 # Escape a value for a double-quoted YAML scalar so it stays one array element
@@ -86,7 +92,7 @@ items:
     labels: {app.kubernetes.io/managed-by: cert-keeper, cert-keeper/name: ${NAME}}
   spec:
     restartPolicy: Never
-    activeDeadlineSeconds: $((TIMEOUT + 120))
+    activeDeadlineSeconds: $((TIMEOUT + COPY_WINDOW + 120))
     volumes: [{name: data, emptyDir: {}}]
     # No runAsNonRoot: the lego image sets no user, so the kubelet refuses to start it
     containers:
@@ -101,7 +107,7 @@ items:
       securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
     - name: helper
       image: ${LEGO_IMAGE}
-      command: [sleep, "$((TIMEOUT + 60))"]
+      command: [sleep, "$((TIMEOUT + COPY_WINDOW + 60))"]
       volumeMounts: [{name: data, mountPath: /data}]
       resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 64Mi}}
       securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
@@ -137,7 +143,7 @@ diagnostics() {
 }
 
 cleanup() {
-  retry "$OC" delete "route/${NAME}" "service/${NAME}" "pod/${NAME}" "networkpolicy/${NAME}" --ignore-not-found --wait=false >/dev/null 2>&1 \
+  retry "$CLEANUP_WINDOW" "$OC" delete "route/${NAME}" "service/${NAME}" "pod/${NAME}" "networkpolicy/${NAME}" --ignore-not-found --wait=false >/dev/null 2>&1 \
     || echo "::warning title=cert-keeper::could not delete ${NAME}; sweep with: oc delete route,service,pod,networkpolicy -l app.kubernetes.io/managed-by=cert-keeper"
 }
 trap cleanup EXIT
@@ -180,9 +186,9 @@ done
 
 mkdir -p "$OUT_DIR" && chmod 700 "$OUT_DIR"
 fetch() { "$OC" exec "pod/${NAME}" -c helper -- sh -c "cat \$(ls /data/lego/certificates/*$1 | head -1)" > "$2"; }
-retry fetch "${ACME_HOST}.key" "${OUT_DIR}/tls.key" || die "could not copy the private key from ${NAME}."
-retry fetch "${ACME_HOST}.crt" "${OUT_DIR}/fullchain.pem" || die "could not copy the certificate from ${NAME}."
-retry fetch "${ACME_HOST}.issuer.crt" "${OUT_DIR}/ca.pem" || die "could not copy the issuer chain from ${NAME}."
+retry "$COPY_WINDOW" fetch "${ACME_HOST}.key" "${OUT_DIR}/tls.key" || die "could not copy the private key from ${NAME}."
+retry "$COPY_WINDOW" fetch "${ACME_HOST}.crt" "${OUT_DIR}/fullchain.pem" || die "could not copy the certificate from ${NAME}."
+retry "$COPY_WINDOW" fetch "${ACME_HOST}.issuer.crt" "${OUT_DIR}/ca.pem" || die "could not copy the issuer chain from ${NAME}."
 # Leaf = first cert of the bundle
 awk '/BEGIN CERTIFICATE/{n++} n==1' "${OUT_DIR}/fullchain.pem" > "${OUT_DIR}/tls.crt"
 chmod 600 "${OUT_DIR}"/*
