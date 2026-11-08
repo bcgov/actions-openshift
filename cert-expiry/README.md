@@ -82,6 +82,10 @@ Invalid inputs (a URL instead of a hostname, a bad port, `lifetime_divisor: 1`, 
 
 The step summary has a table of every host with its status, expiry date and days left.
 
+## Upgrading from `days`
+
+`days` is gone: a fixed number of days stops working as certificate lifetimes shrink (30 days is most of a 47 day certificate). Delete `days` from the `with:` block to get the default, which reports a certificate when a third of its own lifetime is left (about 66 days on a 198 day certificate, 15 on a 47 day one). To report later, add `margin_days`, for example `margin_days: "3"`. There is no fixed-days mode, and a caller still passing `days` fails at the input check.
+
 ## Common fixes
 
 | Message | Fix |
