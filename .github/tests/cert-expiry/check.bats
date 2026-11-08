@@ -107,6 +107,18 @@ findings() {
   [ "$(findings | jq -r '.[0].status')" = "unreadable" ]
 }
 
+@test "results lists every host, healthy or not, while findings lists only those needing attention" {
+  INPUT_HOSTS=$'localhost:'"${OK_PORT}"$'\nlocalhost:'"${SOON_PORT}"$'\nlocalhost:'"${CLOSED_PORT}" INPUT_TIMEOUT=2 INPUT_FAIL_ON_FINDINGS=false run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  results="$(sed -n 's/^results=//p' "$GITHUB_OUTPUT")"
+  [ "$(jq length <<< "$results")" -eq 3 ]
+  [ "$(jq -r --arg h "localhost:${OK_PORT}" '.[]|select(.host==$h)|.status' <<< "$results")" = "ok" ]
+  [ "$(jq -r --arg h "localhost:${OK_PORT}" '.[]|select(.host==$h)|.lifetime_days' <<< "$results")" = "365" ]
+  [ "$(jq -r --arg h "localhost:${SOON_PORT}" '.[]|select(.host==$h)|.status' <<< "$results")" = "expiring" ]
+  [ "$(jq -r --arg h "localhost:${CLOSED_PORT}" '.[]|select(.host==$h)|.status' <<< "$results")" = "unreadable" ]
+  [ "$(findings | jq length)" -eq 2 ]
+}
+
 @test "fail_on_findings false reports findings without failing" {
   INPUT_HOSTS=$'localhost:'"${OK_PORT}"$'\nlocalhost:'"${SOON_PORT}" INPUT_FAIL_ON_FINDINGS=false run bash "$SCRIPT"
   [ "$status" -eq 0 ]

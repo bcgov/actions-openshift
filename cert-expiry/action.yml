@@ -26,6 +26,9 @@ outputs:
   findings:
     description: 'JSON array of hosts that need attention: [{"host","status","not_before","not_after","days_left","lifetime_days"}]. status is uncovered, expiring, expired or unreadable. [] when all are fine.'
     value: ${{ steps.check.outputs.findings }}
+  results:
+    description: 'JSON array with one item per host checked, healthy or not, same fields as findings. Use it to read a host without depending on whether it needs attention.'
+    value: ${{ steps.check.outputs.results }}
   checked:
     description: "Number of hosts checked."
     value: ${{ steps.check.outputs.checked }}

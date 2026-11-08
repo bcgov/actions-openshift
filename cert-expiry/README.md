@@ -78,6 +78,7 @@ Invalid inputs (a URL instead of a hostname, a bad port, `lifetime_divisor: 1`, 
 | Output | Description |
 | --- | --- |
 | `findings` | JSON array of hosts that need attention, `[]` when all are fine. Each item has `host`, `status` (`uncovered`, `expiring`, `expired` or `unreadable`), `not_before` and `not_after` (UTC, empty when unreadable), `days_left` and `lifetime_days`. `uncovered` means the certificate served for the host doesn't cover it, which is what a host with no Route of its own gets from the router. |
+| `results` | JSON array with one item per host checked, healthy or not, with the same fields as `findings`. |
 | `checked` | Number of hosts checked, after removing duplicates. |
 
 The step summary has a table of every host with its status, expiry date and days left.

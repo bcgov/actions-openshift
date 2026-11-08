@@ -80,6 +80,7 @@ done <<< "$LIST"
 
 NOW=$(date -u +%s)
 FINDINGS='[]'
+RESULTS='[]'
 {
   echo "## TLS certificate expiry"
   echo ""
@@ -139,15 +140,18 @@ for key in "${ENTRIES[@]}"; do
   esac
   echo "| ${label} | ${status} | ${not_after:--} | ${days_left:--} | ${lifetime_days:--} |" >> "$SUMMARY"
 
+  item=$(jq -cn --arg h "$label" --arg s "$status" --arg b "$not_before" --arg n "$not_after" --arg d "$days_left" --arg l "$lifetime_days" \
+    '{host: $h, status: $s, not_before: $b, not_after: $n, days_left: $d, lifetime_days: $l}')
+  RESULTS=$(jq -c --argjson i "$item" '. + [$i]' <<< "$RESULTS")
   if [[ "$status" != ok ]]; then
-    FINDINGS=$(jq -c --arg h "$label" --arg s "$status" --arg b "$not_before" --arg n "$not_after" --arg d "$days_left" --arg l "$lifetime_days" \
-      '. + [{host: $h, status: $s, not_before: $b, not_after: $n, days_left: $d, lifetime_days: $l}]' <<< "$FINDINGS")
+    FINDINGS=$(jq -c --argjson i "$item" '. + [$i]' <<< "$FINDINGS")
   fi
 done
 
 COUNT=$(jq length <<< "$FINDINGS")
 {
   echo "findings=${FINDINGS}"
+  echo "results=${RESULTS}"
   echo "checked=${#ENTRIES[@]}"
 } >> "$OUT"
 echo "" >> "$SUMMARY"

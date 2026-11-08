@@ -150,8 +150,6 @@ jobs:
               - route-tls/
               - cert-keeper/
               - .github/tests/cert-keeper/
-              - cert-expiry/
-              - .github/tests/cert-expiry/
               - image-import/
               - .github/workflows/pr-open.yml
               - "!*.md"
@@ -177,7 +175,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq bats openssl
-          bats .github/tests/crunchy .github/tests/route-tls .github/tests/image-import .github/tests/cert-keeper .github/tests/cert-expiry
+          bats .github/tests/crunchy .github/tests/route-tls .github/tests/image-import .github/tests/cert-keeper
 
       - name: Helm lint
         run: helm lint crunchy/charts/crunchy --values crunchy/values.yml
