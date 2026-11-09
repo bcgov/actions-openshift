@@ -3,7 +3,7 @@
 Repository facts and constraints for automated coding assistants.
 
 ## Layout
-- Composite actions: `cert-expiry/`, `cleanup-pr/`, `crunchy/`, `deployer/`, `image-import/`, `oc-runner/`, `pg-upgrade/`, `route-tls/`, `cert-keeper/`, `sysdig-monitor/`
+- Composite actions: `cert-expiry/`, `cleanup-pr/`, `crunchy/`, `deployer/`, `image-import/`, `oc-runner/`, `pg-upgrade/`, `cert-keeper/`, `sysdig-monitor/`
 - Helm chart: `crunchy/charts/crunchy` (`crunchy/values.yml`). OpenShift templates: `deployer/templates/`, `oc-runner/cronjob/openshift.deploy.yml`
 - Workflows: `.github/workflows/` (checks: `pr-open.yml`, `pr-close.yml`, `cert-expiry-tests.yml`, `oc-runner-commands.yml`, `pg-upgrade.yml`; reachability records: `probe-runner-reachability.yml`, weekly report `probe-runner-report.yml`; reusable: `.deployer.yml`, `.pr-close.yml`, `.schema-spy.yml`)
 - Tests: `.github/tests/` (bats). Script-injection audit: `scripts/audit_composite_actions.py`
@@ -11,7 +11,7 @@ Repository facts and constraints for automated coding assistants.
 ## Build, test, deploy
 - No package build. Lint workflows: `docker run --rm -v "$(pwd)":/repo -w /repo rhysd/actionlint:latest`. Audit: `python3 scripts/audit_composite_actions.py`. ShellCheck: `shellcheck --severity=warning` on `*.sh` (except `crunchy/`) and `python3 scripts/shellcheck_composite_actions.py`
 - Unit tests: `bats .github/tests/*`. Chart: `helm lint crunchy/charts/crunchy --values crunchy/values.yml`
-- OpenShift deploys run from GitHub Actions, not a workstation. Same-repo pull requests exercise deployer and route-tls; `pr-close.yml` removes the deployer test resources. Workstation scripts live in [bcgov/devops-scripts](https://github.com/bcgov/devops-scripts)
+- OpenShift deploys run from GitHub Actions, not a workstation. Same-repo pull requests exercise deployer and cert-keeper's install script; `pr-close.yml` removes the deployer test resources. Workstation scripts live in [bcgov/devops-scripts](https://github.com/bcgov/devops-scripts)
 
 ## Inputs and outputs
 
@@ -24,8 +24,8 @@ Repository facts and constraints for automated coding assistants.
 
 ## Action Architecture & Rules
 
-- **`route-tls` is standalone only**: When assisting downstream repositories with custom vanity Route TLS, always implement it as an independent on-demand workflow (`.github/workflows/route-tls.yml` on `workflow_dispatch` with `dry_run` choice defaulting to `true`). **NEVER** embed `route-tls` into `merge.yml`, `release.yml`, or continuous deployment pipelines.
-- **`route_name` is required on `route-tls`**: Never assume a default route name. Check the target repository's deployment templates or existing OpenShift routes. For existing repositories migrated from legacy templates, pass `route_name: ${{ github.event.repository.name }}-prod-frontend-vanity` explicitly; for new standalone routes, use `<repository>-vanity-url` so PR-close sweeps do not delete it.
+- **`cert-keeper` is standalone only**: When assisting downstream repositories with custom vanity Route TLS, always implement it as an independent workflow (`.github/workflows/cert-keeper.yml` on a daily `schedule` and `workflow_dispatch`, as in the cert-keeper README). **NEVER** embed `cert-keeper` into `merge.yml`, `release.yml`, or continuous deployment pipelines.
+- **`route_name` is required on `cert-keeper`**: Never assume a default route name. Check the target repository's deployment templates or existing OpenShift routes. For existing repositories migrated from legacy templates, pass `route_name: ${{ github.event.repository.name }}-prod-frontend-vanity` explicitly; for new standalone routes, use `<repository>-vanity-url` so PR-close sweeps do not delete it.
 - **Secret Management**: Certificates belong in the `prod` GitHub Environment (`TLS_CERTIFICATE`, `TLS_PRIVATE_KEY`, `TLS_CA_CERTIFICATE`). Automated assistants must never manage secrets directly; draft copy-pasteable `gh secret set` commands in chat for human maintainers.
 - **Entrust Certificate Mapping**:
   - `TLS_CERTIFICATE`: leaf only (`<host>.pem`).

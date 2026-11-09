@@ -12,12 +12,8 @@ Every action fails at its first step when a caller passes an input it does not d
 Cleans up Helm releases, labeled resources, and PVCs in a target OpenShift namespace on pull request close or merge.
 * See [cleanup-pr/README.md](./cleanup-pr/README.md) for detailed inputs and usage.
 
-### 2. [Route TLS](./route-tls) (Composite Action)
-GitHub Action that applies an OpenShift Route with a custom TLS certificate (openssl checks and archival backups).
-* See [route-tls/README.md](./route-tls/README.md) for secrets, inputs, and usage.
-
-### 2a. [cert-keeper](./cert-keeper) (Composite Action)
-Keeps a host's SSL/TLS certificate valid on an OpenShift Route: gets a free Let's Encrypt certificate when the host has none or is running low, installs it with `route-tls`, and cleans up.
+### 2. [cert-keeper](./cert-keeper) (Composite Action)
+Keeps a host's SSL/TLS certificate valid on an OpenShift Route: gets a free Let's Encrypt certificate when the host has none or is running low, installs it on the Route, and cleans up.
 * See [cert-keeper/README.md](./cert-keeper/README.md) for the daily workflow, how it decides, and rate limits.
 
 

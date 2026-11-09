@@ -15,7 +15,7 @@ STUB
   export OC="${BATS_TEST_TMPDIR}/bin/oc"
 }
 
-@test "no Route yet: fine, route-tls creates it" {
+@test "no Route yet: fine, the install step creates it" {
   ROUTE_ROW='' run bash "$GUARD"
   [ "$status" -eq 0 ]
   [[ "$output" == *"does not exist yet"* ]]

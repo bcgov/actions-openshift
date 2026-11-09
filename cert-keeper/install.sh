@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OpenShift Route TLS. GitHub Action wrapper: action.yml.
+# Installs a certificate on an OpenShift Route. Run by cert-keeper (action.yml).
 # Run this file locally with the same env vars.
 set -euo pipefail
 
