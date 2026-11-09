@@ -20,16 +20,25 @@ The "third" comes from each certificate's own lifetime, so one rule fits every l
 When a certificate is due:
 
 1. Checks that plain HTTP on port 80 answers for the host (any answer, even a redirect or a 503). Without it, validation cannot work, so it fails early with the reason.
-2. Logs in through [`oc-runner`](../oc-runner) and creates a throwaway Pod (`lego` plus an idle helper), Service, NetworkPolicy and Route named `cert-keeper-<hash>`, labelled `app.kubernetes.io/managed-by=cert-keeper`.
+2. Logs in through [`oc-runner`](../oc-runner) and checks the Route (see [What it touches](#what-it-touches)) before spending a certificate.
+3. Creates a throwaway Pod (`lego` plus an idle helper), Service, NetworkPolicy and Route named `cert-keeper-<hash>`, labelled `app.kubernetes.io/managed-by=cert-keeper`.
    - The Route is **plain HTTP** with `path: /.well-known/acme-challenge` on the same host. The router prefers the longer path, so the vanity Route (edge plus `Redirect`) keeps serving everything else.
    - The NetworkPolicy lets the OpenShift router reach the Pod in default-deny namespaces.
    - lego waits 20 s after starting so the router can load the Route before validation.
    - If the host is owned by a Route in another namespace the challenge Route is not admitted and the action fails fast.
-3. Waits for lego (`timeout`, default 300 s), copies the PEMs out with `oc exec` (retried through short API drops), and checks the leaf matches the host.
-4. Deletes the Pod, Service, NetworkPolicy and Route on success **and** failure. If a runner dies mid-run, sweep with `oc delete route,service,pod,networkpolicy -l app.kubernetes.io/managed-by=cert-keeper`.
-5. Installs the certificate with `route-tls`, which creates the Route if it does not exist and keeps its backups of the old certificate.
+4. Waits for lego (`timeout`, default 300 s), copies the PEMs out with `oc exec` (retried for up to 15 minutes through API drops, with the Pod kept alive that long), and checks the leaf matches the host.
+5. Deletes the Pod, Service, NetworkPolicy and Route on success **and** failure. If a runner dies mid-run, sweep with `oc delete route,service,pod,networkpolicy -l app.kubernetes.io/managed-by=cert-keeper`.
+6. Installs the certificate with `route-tls`, which creates the Route if it does not exist and keeps its backups of the old certificate.
 
 The ACME account key is ephemeral (one per run). Both containers use `goacme/lego`, pinned by digest.
+
+## What it touches
+
+- **One namespace:** `oc_namespace`, and only what the token allows. Nothing outside it.
+- **Temporary objects:** the `cert-keeper-<hash>` Pod, Service, NetworkPolicy and challenge Route, deleted at the end.
+- **One Route:** `route_name`, which `route-tls` rewrites whole: the host, the backend service, and edge TLS with an HTTP redirect. So before it spends a certificate, `cert-keeper` refuses if that Route already exists and serves a different host, or terminates TLS as `passthrough` or `reencrypt`. A different backend service only warns. A Route that does not exist yet is created.
+- **Other Routes:** never changed. A host already claimed by a different Route name stops the install.
+- **Any public hostname works,** not only `*.nrs.gov.bc.ca`: one lowercase FQDN whose DNS points at this cluster's router, with port 80 reachable. A host whose DNS points elsewhere fails validation and leaves nothing behind. Call the action once per host; wildcards are not supported.
 
 ## Usage
 

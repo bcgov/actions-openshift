@@ -107,6 +107,18 @@ runs:
         oc_server: ${{ inputs.oc_server }}
         oc_token: ${{ inputs.oc_token }}
 
+    # Before issuing, so a refusal costs no certificate: route-tls rewrites the
+    # whole Route, so it must be this host's own
+    - name: Check the Route
+      if: steps.decide.outputs.due == 'true'
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        HOST: ${{ inputs.hostname }}
+        ROUTE_NAME: ${{ inputs.route_name }}
+        TARGET_SERVICE: ${{ inputs.target_service }}
+      run: bash "${ACTION_PATH}/route-guard.sh"
+
     - name: Get certificate
       id: issue
       if: steps.decide.outputs.due == 'true'
