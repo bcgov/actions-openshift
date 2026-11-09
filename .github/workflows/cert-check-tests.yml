@@ -1,12 +1,12 @@
-name: Cert Expiry Tests
+name: Cert Check Tests
 
-# Tests for the cert-expiry action: bats unit tests against local openssl
+# Tests for cert-keeper's certificate check: bats unit tests against local openssl
 # s_server certificates, and a live read of a known host (github.com) on both
 # ubuntu-26.04 and ubuntu-slim (the runner quickstart-openshift's scheduled
 # jobs use). Scheduling and notifying belong to each calling repository.
 
-# Always runs on pull requests and main pushes so Cert Expiry Results reports; the test
-# jobs run only when cert-expiry changed (Markdown excluded).
+# Always runs on pull requests and main pushes so Cert Check Results reports; the test
+# jobs run only when the check changed (Markdown excluded).
 on:
   pull_request:
   push:
@@ -21,7 +21,7 @@ permissions: {}
 
 jobs:
   changes:
-    name: Cert Expiry (changes)
+    name: Cert Check (changes)
     permissions:
       contents: read
     runs-on: ubuntu-26.04
@@ -50,14 +50,14 @@ jobs:
         with:
           base: ${{ steps.base.outputs.sha || github.event.before }}
           triggers: |
-            cert-expiry/
+            cert-keeper/check.sh
             shared/inputs.sh
-            .github/tests/cert-expiry/
-            .github/workflows/cert-expiry-tests.yml
+            .github/tests/cert-keeper/check.bats
+            .github/workflows/cert-check-tests.yml
             !*.md
 
   unit:
-    name: Test cert-expiry (bats)
+    name: Test cert check (bats)
     needs: changes
     if: needs.changes.outputs.triggered == 'true'
     permissions: {}
@@ -73,10 +73,10 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq bats parallel openssl
-          bats --jobs 2 .github/tests/cert-expiry
+          bats --jobs 2 .github/tests/cert-keeper/check.bats
 
   known-host:
-    name: Test cert-expiry (known host, ${{ matrix.runner }})
+    name: Test cert check (known host, ${{ matrix.runner }})
     needs: changes
     if: needs.changes.outputs.triggered == 'true'
     permissions: {}
@@ -96,10 +96,14 @@ jobs:
       # covered by the bats tests and the failing step below.
       - name: Known host (github.com)
         id: known
-        uses: $/cert-expiry
-        with:
-          hosts: github.com
-          fail_on_findings: "false"
+        shell: bash
+        env:
+          INPUT_HOSTS: github.com
+          INPUT_LIFETIME_DIVISOR: "3"
+          INPUT_MARGIN_DAYS: "0"
+          INPUT_TIMEOUT: "10"
+          INPUT_FAIL_ON_FINDINGS: "false"
+        run: bash cert-keeper/check.sh
 
       - name: Check known-host result
         env:
@@ -117,10 +121,14 @@ jobs:
       - name: Failing check fails the step (for if failure() notify)
         id: failing
         continue-on-error: true
-        uses: $/cert-expiry
-        with:
-          hosts: github.com:1
-          timeout: "3"
+        shell: bash
+        env:
+          INPUT_HOSTS: github.com:1
+          INPUT_LIFETIME_DIVISOR: "3"
+          INPUT_MARGIN_DAYS: "0"
+          INPUT_TIMEOUT: "3"
+          INPUT_FAIL_ON_FINDINGS: "true"
+        run: bash cert-keeper/check.sh
 
       - name: Check failing step outcome
         env:
@@ -134,7 +142,7 @@ jobs:
 
   # Merge gate for this workflow: always reports, skipped jobs count as passing
   results:
-    name: Cert Expiry Results
+    name: Cert Check Results
     needs:
       - changes
       - unit

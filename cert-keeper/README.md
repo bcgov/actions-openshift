@@ -26,7 +26,7 @@ flowchart TD
 
 ## How it decides
 
-Every run first reads the certificate the host serves today (with [`cert-expiry`](../cert-expiry)) and does nothing unless one of these is true:
+Every run first reads the certificate the host serves today and does nothing unless one of these is true:
 
 | Situation | What it means |
 |---|---|

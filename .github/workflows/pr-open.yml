@@ -622,22 +622,27 @@ jobs:
           verbose: true
           diff_branch: main
 
-      - name: cert-expiry with unknown key
-        id: cert_expiry
+      - name: cert-keeper with unknown key
+        id: cert_keeper
         continue-on-error: true
-        uses: $/cert-expiry
+        uses: $/cert-keeper
         with:
-          hosts: example.com
-          fail_on_findings: "false"
+          hostname: example.com
+          email: ops@example.com
+          route_name: example
+          target_service: example
+          oc_namespace: none
+          oc_server: https://example.invalid:6443
+          oc_token: none
           not_an_input: x
 
       - name: Require failures
         env:
           OC_RUNNER: ${{ steps.oc_runner.outcome }}
-          CERT_EXPIRY: ${{ steps.cert_expiry.outcome }}
+          CERT_KEEPER: ${{ steps.cert_keeper.outcome }}
         run: |
-          echo "oc-runner=$OC_RUNNER cert-expiry=$CERT_EXPIRY"
-          [ "$OC_RUNNER" = failure ] && [ "$CERT_EXPIRY" = failure ] || {
+          echo "oc-runner=$OC_RUNNER cert-keeper=$CERT_KEEPER"
+          [ "$OC_RUNNER" = failure ] && [ "$CERT_KEEPER" = failure ] || {
             echo "::error::An action accepted an undeclared input"; exit 1; }
 
       # The failures above must be the unknown-input diagnostic: run the same
