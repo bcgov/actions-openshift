@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# cert-keeper's gate: decide.sh turns cert-expiry findings into due or not,
+# cert-keeper's gate: decide.sh turns check.sh findings into due or not,
 # and preflight.sh fails early when port 80 does not answer.
 
 setup() {

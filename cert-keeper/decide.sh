@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Decides whether a host needs a new certificate, from the cert-expiry findings.
+# Decides whether a host needs a new certificate, from the findings of check.sh.
 # Due when the served certificate does not cover the host, has expired, or has a
 # third of its own lifetime or less left; or when force is set. An unreadable
 # host is an error: nothing can be issued until DNS and the router answer.
@@ -18,9 +18,9 @@ die() {
 }
 
 [ -n "$HOST" ] || die "HOST is required." "Pass the hostname to check."
-jq -e 'type == "array"' <<< "$FINDINGS" > /dev/null 2>&1 || die "findings is not a JSON array." "Pass the findings output of cert-expiry."
+jq -e 'type == "array"' <<< "$FINDINGS" > /dev/null 2>&1 || die "findings is not a JSON array." "Pass the findings output of the check step."
 
-# cert-expiry reports hosts in lowercase and only lists those needing attention
+# check.sh reports hosts in lowercase and only lists those needing attention
 row="$(jq -c --arg h "${HOST,,}" '[.[] | select(.host == $h)][0] // {}' <<< "$FINDINGS")"
 status="$(jq -r '.status // "ok"' <<< "$row")"
 days_left="$(jq -r '.days_left // ""' <<< "$row")"
@@ -47,7 +47,7 @@ case "$status" in
       reason="the certificate for ${HOST} is not due for renewal"
     fi ;;
   *)
-    die "Unexpected status '${status}' for ${HOST}." "Use a cert-expiry version that reports uncovered, expiring, expired and unreadable." ;;
+    die "Unexpected status '${status}' for ${HOST}." "Use a check.sh that reports uncovered, expiring, expired and unreadable." ;;
 esac
 
 echo "due=${due}" >> "$OUT"
