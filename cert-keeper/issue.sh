@@ -52,7 +52,8 @@ yaml_dq() {
 # Validation (also runs without a cluster)
 [[ "$ACME_HOST" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]] \
   || die "hostname must be one lowercase FQDN, no scheme, port, path or wildcard."
-[[ "$ACME_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || die "email is not an address."
+# The contact email is optional; when given it must look like an address
+[[ -z "$ACME_EMAIL" || "$ACME_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || die "email is not an address."
 [[ "$TIMEOUT" =~ ^[0-9]+$ ]] && [ "$TIMEOUT" -ge 30 ] || die "timeout must be an integer >= 30."
 case "$CA" in
   letsencrypt-staging) server_url="https://acme-staging-v02.api.letsencrypt.org/directory" ;;
@@ -62,7 +63,11 @@ esac
 KEY_TYPE="${KEY_TYPE^^}"
 case "$KEY_TYPE" in EC256|EC384|RSA2048|RSA3072|RSA4096) ;; *) die "unsupported key_type." ;; esac
 
-email_yaml="$(yaml_dq "$ACME_EMAIL")"
+# Passed to lego only when set; lego registers an account without one
+email_args=""
+if [ -n "$ACME_EMAIL" ]; then
+  email_args=", --email, \"$(yaml_dq "$ACME_EMAIL")\""
+fi
 
 # Short unique name; label used for cleanup sweeps
 suffix="$(printf '%s' "${ACME_HOST}${GITHUB_RUN_ID:-}${RANDOM}" | sha256sum | cut -c1-8)"
@@ -98,7 +103,7 @@ items:
     containers:
     - name: lego
       image: ${LEGO_IMAGE}
-      args: [run, --accept-tos, --email, "${email_yaml}", --server, "${server_url}",
+      args: [run, --accept-tos${email_args}, --server, "${server_url}",
              --domains, "${ACME_HOST}", --key-type, "${KEY_TYPE}", --http, --http.address, ":8080",
              --http.delay, "${CHALLENGE_DELAY}", --path, /data/lego]
       ports: [{containerPort: 8080}]

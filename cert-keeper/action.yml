@@ -5,8 +5,9 @@ inputs:
     description: "Hostname to keep certified (e.g. myapp.gov.bc.ca). One host, no scheme, no wildcard. Its A/CNAME must already reach the OpenShift router."
     required: true
   email:
-    description: "ACME account contact email."
-    required: true
+    description: "Optional contact email for the ACME account. Let's Encrypt no longer sends expiry emails and every run uses a new account, so most callers leave it out."
+    required: false
+    default: ""
   route_name:
     description: "Route to create or update with the certificate."
     required: true

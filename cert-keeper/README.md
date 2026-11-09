@@ -67,7 +67,6 @@ The ACME account key is ephemeral (one per run). Both containers use `goacme/leg
 
    ```bash
    gh variable set VANITY_HOST  --env prod --body "myapp.nrs.gov.bc.ca"
-   gh variable set ACME_EMAIL   --env prod --body "team-mailbox@gov.bc.ca"
    gh variable set OC_NAMESPACE --env prod --body "abc123-prod"
    gh variable set OC_SERVER    --env prod --body "https://api.silver.devops.gov.bc.ca:6443"
    gh secret set OC_TOKEN --env prod   # paste the token when prompted
@@ -125,7 +124,6 @@ jobs:
       - uses: bcgov/actions-openshift/cert-keeper@<sha> # vX.Y.Z
         with:
           hostname: ${{ vars.VANITY_HOST }}
-          email: ${{ vars.ACME_EMAIL }}
           route_name: ${{ github.event.repository.name }}-vanity-url
           target_service: ${{ github.event.repository.name }}-prod-frontend
           force: ${{ inputs.force || 'false' }}
@@ -157,7 +155,7 @@ Pin to a release SHA, never `@main`. Also add the host to [`nr-cert-monitor`](ht
 | Input | Required | Default | Notes |
 |---|---|---|---|
 | `hostname` | yes | | One lowercase FQDN, no scheme, port or wildcard |
-| `email` | yes | | ACME contact |
+| `email` | no | none | Optional contact for the ACME account. Let's Encrypt no longer sends expiry emails and each run uses a new account, so leave it out unless you want one |
 | `route_name` | yes | | Route to create or update |
 | `target_service` | yes | | Service the Route sends traffic to |
 | `ca` | no | `letsencrypt` | `letsencrypt` or `letsencrypt-staging`. An omitted value selects production |
@@ -230,6 +228,6 @@ These come from Let's Encrypt's [rate limits page](https://letsencrypt.org/docs/
 ## Local run
 
 ```bash
-oc login ... && ACME_HOST=app.example.gov.bc.ca ACME_EMAIL=me@gov.bc.ca CA=letsencrypt-staging ./issue.sh
-RENDER_ONLY=true ACME_HOST=... ACME_EMAIL=... ./issue.sh   # print the manifests only
+oc login ... && ACME_HOST=app.example.gov.bc.ca CA=letsencrypt-staging ./issue.sh
+RENDER_ONLY=true ACME_HOST=... ./issue.sh   # print the manifests only
 ```
