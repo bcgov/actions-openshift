@@ -5,7 +5,8 @@
 set -euo pipefail
 
 HOSTS="${INPUT_HOSTS:-}"
-DAYS="${INPUT_DAYS-30}"
+DIVISOR="${INPUT_LIFETIME_DIVISOR-3}"
+MARGIN="${INPUT_MARGIN_DAYS-0}"
 TIMEOUT="${INPUT_TIMEOUT-10}"
 FAIL_ON_FINDINGS="${INPUT_FAIL_ON_FINDINGS-true}"
 OUT="${GITHUB_OUTPUT:-/dev/null}"
@@ -27,9 +28,12 @@ for tool in openssl jq timeout; do
   command -v "$tool" > /dev/null || fail "$tool is not installed on this runner." "Use an ubuntu runner, or install $tool before this step."
 done
 
-in_range "$DAYS" 1 3650 \
-  || fail "days must be a whole number from 1 to 3650, got '${DAYS}'." "Set days to a number of days, for example days: 30."
-DAYS=$((10#$DAYS))
+in_range "$DIVISOR" 2 100 \
+  || fail "lifetime_divisor must be a whole number from 2 to 100, got '${DIVISOR}'." "Set lifetime_divisor to 3 to report a certificate when a third of its lifetime is left."
+DIVISOR=$((10#$DIVISOR))
+in_range "$MARGIN" 0 3650 \
+  || fail "margin_days must be a whole number from 0 to 3650, got '${MARGIN}'." "Set margin_days to a number of days, for example margin_days: 3."
+MARGIN=$((10#$MARGIN))
 in_range "$TIMEOUT" 1 120 \
   || fail "timeout must be a whole number from 1 to 120, got '${TIMEOUT}'." "Set timeout to a number of seconds, for example timeout: 10."
 TIMEOUT=$((10#$TIMEOUT))
@@ -75,15 +79,15 @@ done <<< "$LIST"
 ((${#ENTRIES[@]} > 0)) || fail "No hostnames to check." "Set hosts to one or more hostnames, one per line."
 
 NOW=$(date -u +%s)
-WINDOW=$((DAYS * 86400))
 FINDINGS='[]'
+RESULTS='[]'
 {
   echo "## TLS certificate expiry"
   echo ""
-  echo "Warning window: ${DAYS} days."
+  echo "Reporting a certificate when 1/${DIVISOR} of its lifetime is left, minus ${MARGIN} days."
   echo ""
-  echo "| Host | Status | Expires (UTC) | Days left |"
-  echo "|---|---|---|---|"
+  echo "| Host | Status | Expires (UTC) | Days left | Lifetime (days) |"
+  echo "|---|---|---|---|---|"
 } >> "$SUMMARY"
 
 for key in "${ENTRIES[@]}"; do
@@ -98,16 +102,29 @@ for key in "${ENTRIES[@]}"; do
 
   if [[ -z "$CERT" ]]; then
     status=unreadable
+    not_before=""
     not_after=""
     days_left=""
+    lifetime_days=""
   else
+    not_before=$(openssl x509 -noout -startdate <<< "$CERT" | cut -d= -f2-)
     not_after=$(openssl x509 -noout -enddate <<< "$CERT" | cut -d= -f2-)
+    start=$(date -u -d "$not_before" +%s)
     end=$(date -u -d "$not_after" +%s)
     days_left=$(((end - NOW) / 86400))
+    lifetime_days=$(((end - start) / 86400))
+    not_before=$(date -u -d "@${start}" +%Y-%m-%dT%H:%M:%SZ)
     not_after=$(date -u -d "@${end}" +%Y-%m-%dT%H:%M:%SZ)
-    if ((end <= NOW)); then
+    # Due when a 1/DIVISOR share of this certificate's own lifetime is left, less the margin
+    limit=$(((end - start) / DIVISOR - MARGIN * 86400))
+    ((limit >= 0)) || limit=0
+    # A host with no certificate of its own is served the router default, which does not cover it
+    covers=$(openssl x509 -noout -checkhost "$host" <<< "$CERT" 2> /dev/null || true)
+    if [[ "$covers" != *"does match"* ]]; then
+      status=uncovered
+    elif ((end <= NOW)); then
       status=expired
-    elif ((end - NOW <= WINDOW)); then
+    elif ((end - NOW <= limit)); then
       status=expiring
     else
       status=ok
@@ -116,28 +133,32 @@ for key in "${ENTRIES[@]}"; do
 
   case "$status" in
     ok) echo "OK: ${label} expires ${not_after} (${days_left} days left)" ;;
-    expiring) echo "::warning::${label} certificate expires ${not_after} (${days_left} days left, within ${DAYS})" ;;
+    expiring) echo "::warning::${label} certificate expires ${not_after} (${days_left} days left of a ${lifetime_days} day certificate)" ;;
+    uncovered) echo "::warning::${label} serves a certificate that does not cover it (another name, or the router default)" ;;
     expired) echo "::warning::${label} certificate expired ${not_after}" ;;
     unreadable) echo "::warning::${label}: could not read a certificate (no TLS answer within ${TIMEOUT}s, DNS failure or handshake error)" ;;
   esac
-  echo "| ${label} | ${status} | ${not_after:--} | ${days_left:--} |" >> "$SUMMARY"
+  echo "| ${label} | ${status} | ${not_after:--} | ${days_left:--} | ${lifetime_days:--} |" >> "$SUMMARY"
 
+  item=$(jq -cn --arg h "$label" --arg s "$status" --arg b "$not_before" --arg n "$not_after" --arg d "$days_left" --arg l "$lifetime_days" \
+    '{host: $h, status: $s, not_before: $b, not_after: $n, days_left: $d, lifetime_days: $l}')
+  RESULTS=$(jq -c --argjson i "$item" '. + [$i]' <<< "$RESULTS")
   if [[ "$status" != ok ]]; then
-    FINDINGS=$(jq -c --arg h "$label" --arg s "$status" --arg n "$not_after" --arg d "$days_left" \
-      '. + [{host: $h, status: $s, not_after: $n, days_left: $d}]' <<< "$FINDINGS")
+    FINDINGS=$(jq -c --argjson i "$item" '. + [$i]' <<< "$FINDINGS")
   fi
 done
 
 COUNT=$(jq length <<< "$FINDINGS")
 {
   echo "findings=${FINDINGS}"
+  echo "results=${RESULTS}"
   echo "checked=${#ENTRIES[@]}"
 } >> "$OUT"
 echo "" >> "$SUMMARY"
 echo "Checked ${#ENTRIES[@]} host(s); ${COUNT} need attention."
 
 if ((COUNT > 0)) && [[ "$FAIL_ON_FINDINGS" == true ]]; then
-  echo "::error::${COUNT} host(s) need attention: certificate expiring within ${DAYS} days, expired, or unreadable."
-  echo "Fix: renew and install the certificate (see route-tls), or remove the host from the list if it is retired."
+  echo "::error::${COUNT} host(s) need attention: certificate not covering the host, due for renewal, expired, or unreadable."
+  echo "Fix: renew and install the certificate (see cert-keeper), or remove the host from the list if it is retired."
   exit 1
 fi

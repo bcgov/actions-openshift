@@ -2,7 +2,7 @@
 
 On findings, CODEOWNERS get notified: `workflow-notifier` opens an issue. The failing check step is only the mechanism that triggers that notify step.
 
-For each hostname this action runs a read-only `openssl s_client` handshake, reads the public leaf certificate's expiry date, and reports any certificate that expires within `days` (default 30), has expired, or can't be read. It needs no OpenShift credentials, no `oc` login and no `GITHUB_TOKEN`, and changes nothing. It prints only hostnames, expiry dates and days left. Installing a renewed certificate is [`route-tls`](../route-tls/README.md)'s job.
+For each hostname this action runs a read-only `openssl s_client` handshake, reads the public leaf certificate, and reports any certificate that doesn't cover the hostname, has a third of its own lifetime or less left (`lifetime_divisor` and `margin_days`), has expired, or can't be read. It needs no OpenShift credentials, no `oc` login and no `GITHUB_TOKEN`, and changes nothing. It prints only hostnames, expiry dates and days left. Installing a renewed certificate is [`route-tls`](../route-tls/README.md)'s job.
 
 Pin a tag or commit SHA, not `@main`. The runner needs `openssl`, `jq` and `timeout` (all on `ubuntu-*` runners).
 
@@ -47,7 +47,7 @@ jobs:
           hosts: |
             ${{ github.event.repository.name }}-prod.apps.silver.devops.gov.bc.ca
             ${{ vars.ROUTE_HOST }}
-          days: "30"
+          lifetime_divisor: "3"
 
       - name: Notify CODEOWNERS
         if: failure()
@@ -66,25 +66,32 @@ To notify only on certificate findings (not on an input error), give the check s
 | Input | Default | Description |
 | --- | --- | --- |
 | `hosts` | required | Hostnames, one per line, or a single host. `host` or `host:port`, no scheme; port defaults to 443. Blank lines and `#` comments are skipped. |
-| `days` | `30` | Warn when a certificate expires within this many days. Whole number, 1 to 3650. |
+| `lifetime_divisor` | `3` | Report a certificate when 1/N of its own lifetime or less is left, so `3` means a third. Whole number, 2 to 100. It scales with certificate lifetimes, which are shrinking toward 47 days. |
+| `margin_days` | `0` | Subtract this many days from that point, so the report comes later. Whole number, 0 to 3650. A renewer uses `0`; a monitor can use `3` so it only alerts after renewal has had 3 days. |
 | `timeout` | `10` | Seconds to wait for each handshake. Whole number, 1 to 120. |
 | `fail_on_findings` | `true` | Fail the step when any host needs attention, so the next step can notify with `if: failure()`. Outputs are written either way. |
 
-Invalid inputs (a URL instead of a hostname, a bad port, `days: 0`, an empty list) fail the step with an `::error::` line and a `Fix:` line.
+Invalid inputs (a URL instead of a hostname, a bad port, `lifetime_divisor: 1`, an empty list) fail the step with an `::error::` line and a `Fix:` line.
 
 ## Outputs
 
 | Output | Description |
 | --- | --- |
-| `findings` | JSON array of hosts that need attention, `[]` when all are fine. Each item has `host`, `status` (`expiring`, `expired` or `unreadable`), `not_after` (UTC, empty when unreadable) and `days_left`. |
+| `findings` | JSON array of hosts that need attention, `[]` when all are fine. Each item has `host`, `status` (`uncovered`, `expiring`, `expired` or `unreadable`), `not_before` and `not_after` (UTC, empty when unreadable), `days_left` and `lifetime_days`. `uncovered` means the certificate served for the host doesn't cover it, which is what a host with no Route of its own gets from the router. |
+| `results` | JSON array with one item per host checked, healthy or not, with the same fields as `findings`. |
 | `checked` | Number of hosts checked, after removing duplicates. |
 
 The step summary has a table of every host with its status, expiry date and days left.
+
+## Upgrading from `days`
+
+`days` is gone: a fixed number of days stops working as certificate lifetimes shrink (30 days is most of a 47 day certificate). Delete `days` from the `with:` block to get the default, which reports a certificate when a third of its own lifetime is left (about 66 days on a 198 day certificate, 15 on a 47 day one). To report later, add `margin_days`, for example `margin_days: "3"`. There is no fixed-days mode, and a caller still passing `days` fails at the input check.
 
 ## Common fixes
 
 | Message | Fix |
 | --- | --- |
-| `certificate expires ... within 30 days` | Renew the certificate and install it with `route-tls`. |
+| `certificate expires ... days left of a N day certificate` | Renew and install it with `cert-keeper`, or by hand with `route-tls`. |
+| `serves a certificate that does not cover it` | The host has no certificate of its own yet, or its Route was removed. Get one with `cert-keeper`. |
 | `could not read a certificate` | Check the hostname resolves and serves TLS on that port, raise `timeout` for slow hosts, or remove the host if it is retired. |
 | `'https://...' is a URL, not a hostname` | List the hostname only, for example `myapp.gov.bc.ca`. |

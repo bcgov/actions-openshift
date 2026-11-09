@@ -1,14 +1,18 @@
 # Stay bash: openssl only. Do not convert to JavaScript.
 name: "Cert Expiry"
-description: "Read-only TLS expiry check: reads each host's public certificate with openssl s_client and reports any that expire within a number of days."
+description: "Read-only TLS expiry check: reads each host's public certificate with openssl s_client and reports any that do not cover the host or are running low on their own lifetime."
 inputs:
   hosts:
     description: "Hostnames to check, one per line, or a single host. host or host:port, no scheme. Port defaults to 443. Blank lines and # comments are ignored."
     required: true
-  days:
-    description: "Warn when a certificate expires within this many days (whole number, 1 to 3650)."
+  lifetime_divisor:
+    description: "Report a certificate when 1/N of its own lifetime or less is left, so 3 means a third (whole number, 2 to 100)."
     required: false
-    default: "30"
+    default: "3"
+  margin_days:
+    description: "Subtract this many days from that point, so the report comes later (whole number, 0 to 3650)."
+    required: false
+    default: "0"
   timeout:
     description: "Seconds to wait for each TLS handshake (whole number, 1 to 120)."
     required: false
@@ -20,8 +24,11 @@ inputs:
 
 outputs:
   findings:
-    description: 'JSON array of hosts that need attention: [{"host","status","not_after","days_left"}]. status is expiring, expired or unreadable. [] when all are fine.'
+    description: 'JSON array of hosts that need attention: [{"host","status","not_before","not_after","days_left","lifetime_days"}]. status is uncovered, expiring, expired or unreadable. [] when all are fine.'
     value: ${{ steps.check.outputs.findings }}
+  results:
+    description: 'JSON array with one item per host checked, healthy or not, same fields as findings. Use it to read a host without depending on whether it needs attention.'
+    value: ${{ steps.check.outputs.results }}
   checked:
     description: "Number of hosts checked."
     value: ${{ steps.check.outputs.checked }}
@@ -42,7 +49,8 @@ runs:
       env:
         ACTION_PATH: ${{ github.action_path }}
         INPUT_HOSTS: ${{ inputs.hosts }}
-        INPUT_DAYS: ${{ inputs.days }}
+        INPUT_LIFETIME_DIVISOR: ${{ inputs.lifetime_divisor }}
+        INPUT_MARGIN_DAYS: ${{ inputs.margin_days }}
         INPUT_TIMEOUT: ${{ inputs.timeout }}
         INPUT_FAIL_ON_FINDINGS: ${{ inputs.fail_on_findings }}
       run: bash "${ACTION_PATH}/check.sh"

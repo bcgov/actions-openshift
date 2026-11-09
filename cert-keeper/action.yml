@@ -1,0 +1,147 @@
+name: "Cert Keeper"
+description: "Keeps one hostname's SSL/TLS certificate valid on an OpenShift Route: gets a free Let's Encrypt certificate when the host has none or is running low, installs it with route-tls, and cleans up."
+inputs:
+  hostname:
+    description: "Hostname to keep certified (e.g. myapp.gov.bc.ca). One host, no scheme, no wildcard. Its A/CNAME must already reach the OpenShift router."
+    required: true
+  email:
+    description: "ACME account contact email."
+    required: true
+  route_name:
+    description: "Route to create or update with the certificate."
+    required: true
+  target_service:
+    description: "Service the Route sends traffic to."
+    required: true
+  ca:
+    description: "Certificate authority: letsencrypt (browser-trusted, rate limited) or letsencrypt-staging (untrusted test CA)."
+    required: false
+    default: "letsencrypt"
+  force:
+    description: "If true, get and install a new certificate even when the current one is not due, for example after a key leak. Counts against the 5 certificates per week limit for this host."
+    required: false
+    default: "false"
+  oc_namespace:
+    description: "OpenShift namespace."
+    required: true
+  oc_server:
+    description: "OpenShift API URL."
+    required: true
+  oc_token:
+    description: "OpenShift token."
+    required: true
+  timeout:
+    description: "Seconds to wait for issuance before cleanup and failure."
+    required: false
+    default: "300"
+outputs:
+  due:
+    description: "true when a new certificate was needed (and so issued and installed), false when the current one was left alone."
+    value: ${{ steps.decide.outputs.due }}
+  reason:
+    description: "Why a new certificate was or was not needed."
+    value: ${{ steps.decide.outputs.reason }}
+  not_after:
+    description: "Expiry of the newly issued certificate; empty when nothing was issued."
+    value: ${{ steps.issue.outputs.not_after }}
+
+runs:
+  using: "composite"
+  steps:
+    # Undeclared inputs fail here; GitHub only warns
+    - name: Check inputs
+      uses: bcgov/actions/input-enforcer@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+      with:
+        inputs: ${{ toJSON(inputs) }}
+        action_path: ${{ github.action_path }}
+
+    # Shared input rules (shared/inputs.sh); a bad value fails here
+    - name: Parse Inputs
+      id: inputs
+      shell: bash
+      env:
+        INPUT_CA: ${{ inputs.ca }}
+        INPUT_FORCE: ${{ inputs.force }}
+        SHARED_INPUTS: ${{ github.action_path }}/../shared/inputs.sh
+      run: |
+        # shellcheck source=/dev/null
+        source "$SHARED_INPUTS"
+        ca="$(input_enum ca "$INPUT_CA" "letsencrypt letsencrypt-staging" letsencrypt)" || { echo "$ca"; exit 1; }
+        force="$(input_bool force "$INPUT_FORCE" false)" || { echo "$force"; exit 1; }
+        echo "ca=${ca}" >> "$GITHUB_OUTPUT"
+        echo "force=${force}" >> "$GITHUB_OUTPUT"
+
+    # Reads the certificate the host serves today; one rule shared with nr-cert-monitor
+    - name: Check current certificate
+      id: gate
+      uses: $/cert-expiry
+      with:
+        hosts: ${{ inputs.hostname }}
+        lifetime_divisor: "3"
+        margin_days: "0"
+        fail_on_findings: "false"
+
+    - name: Decide
+      id: decide
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        HOST: ${{ inputs.hostname }}
+        FORCE: ${{ steps.inputs.outputs.force }}
+        FINDINGS: ${{ steps.gate.outputs.findings }}
+      run: bash "${ACTION_PATH}/decide.sh"
+
+    - name: Check port 80
+      if: steps.decide.outputs.due == 'true'
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        HOST: ${{ inputs.hostname }}
+      run: bash "${ACTION_PATH}/preflight.sh"
+
+    - name: OpenShift CLI
+      if: steps.decide.outputs.due == 'true'
+      uses: $/oc-runner
+      with:
+        oc_namespace: ${{ inputs.oc_namespace }}
+        oc_server: ${{ inputs.oc_server }}
+        oc_token: ${{ inputs.oc_token }}
+
+    # Before issuing, so a refusal costs no certificate: route-tls rewrites the
+    # whole Route, so it must be this host's own
+    - name: Check the Route
+      if: steps.decide.outputs.due == 'true'
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        HOST: ${{ inputs.hostname }}
+        ROUTE_NAME: ${{ inputs.route_name }}
+        TARGET_SERVICE: ${{ inputs.target_service }}
+      run: bash "${ACTION_PATH}/route-guard.sh"
+
+    - name: Get certificate
+      id: issue
+      if: steps.decide.outputs.due == 'true'
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        ACME_HOST: ${{ inputs.hostname }}
+        ACME_EMAIL: ${{ inputs.email }}
+        CA: ${{ steps.inputs.outputs.ca }}
+        TIMEOUT: ${{ inputs.timeout }}
+        OC_NAMESPACE: ${{ inputs.oc_namespace }}
+      run: bash "${ACTION_PATH}/issue.sh"
+
+    - name: Install on the Route
+      if: steps.decide.outputs.due == 'true'
+      uses: $/route-tls
+      with:
+        hostname: ${{ inputs.hostname }}
+        route_name: ${{ inputs.route_name }}
+        target_service: ${{ inputs.target_service }}
+        tls_certificate: ${{ steps.issue.outputs.tls_certificate }}
+        tls_private_key: ${{ steps.issue.outputs.tls_private_key }}
+        tls_ca_certificate: ${{ steps.issue.outputs.tls_ca_certificate }}
+        oc_namespace: ${{ inputs.oc_namespace }}
+        oc_server: ${{ inputs.oc_server }}
+        oc_token: ${{ inputs.oc_token }}
