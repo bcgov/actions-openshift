@@ -1,6 +1,6 @@
 # Cert Keeper
 
-Keeps one hostname's SSL/TLS certificate valid on an OpenShift Route. When the host has no certificate of its own, or is running low, it gets a free [Let's Encrypt](https://letsencrypt.org/) certificate, installs it with [`route-tls`](../route-tls), and cleans up. No Service Desk ticket and no paid certificate per renewal, once the host's DNS already points at the cluster router.
+Keeps one hostname's SSL/TLS certificate valid on an OpenShift Route. When the host has no certificate of its own, or is running low, it gets a free [Let's Encrypt](https://letsencrypt.org/) certificate, installs it on your Route, and cleans up. No Service Desk ticket and no paid certificate per renewal, once the host's DNS already points at the cluster router.
 
 Each repo opts in and runs it for its own hosts. Out of scope: wildcards and DNS-01 (see `bcgov/cert-manager-proxy`), several hosts on one certificate, platforms other than OpenShift Routes, and replacing Entrust where a ministry requires it.
 
@@ -48,7 +48,7 @@ When a certificate is due:
    - If the host is owned by a Route in another namespace the challenge Route is not admitted and the action fails fast.
 4. Waits for lego (`timeout`, default 300 s), copies the PEMs out with `oc exec` (retried for up to 15 minutes through API drops, with the Pod kept alive that long), and checks the leaf matches the host.
 5. Deletes the Pod, Service, NetworkPolicy and Route on success **and** failure. If a runner dies mid-run, sweep with `oc delete route,service,pod,networkpolicy -l app.kubernetes.io/managed-by=cert-keeper`.
-6. Installs the certificate with `route-tls`, which creates the Route if it does not exist and keeps its backups of the old certificate.
+6. Installs the certificate: it checks the certificate, key and chain, creates the Route if it does not exist, saves the old certificate as a backup Secret, applies the new one and reads it back to confirm.
 
 The ACME account key is ephemeral (one per run). Both containers use `goacme/lego`, pinned by digest.
 
@@ -56,7 +56,7 @@ The ACME account key is ephemeral (one per run). Both containers use `goacme/leg
 
 - **One namespace:** `oc_namespace`, and only what the token allows. Nothing outside it.
 - **Temporary objects:** the `cert-keeper-<hash>` Pod, Service, NetworkPolicy and challenge Route, deleted at the end.
-- **One Route:** `route_name`, which `route-tls` rewrites whole: the host, the backend service, and edge TLS with an HTTP redirect. So before it spends a certificate, `cert-keeper` refuses if that Route already exists and serves a different host, or terminates TLS as `passthrough` or `reencrypt`. A different backend service only warns. A Route that does not exist yet is created.
+- **One Route:** `route_name`, which the install step rewrites whole: the host, the backend service, and edge TLS with an HTTP redirect. So before it spends a certificate, `cert-keeper` refuses if that Route already exists and serves a different host, or terminates TLS as `passthrough` or `reencrypt`. A different backend service only warns. A Route that does not exist yet is created.
 - **Other Routes:** never changed. A host already claimed by a different Route name stops the install.
 - **Any public hostname works,** not only `*.nrs.gov.bc.ca`: one lowercase FQDN whose DNS points at this cluster's router, with port 80 reachable. A host whose DNS points elsewhere fails validation and leaves nothing behind. Call the action once per host; wildcards are not supported.
 
@@ -73,9 +73,9 @@ The ACME account key is ephemeral (one per run). Both containers use `goacme/leg
    gh secret set OC_TOKEN --env prod   # paste the token when prompted
    ```
 
-3. **Token permissions.** The token for `OC_NAMESPACE` must be able to create, get and delete pods, services, routes and networkpolicies, to exec into pods and read their logs, and to create secrets (`route-tls` saves the old certificate as a backup Secret). Events are listed for diagnostics only.
+3. **Token permissions.** The token for `OC_NAMESPACE` must be able to create, get and delete pods, services, routes and networkpolicies, to exec into pods and read their logs, and to create secrets (the install step saves the old certificate as a backup Secret). Events are listed for diagnostics only.
 4. **Add the workflow** from [Usage](#usage) as `.github/workflows/cert-keeper.yml`, with your own Route and Service names, in a pull request.
-5. **First run.** Run it from the Actions tab. By default it asks for a real, browser-trusted certificate. To rehearse first, add `ca: letsencrypt-staging`, but be careful: staging installs an **untrusted** certificate on the Route, so browsers show a warning until a production run replaces it. Use staging only on a host nobody is using yet.
+5. **First run.** Run it from the Actions tab. By default it asks for a real, browser-trusted certificate. To rehearse first, add `ca: letsencrypt-staging`, but be careful: staging installs an **untrusted** certificate on the Route, so browsers show a warning. The daily check only looks at dates and the host name, so it will not replace that certificate until a third of its life is left. After a rehearsal, run once with `force: true` and the default `ca` to put a trusted certificate back. Use staging only on a host nobody is using yet.
 6. **Check it worked.** `ssl_verify=0` means the certificate is trusted:
 
    ```bash
@@ -150,7 +150,7 @@ Pin to a release SHA, never `@main`. Also add the host to [`nr-cert-monitor`](ht
 - The host's A or CNAME record already points at the cluster router (a one-time Service Desk step).
 - Plain HTTP on port 80 reaches the router.
 - No Route in another namespace already claims the host.
-- To rehearse, `ca: letsencrypt-staging` proves it end to end, but it installs an untrusted certificate on the Route, so use it only on a host nobody is using yet.
+- To rehearse, `ca: letsencrypt-staging` proves it end to end, but it installs an untrusted certificate on the Route that the daily check will not replace on its own (run once with `force: true` afterwards), so use it only on a host nobody is using yet.
 
 ## Inputs
 
@@ -191,7 +191,7 @@ These come from Let's Encrypt's [rate limits page](https://letsencrypt.org/docs/
 - **One hostname per run.** No wildcards. Call it once per host.
 - **HTTP-01 on OpenShift Routes only.** The host must be public, its DNS must point at the cluster router, and port 80 must be reachable.
 - **Shrinking lifetimes.** The one-third rule adapts, but renewals become more frequent as certificates get shorter.
-- **OpenShift API reliability.** The connection from GitHub runners to the API has dropped during testing. `cert-keeper` retries for up to 15 minutes while copying the certificate out, and `route-tls` retries network errors up to 12 times when installing. A longer outage fails that run: the current certificate keeps serving, the code owners are alerted, and the next daily run tries again.
+- **OpenShift API reliability.** The connection from GitHub runners to the API has dropped during testing. `cert-keeper` retries for up to 15 minutes while copying the certificate out, and the install step retries network errors up to 12 times. A longer outage fails that run: the current certificate keeps serving, the code owners are alerted, and the next daily run tries again.
 - **Scheduling.** GitHub can delay or drop scheduled runs, and disables schedules in public repos after 60 days without activity.
 - **Dependencies.** The cluster pulls the `lego` image from Docker Hub, pinned by digest.
 - **Policy.** Whether Let's Encrypt is approved for your domain is for your organization to settle; `cert-keeper` does not decide it.
@@ -213,7 +213,7 @@ These come from Let's Encrypt's [rate limits page](https://letsencrypt.org/docs/
 
 **Can it use another certificate authority?** Today `ca` accepts `letsencrypt` and `letsencrypt-staging`. Another ACME authority would be a change to the action, and some need extra credentials.
 
-**What happens to my current certificate?** It stays until the new one is installed. `route-tls` saves the old one as a backup Secret first.
+**What happens to my current certificate?** It stays until the new one is installed. the install step saves the old one as a backup Secret first.
 
 **How do I stop it?** Disable the workflow. The current certificate stays on the Route until it expires.
 

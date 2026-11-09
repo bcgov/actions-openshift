@@ -145,9 +145,7 @@ jobs:
             crunchy:
               - crunchy/
               - .github/tests/crunchy/
-              - .github/tests/route-tls/
               - .github/tests/image-import/
-              - route-tls/
               - cert-keeper/
               - .github/tests/cert-keeper/
               - image-import/
@@ -175,7 +173,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq bats openssl
-          bats .github/tests/crunchy .github/tests/route-tls .github/tests/image-import .github/tests/cert-keeper
+          bats .github/tests/crunchy .github/tests/image-import .github/tests/cert-keeper
 
       - name: Helm lint
         run: helm lint crunchy/charts/crunchy --values crunchy/values.yml
@@ -239,8 +237,8 @@ jobs:
           grep -q 'has no templates/route.yaml' <<< "$output"
 
   # Composite dry-run logs into the cluster. An unrelated diff must not fail on the runner allowlist.
-  route-tls-changes:
-    name: Route TLS path filter
+  cert-keeper-changes:
+    name: Cert Keeper path filter
     permissions:
       contents: read
     runs-on: ubuntu-26.04
@@ -268,15 +266,15 @@ jobs:
         with:
           base: ${{ steps.base.outputs.sha || github.event.before }}
           triggers: |
-            route-tls/
+            cert-keeper/
             oc-runner/
             .github/workflows/pr-open.yml
             !*.md
 
-  test-route-tls:
-    name: Test Route TLS
-    needs: route-tls-changes
-    if: needs.route-tls-changes.outputs.triggered == 'true'
+  test-cert-keeper-install:
+    name: Test cert-keeper install
+    needs: cert-keeper-changes
+    if: needs.cert-keeper-changes.outputs.triggered == 'true'
     permissions: {}
     runs-on: ubuntu-26.04
     steps:
@@ -295,7 +293,7 @@ jobs:
             exit 1
           fi
           echo "Checking sibling action references..."
-          for action in route-tls cleanup-pr image-import; do
+          for action in cert-keeper cleanup-pr image-import; do
             if ! grep -q 'uses: \$/oc-runner' "fixture/$action/action.yml"; then
               echo "::error::$action/action.yml must reference oc-runner via 'uses: $/oc-runner'"
               exit 1
@@ -328,17 +326,6 @@ jobs:
           for f in *.pem *.key; do
             grep -v -e '-----' "$f" | while IFS= read -r line; do echo "::add-mask::${line}"; done
           done
-          {
-            echo "DUMMY_CERT<<EOF"
-            cat leaf.pem
-            echo "EOF"
-            echo "DUMMY_KEY<<EOF"
-            cat leaf.key
-            echo "EOF"
-            echo "DUMMY_CA<<EOF"
-            cat ca.pem
-            echo "EOF"
-          } >> "$GITHUB_ENV"
 
       - name: Script dry-run
         env:
@@ -359,10 +346,10 @@ jobs:
           printf '%s\n' '#!/bin/bash' 'exit 0' > /tmp/bin/oc
           chmod +x /tmp/bin/oc
           export PATH="/tmp/bin:${PATH}"
-          output="$(./fixture/route-tls/provision.sh 2>&1)" || { echo "$output"; exit 1; }
+          output="$(./fixture/cert-keeper/install.sh 2>&1)" || { echo "$output"; exit 1; }
           printf '%s\n' "$output"
           if printf '%s\n' "$output" | grep -qE 'BEGIN (PRIVATE KEY|RSA PRIVATE KEY)'; then
-            echo "provision.sh leaked a private key to stdout/stderr"
+            echo "install.sh leaked a private key to stdout/stderr"
             exit 1
           fi
           grep -qF 'PASS: CA chain (2 certificate(s)) issued the certificate, in order, none expired' <<< "$output"
@@ -384,7 +371,7 @@ jobs:
             shift 3
             if output="$(env ROUTE_HOST=myapp.bcgov.ca ROUTE_NAME=my-test-route TARGET_SERVICE=my-test-service \
               TLS_CERTIFICATE_FILE="${d}/leaf.pem" TLS_PRIVATE_KEY_FILE="${d}/leaf.key" TLS_CA_CERTIFICATE_FILE="${d}/ca.pem" \
-              DRY_RUN=true ROUTE_OUT="${d}/route-${name}.yml" "$@" ./fixture/route-tls/provision.sh 2>&1)"; then
+              DRY_RUN=true ROUTE_OUT="${d}/route-${name}.yml" "$@" ./fixture/cert-keeper/install.sh 2>&1)"; then
               echo "::error::${name}: expected a failure"
               exit 1
             fi
@@ -413,37 +400,16 @@ jobs:
           expect_fail full-chain "TLS_CERTIFICATE must hold only the leaf certificate (found 2)." "Put only the leaf (first block) in TLS_CERTIFICATE" \
             TLS_CERTIFICATE_FILE="${d}/fullchain.pem"
 
-      - name: Quarantine root workspace
-        run: |
-          set -euo pipefail
-          rm -rf fixture
-          echo "Root workspace quarantined. Current contents:"
-          ls -la
-
-      - name: Composite action dry-run
-        uses: $/route-tls
-        with:
-          hostname: myapp.bcgov.ca
-          route_name: actions-openshift-vanity-url
-          target_service: my-test-service
-          tls_certificate: ${{ env.DUMMY_CERT }}
-          tls_private_key: ${{ env.DUMMY_KEY }}
-          tls_ca_certificate: ${{ env.DUMMY_CA }}
-          oc_namespace: ${{ vars.OC_NAMESPACE }}
-          oc_server: ${{ vars.OC_SERVER }}
-          oc_token: ${{ secrets.OC_TOKEN }}
-          dry_run: "true"
-
-  test-route-tls-logs:
-    name: Test Route TLS logs
-    needs: [test-route-tls, test-fork-token-degradation]
+  test-cert-keeper-install-logs:
+    name: Test cert-keeper install logs
+    needs: [test-cert-keeper-install]
     # Failed runs are the likeliest to have printed PEM data
     if: ${{ !cancelled() }}
     permissions:
       actions: read
     runs-on: ubuntu-26.04
     steps:
-      - name: No PEM contents in the route-tls job logs
+      - name: No PEM contents in the cert-keeper install job log
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.run_id }}
@@ -453,7 +419,7 @@ jobs:
           jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" --paginate \
             --jq '.jobs[] | "\(.id)\t\(.name)\t\(.conclusion)"')"
           failed=0
-          for name in "Test Route TLS" "Fork Token Degradation Matrix (route-tls-isolated)"; do
+          for name in "Test cert-keeper install"; do
             job_id="$(awk -F'\t' -v n="$name" '$2 == n { print $1 }' <<< "$jobs")"
             conclusion="$(awk -F'\t' -v n="$name" '$2 == n { print $3 }' <<< "$jobs")"
             [ -n "$job_id" ] || { echo "::error::${name} job not found"; exit 1; }
@@ -478,14 +444,11 @@ jobs:
 
   test-fork-token-degradation:
     name: Fork Token Degradation Matrix (${{ matrix.scenario.name }})
-    needs: route-tls-changes
     permissions: read-all
     runs-on: ubuntu-26.04
     strategy:
       matrix:
         scenario:
-          - name: route-tls-isolated
-            type: composite-action
           - name: pr-description-write-noop
             type: write-noop-harness
             operation: pr-description
@@ -559,56 +522,6 @@ jobs:
             cat "$RESPONSE_FILE"
             exit 1
           fi
-
-      - name: Generate dummy certificates
-        if: matrix.scenario.type == 'composite-action' && needs.route-tls-changes.outputs.triggered == 'true'
-        run: |
-          set -euo pipefail
-          openssl req -x509 -newkey rsa:2048 -keyout /tmp/fork-key.pem -out /tmp/fork-cert.pem \
-            -days 30 -nodes -subj "/CN=myapp.bcgov.ca" \
-            -addext "subjectAltName=DNS:myapp.bcgov.ca"
-          openssl req -x509 -newkey rsa:2048 -keyout /tmp/fork-other-key.pem -out /tmp/fork-other.pem \
-            -days 30 -nodes -subj "/CN=other.example"
-          cp /tmp/fork-cert.pem /tmp/fork-ca.pem
-          # Mask every PEM body line, so env and input displays show *** instead
-          for f in /tmp/fork-*.pem; do
-            grep -v -e '-----' "$f" | while IFS= read -r line; do echo "::add-mask::${line}"; done
-          done
-          {
-            echo "FORK_CERT<<EOF"
-            cat /tmp/fork-cert.pem
-            echo "EOF"
-            echo "FORK_KEY<<EOF"
-            cat /tmp/fork-key.pem
-            echo "EOF"
-            echo "FORK_CA<<EOF"
-            cat /tmp/fork-ca.pem
-            echo "EOF"
-          } >> "$GITHUB_ENV"
-
-      - name: Composite action dry-run (quarantined workspace)
-        if: matrix.scenario.type == 'composite-action' && needs.route-tls-changes.outputs.triggered == 'true'
-        uses: $/route-tls
-        with:
-          hostname: myapp.bcgov.ca
-          route_name: actions-openshift-vanity-url
-          target_service: my-test-service
-          tls_certificate: ${{ env.FORK_CERT }}
-          tls_private_key: ${{ env.FORK_KEY }}
-          tls_ca_certificate: ${{ env.FORK_CA }}
-          oc_namespace: ${{ vars.OC_NAMESPACE }}
-          oc_server: ${{ vars.OC_SERVER }}
-          oc_token: ${{ secrets.OC_TOKEN }}
-          dry_run: "true"
-
-      - name: Validate generated route output
-        if: matrix.scenario.type == 'composite-action' && needs.route-tls-changes.outputs.triggered == 'true'
-        run: |
-          set -euo pipefail
-          [ -f route.yml ] || { echo "::error::route.yml was not created"; exit 1; }
-          grep -q '^apiVersion: route.openshift.io/v1' route.yml
-          grep -q '^kind: Route' route.yml
-          echo "Route TLS composite action executed cleanly under fork token degradation."
 
   test-image-import:
     name: Test Image Import
@@ -760,9 +673,9 @@ jobs:
       - changes
       - test-deployer
       - test-crunchy
-      - route-tls-changes
-      - test-route-tls
-      - test-route-tls-logs
+      - cert-keeper-changes
+      - test-cert-keeper-install
+      - test-cert-keeper-install-logs
       - test-fork-token-degradation
       - test-image-import
       - test-unknown-inputs

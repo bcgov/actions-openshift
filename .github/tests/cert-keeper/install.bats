@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
-# route-tls validates the cert, key and CA chain order, backs up before apply,
+# install.sh validates the cert, key and CA chain order, backs up before apply,
 # and prints only names and results
 
 setup() {
-  SCRIPT="${BATS_TEST_DIRNAME}/../../../route-tls/provision.sh"
+  SCRIPT="${BATS_TEST_DIRNAME}/../../../cert-keeper/install.sh"
   D="$BATS_TEST_TMPDIR"
   printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' > "${D}/ca.cnf"
   printf 'subjectAltName=DNS:app.example.gov.bc.ca\n' > "${D}/leaf.cnf"

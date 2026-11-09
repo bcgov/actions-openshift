@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# route-tls summary records dry_run without printing the private key
+# install.sh summary records dry_run without printing the private key
 
 setup() {
-  SCRIPT="${BATS_TEST_DIRNAME}/../../../route-tls/provision.sh"
+  SCRIPT="${BATS_TEST_DIRNAME}/../../../cert-keeper/install.sh"
   WORK="${BATS_TEST_TMPDIR}/work"
   mkdir -p "$WORK"
   export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary.md"

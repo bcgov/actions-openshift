@@ -5,7 +5,7 @@ name: Cert Check Tests
 # ubuntu-26.04 and ubuntu-slim (the runner quickstart-openshift's scheduled
 # jobs use). Scheduling and notifying belong to each calling repository.
 
-# Always runs on pull requests and main pushes so Cert Expiry Results reports; the test
+# Always runs on pull requests and main pushes so Cert Check Results reports; the test
 # jobs run only when the check changed (Markdown excluded).
 on:
   pull_request:

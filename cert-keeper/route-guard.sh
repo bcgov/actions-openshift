@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Refuses to let route-tls rewrite a Route that is not this host's. route-tls
-# applies the whole Route (host, backend, edge termination with a redirect), so
+# Refuses to let the install step rewrite a Route that is not this host's. The
+# install step applies the whole Route (host, backend, edge termination with a redirect), so
 # an existing Route with this name that serves another host, or terminates TLS
 # some other way, would be changed without a word. This runs before a
 # certificate is issued, so a refusal wastes none of the rate limit.
@@ -23,7 +23,7 @@ row="$("$OC" get route "$ROUTE_NAME" --ignore-not-found -o 'jsonpath={.spec.host
   || die "Could not read Route ${ROUTE_NAME}." "Check the token can get routes in the namespace and the API answers."
 
 if [ -z "$row" ]; then
-  echo "Route ${ROUTE_NAME} does not exist yet; route-tls will create it."
+  echo "Route ${ROUTE_NAME} does not exist yet; the install step will create it."
   exit 0
 fi
 

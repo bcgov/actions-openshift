@@ -79,8 +79,8 @@ web_modules/
 .env.*
 !.env.example
 
-# Local route-tls dry-run output (contains the private key)
-route-tls/route.yml
+# Local install.sh dry-run output (contains the private key)
+cert-keeper/route.yml
 route.yml
 **/route.yml
 route-*.yml
