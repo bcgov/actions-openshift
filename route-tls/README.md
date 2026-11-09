@@ -6,6 +6,8 @@ The Route uses `termination: edge` and `insecureEdgeTerminationPolicy: Redirect`
 
 Pin a tag or commit SHA, not `@main`. This action does not use `GITHUB_TOKEN` itself. Every run, `dry_run` included, logs in through the sibling [`oc-runner`](../oc-runner/README.md) action, which checks out the caller repo (that step needs `contents: read` if the repository is private).
 
+**Can your host use Let's Encrypt?** Then use [`cert-keeper`](../cert-keeper/README.md) instead: it gets the certificate and calls this action for you, and renews it before it expires. The rest of this page is for certificates you get another way, such as Entrust through the Service Desk.
+
 Flow when you need a cert (or a new one): [no cert → CSR → Entrust/ACME → secrets → this action](#no-cert-yet-csr-and-update). If you already have PEMs, skip to [GitHub secrets](#github-secrets) and [Usage](#usage).
 
 ## No cert yet (CSR and update)

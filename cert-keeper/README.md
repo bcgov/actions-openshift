@@ -4,6 +4,26 @@ Keeps one hostname's SSL/TLS certificate valid on an OpenShift Route. When the h
 
 Each repo opts in and runs it for its own hosts. Out of scope: wildcards and DNS-01 (see `bcgov/cert-manager-proxy`), several hosts on one certificate, platforms other than OpenShift Routes, and replacing Entrust where a ministry requires it.
 
+## In plain words
+
+Every hostname served over HTTPS needs a certificate, and certificates expire. Getting one by hand means a Service Desk ticket and a paid certificate, and the maximum lifetime keeps shrinking: 90 days now, 64 from February 2027 and 45 from February 2028 (Let's Encrypt's schedule), and 47 days by industry rule from March 2029. By then that is roughly a dozen renewals a year for every host.
+
+`cert-keeper` does the renewing. Once a day, a scheduled workflow in your repo looks at the certificate your site is actually serving. If it is fine, nothing happens. If the host has no certificate of its own, or the certificate has a third of its life or less left, `cert-keeper` gets a free certificate from Let's Encrypt, installs it on your OpenShift Route, and cleans up after itself.
+
+To issue a certificate, Let's Encrypt wants proof that you control the hostname. `cert-keeper` gives it by starting a small temporary Pod in your namespace that answers Let's Encrypt's check over plain HTTP, then deleting it. That is why it needs no cluster admin and no access to DNS: only an OpenShift token for your own namespace.
+
+```mermaid
+flowchart TD
+    A["Daily run"] --> B{"Does the site serve a valid certificate for the host, with more than a third of its life left?"}
+    B -- "yes" --> C["Do nothing"]
+    B -- "no" --> D["Check port 80 and the Route"]
+    D --> E["A temporary Pod answers Let's Encrypt's ownership check"]
+    E --> F["Let's Encrypt issues the certificate"]
+    F --> G["Install it on the OpenShift Route"]
+    G --> H["Delete the temporary objects"]
+    I["nr-cert-monitor watches the certificate itself and alerts people if renewal stalls"] -.-> B
+```
+
 ## How it decides
 
 Every run first reads the certificate the host serves today (with [`cert-expiry`](../cert-expiry)) and does nothing unless one of these is true:
@@ -39,6 +59,30 @@ The ACME account key is ephemeral (one per run). Both containers use `goacme/leg
 - **One Route:** `route_name`, which `route-tls` rewrites whole: the host, the backend service, and edge TLS with an HTTP redirect. So before it spends a certificate, `cert-keeper` refuses if that Route already exists and serves a different host, or terminates TLS as `passthrough` or `reencrypt`. A different backend service only warns. A Route that does not exist yet is created.
 - **Other Routes:** never changed. A host already claimed by a different Route name stops the install.
 - **Any public hostname works,** not only `*.nrs.gov.bc.ca`: one lowercase FQDN whose DNS points at this cluster's router, with port 80 reachable. A host whose DNS points elsewhere fails validation and leaves nothing behind. Call the action once per host; wildcards are not supported.
+
+## Add a host, step by step
+
+1. **DNS and port 80.** The host's A or CNAME record must already point at the cluster router (a one-time Service Desk step for a new name), and plain HTTP on port 80 must reach it.
+2. **Create a GitHub Environment** named `prod` in the repo's Settings, then set its variables and secret. The OpenShift API address is the same for every Silver namespace; the rest are yours.
+
+   ```bash
+   gh variable set VANITY_HOST  --env prod --body "myapp.nrs.gov.bc.ca"
+   gh variable set ACME_EMAIL   --env prod --body "team-mailbox@gov.bc.ca"
+   gh variable set OC_NAMESPACE --env prod --body "abc123-prod"
+   gh variable set OC_SERVER    --env prod --body "https://api.silver.devops.gov.bc.ca:6443"
+   gh secret set OC_TOKEN --env prod   # paste the token when prompted
+   ```
+
+3. **Token permissions.** The token for `OC_NAMESPACE` must be able to create, get and delete pods, services, routes and networkpolicies, to exec into pods and read their logs, and to create secrets (`route-tls` saves the old certificate as a backup Secret). Events are listed for diagnostics only.
+4. **Add the workflow** from [Usage](#usage) as `.github/workflows/cert-keeper.yml`, with your own Route and Service names, in a pull request.
+5. **First run.** Run it from the Actions tab. By default it asks for a real, browser-trusted certificate. To rehearse first, add `ca: letsencrypt-staging`, but be careful: staging installs an **untrusted** certificate on the Route, so browsers show a warning until a production run replaces it. Use staging only on a host nobody is using yet.
+6. **Check it worked.** `ssl_verify=0` means the certificate is trusted:
+
+   ```bash
+   curl -sS -o /dev/null -w 'http=%{http_code} ssl_verify=%{ssl_verify_result}\n' https://myapp.nrs.gov.bc.ca/
+   ```
+
+7. **Optional second pair of eyes.** Add the host to [`nr-cert-monitor`](https://github.com/bcgov/nr-cert-monitor) with a pull request to its `rules.yml`.
 
 ## Usage
 
@@ -106,7 +150,7 @@ Pin to a release SHA, never `@main`. Also add the host to [`nr-cert-monitor`](ht
 - The host's A or CNAME record already points at the cluster router (a one-time Service Desk step).
 - Plain HTTP on port 80 reaches the router.
 - No Route in another namespace already claims the host.
-- Start with `ca: letsencrypt-staging` to prove it end to end; staging certificates are not browser-trusted.
+- To rehearse, `ca: letsencrypt-staging` proves it end to end, but it installs an untrusted certificate on the Route, so use it only on a host nobody is using yet.
 
 ## Inputs
 
@@ -119,7 +163,7 @@ Pin to a release SHA, never `@main`. Also add the host to [`nr-cert-monitor`](ht
 | `ca` | no | `letsencrypt` | `letsencrypt` or `letsencrypt-staging`. An omitted value selects production |
 | `force` | no | `false` | Reissue now even if not due |
 | `timeout` | no | `300` | Seconds to wait for issuance, at least 30 |
-| `oc_namespace`, `oc_server`, `oc_token` | yes | | The token needs create and delete on pods, services, routes and networkpolicies, and `pods/exec` |
+| `oc_namespace`, `oc_server`, `oc_token` | yes | | The token needs create, get and delete on pods, services, routes and networkpolicies, `pods/exec`, pod logs, and create on secrets (see [Add a host](#add-a-host-step-by-step)) |
 
 ## Outputs
 
@@ -131,11 +175,47 @@ Pin to a release SHA, never `@main`. Also add the host to [`nr-cert-monitor`](ht
 
 ## Limits
 
-Let's Encrypt rate limits ([source](https://letsencrypt.org/docs/rate-limits/)):
+### Let's Encrypt's limits
 
-- **50 new certificates per registered domain per 7 days**, shared by everyone. `bc.ca` is on the Public Suffix List, so the registered domain is `gov.bc.ca` and the whole province shares it. Renewals are exempt from this one.
-- **5 certificates per exact set of names per 7 days.** Renewals count, which is why the gate only issues when due, and why repeated `force` runs can lock a host out for days.
-- **5 failed validations per host per hour** per account. Debug on `letsencrypt-staging`.
+These come from Let's Encrypt's [rate limits page](https://letsencrypt.org/docs/rate-limits/).
+
+| Limit | Allowance | Who shares it | In practice |
+|---|---|---|---|
+| Certificates for one exact hostname | 5 per 7 days, one more every 34 hours | Everyone, for that hostname | Renewals count. A normal host uses about one a month. Repeated `force` runs or testing can use it up. No override. |
+| New certificates per registered domain | 50 per 7 days, one more every 202 minutes | Everyone under `gov.bc.ca`, across all accounts | `bc.ca` is on the Public Suffix List, so the whole province shares this one. Renewals do not count, only first-time names. An override form exists and takes weeks. |
+| New accounts per IP address | 10 per 3 hours | Everyone on that IP | Each run that issues registers a fresh account from a GitHub runner, and runner IPs are shared. No override. |
+| Failed validations | 5 per hour per host, counted per account | Per host and account | `cert-keeper` registers a new account every run, so one run's failures do not carry over to the next and this rarely bites. It matters if you run `lego` by hand with one account while debugging. |
+
+### Limits of `cert-keeper` itself
+
+- **One hostname per run.** No wildcards. Call it once per host.
+- **HTTP-01 on OpenShift Routes only.** The host must be public, its DNS must point at the cluster router, and port 80 must be reachable.
+- **Shrinking lifetimes.** The one-third rule adapts, but renewals become more frequent as certificates get shorter.
+- **OpenShift API reliability.** The connection from GitHub runners to the API has dropped during testing. `cert-keeper` retries for up to 15 minutes while copying the certificate out, and `route-tls` retries network errors up to 12 times when installing. A longer outage fails that run: the current certificate keeps serving, the code owners are alerted, and the next daily run tries again.
+- **Scheduling.** GitHub can delay or drop scheduled runs, and disables schedules in public repos after 60 days without activity.
+- **Dependencies.** The cluster pulls the `lego` image from Docker Hub, pinned by digest.
+- **Policy.** Whether Let's Encrypt is approved for your domain is for your organization to settle; `cert-keeper` does not decide it.
+
+## Rolling it out
+
+- Only first-time names count against the shared 50 a week, so adding many new hosts in one week is what can reach it. Renewals do not.
+- Pick your own minute in the `cron` line, so repos do not all run at the same moment.
+- Rehearse on a host nobody is using before a real one, and do not use `force` to test, because it spends the per-host allowance.
+- Add each host to `nr-cert-monitor` so a stalled renewal is noticed.
+
+## FAQ
+
+**Why not cert-manager or another existing tool?** Cluster-side controllers such as cert-manager or `openshift-routes` need a cluster admin to install, which app teams normally do not have. If your cluster provides one, prefer it. The namespace-level controller `openshift-acme` is archived, and ACME clients run from GitHub usually answer the challenge through DNS, which most teams here cannot change.
+
+**What if it fails?** The run fails, the code owners get an issue from `workflow-notifier`, the current certificate keeps serving, and the next daily run tries again. Renewal starts at about 15 days left on a 47 day certificate, so there are roughly two weeks of daily tries.
+
+**Is Let's Encrypt allowed for my domain?** That is an organizational decision, not something this action can answer. For Natural Resources the question is tracked in [#159](https://github.com/bcgov/actions-openshift/issues/159).
+
+**Can it use another certificate authority?** Today `ca` accepts `letsencrypt` and `letsencrypt-staging`. Another ACME authority would be a change to the action, and some need extra credentials.
+
+**What happens to my current certificate?** It stays until the new one is installed. `route-tls` saves the old one as a backup Secret first.
+
+**How do I stop it?** Disable the workflow. The current certificate stays on the Route until it expires.
 
 ## Common fixes
 
