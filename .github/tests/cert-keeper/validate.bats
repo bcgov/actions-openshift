@@ -60,6 +60,9 @@ case "$1" in
     exit 0
     ;;
   exec)
+    if [ -n "${EXEC_FAIL_ALWAYS-}" ]; then
+      exit 1
+    fi
     if [ -n "${EXEC_FAILS-}" ] && [ "$(grep -c '^exec ' "$OC_LOG")" -le "$EXEC_FAILS" ]; then
       exit 1
     fi
@@ -90,6 +93,7 @@ issue() {
     HELPER_READY="${HELPER_READY-1}" \
     WAITING="${WAITING-}" \
     EXEC_FAILS="${EXEC_FAILS-}" \
+    EXEC_FAIL_ALWAYS="${EXEC_FAIL_ALWAYS-}" \
     DELETE_RC="${DELETE_RC-0}" \
     RETRY_DELAY=0 \
     COPY_WINDOW="${COPY_WINDOW-1}" \
@@ -253,14 +257,16 @@ issue() {
 }
 
 @test "mocked API drop during copy retries and keeps the certificate" {
-  EXEC_FAILS=2 issue
+  # A roomy window: the third attempt succeeds at once, so it never waits it out
+  COPY_WINDOW=60 EXEC_FAILS=2 issue
   [ "$status" -eq 0 ]
   [[ "$output" == *"Issued app.example.gov.bc.ca"* ]]
   cmp -s "${D}/out/tls.key" "${D}/leaf.key"
 }
 
 @test "mocked API loss during copy fails with a clear error" {
-  EXEC_FAILS=99 issue
+  # Retries are bounded by time, not count, so the mock must fail on every attempt
+  EXEC_FAIL_ALWAYS=1 issue
   [ "$status" -eq 1 ]
   [[ "$output" == *"could not copy the private key"* ]]
 }
