@@ -71,15 +71,18 @@ runs:
         echo "ca=${ca}" >> "$GITHUB_OUTPUT"
         echo "force=${force}" >> "$GITHUB_OUTPUT"
 
-    # Reads the certificate the host serves today; one rule shared with nr-cert-monitor
+    # Reads the certificate the host serves today (check.sh, read-only)
     - name: Check current certificate
       id: gate
-      uses: $/cert-expiry
-      with:
-        hosts: ${{ inputs.hostname }}
-        lifetime_divisor: "3"
-        margin_days: "0"
-        fail_on_findings: "false"
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUT_HOSTS: ${{ inputs.hostname }}
+        INPUT_LIFETIME_DIVISOR: "3"
+        INPUT_MARGIN_DAYS: "0"
+        INPUT_TIMEOUT: "10"
+        INPUT_FAIL_ON_FINDINGS: "false"
+      run: bash "${ACTION_PATH}/check.sh"
 
     - name: Decide
       id: decide

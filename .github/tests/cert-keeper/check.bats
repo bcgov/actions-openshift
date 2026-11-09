@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# cert-expiry reads public leaf certificates from local openssl s_server
+# check.sh reads public leaf certificates from local openssl s_server
 # instances and reports expiring, expired and unreadable hosts. It prints only
 # hosts, dates and day counts, never certificate or key material.
 
@@ -38,7 +38,7 @@ teardown_file() {
 }
 
 setup() {
-  SCRIPT="${BATS_TEST_DIRNAME}/../../../cert-expiry/check.sh"
+  SCRIPT="${BATS_TEST_DIRNAME}/../../../cert-keeper/check.sh"
   export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/output"
   export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary"
   : > "$GITHUB_OUTPUT"
