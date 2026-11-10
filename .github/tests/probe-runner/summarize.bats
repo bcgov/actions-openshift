@@ -71,10 +71,11 @@ MISSING_NOTE="Missing samples mean results didn't come back, which is usually a 
   grep -F '| 5 | 20.0.0.5 | 200 200 200 | 200 200 200 | 200 200 200 | false | false |' "$GITHUB_STEP_SUMMARY"
   grep -F 'Samples: 4, missing: 1, unique IPs: 4, API blocked: 1, router OK while API blocked: 1' "$GITHUB_STEP_SUMMARY"
   grep -F "$MISSING_NOTE" "$GITHUB_STEP_SUMMARY"
-  # Note sits under the table, not merged into the API-blocked warning
-  [[ "$output" == *"::warning::OpenShift API unreachable from 1 of 4 runner sample(s); recorded in the table above and in probe-results"* ]]
+  # Note sits under the table and in the error; the API-blocked warning is unchanged and separate
+  warning_line="$(printf '%s\n' "$output" | grep -F '::warning::')"
+  [ "$warning_line" = "::warning::OpenShift API unreachable from 1 of 4 runner sample(s); recorded in the table above and in probe-results" ]
+  [[ "$warning_line" != *"$MISSING_NOTE"* ]]
   [[ "$output" == *"::error::Incomplete probe record: expected samples 1-5, missing 4. Re-run all jobs to regenerate missing or expired samples. ${MISSING_NOTE}"* ]]
-  [[ "$output" != *"::warning::"*"$MISSING_NOTE"* ]]
   # probe-results.json still lists only samples that came back
   [ "$(jq '.samples | map(.sample | tonumber) | sort | . == [1, 2, 3, 5]' probe-results.json)" = true ]
   [ "$(jq '.samples | length' probe-results.json)" = 4 ]
