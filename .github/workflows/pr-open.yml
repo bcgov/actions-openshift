@@ -664,6 +664,25 @@ jobs:
           done
           exit $fail
 
+  # Fixture test of the Probe Runner Reachability Summary script. Cheap (no
+  # cluster); always runs so missing-sample reporting stays covered.
+  test-probe-summary:
+    name: Test Probe Summary
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Summarize fixtures (bats)
+        run: |
+          set -euo pipefail
+          command -v bats >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq bats; }
+          bats .github/tests/probe-runner/summarize.bats
+
   # Single merge gate for this workflow. Skipped jobs count as passing, so path-filtered
   # and same-repo-only jobs still let it report; it fails on any failed or cancelled job.
   results:
@@ -679,6 +698,7 @@ jobs:
       - test-fork-token-degradation
       - test-image-import
       - test-unknown-inputs
+      - test-probe-summary
     if: always()
     permissions:
       contents: read
