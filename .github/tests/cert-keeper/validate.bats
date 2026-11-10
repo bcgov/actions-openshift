@@ -128,6 +128,20 @@ issue() {
   [ "$status" -eq 1 ]
 }
 
+@test "email is optional: no --email is rendered when it is empty" {
+  ACME_EMAIL='' RENDER_ONLY=true run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'--email'* ]]
+  [[ "$output" == *'run, --accept-tos, --server,'* ]]
+}
+
+@test "email is optional: no --email is rendered when it is unset" {
+  unset ACME_EMAIL
+  RENDER_ONLY=true run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'--email'* ]]
+}
+
 @test "rejects unknown ca" {
   CA=other run bash "$SCRIPT"
   [ "$status" -eq 1 ]
