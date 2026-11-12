@@ -153,6 +153,24 @@ equals "rollback: source writable" "$(sql src "INSERT INTO public.users (name) V
 
 if [ -z "$GIS_NEW" ]; then exit "$FAILED"; fi
 
+# Source extensions the target image lacks, e.g. postgis_tiger_geocoder: the postgis/postgis images
+# before PostGIS 3.7 install it in every database, and PostGIS 3.7 removed it. The upgrade must stop
+# before any change; then the README's fix (drop the unused extension on the source) lets it through.
+GONE="$(sql gsrc "SELECT extname FROM pg_extension WHERE extname <> 'plpgsql' ORDER BY 1" | while read -r e; do
+  [ "$(sql gtgt "SELECT count(*) FROM pg_available_extensions WHERE name = '${e}'")" = 1 ] || echo "$e"
+done)"
+if [ -n "$GONE" ]; then
+  check "extension missing from the target image stops the upgrade" fail "Extension\\(s\\) $(paste -sd' ' <<< "$GONE") used by the source are not available.*Neither database was changed" -- run_job "$GIS_NEW" upgrade gsrc gtgt
+  if grep -q "DROP EXTENSION <name>;" "$LOG"; then echo "PASS: missing extension: fix names DROP EXTENSION"; else echo "FAIL: missing extension: fix does not name DROP EXTENSION"; FAILED=1; fi
+  equals "missing extension: target still empty" "$(sql gtgt "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")" 0
+  equals "missing extension: source not paused" "$(sql gsrc "SHOW default_transaction_read_only")" off
+  # The README's fix, without CASCADE
+  while read -r e; do sql gsrc "DROP EXTENSION \"${e}\"" > /dev/null; done <<< "$GONE"
+  echo "Dropped from the source, as the README says: $(paste -sd' ' <<< "$GONE")"
+else
+  echo "Every ${GIS_OLD} extension exists in ${GIS_NEW}; the missing-extension path needs an older source here"
+fi
+
 # A failure part-way through the restore commits nothing and lifts the write pause.
 # The non-superuser target role can't CREATE EXTENSION postgis in a database without it.
 sql gtgt "CREATE ROLE appuser LOGIN PASSWORD '${PW}'" > /dev/null
