@@ -128,7 +128,7 @@ An older template that runs the database as a Deployment works the same way: dep
 
 Use the `postgis/postgis` image for the new major, with the PostGIS version your target runs, e.g. `image: postgis/postgis:18-3.6`. The extension is created at the target's version during the restore.
 
-Every extension the source has must exist in the target image, or the action stops before anything changes (a rehearsal shows it too). PostGIS 3.7 removed `postgis_tiger_geocoder` and `address_standardizer`, and the `postgis/postgis` images before 3.7 install `postgis_tiger_geocoder` (with `fuzzystrmatch`) in every new database, so an older source often has it without using it. Either:
+Every extension the source has must exist in the target image, or the action stops before copying data or pausing writes (a rehearsal shows it too). PostGIS 3.7 removed `postgis_tiger_geocoder` and `address_standardizer`, and the `postgis/postgis` images before 3.7 install `postgis_tiger_geocoder` (with `fuzzystrmatch`) in every new database, so an older source often has it without using it. Either:
 
 - Drop it on the source if nothing uses it: `DROP EXTENSION postgis_tiger_geocoder;`. Leave out `CASCADE`, so PostgreSQL refuses while anything (such as loaded TIGER data) depends on it. `fuzzystrmatch` can stay; it ships with PostgreSQL.
 - Keep it by targeting a PostGIS 3.6 image, e.g. `postgis/postgis:18-3.6`.

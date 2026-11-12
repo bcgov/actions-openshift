@@ -159,7 +159,7 @@ if [ -z "$GIS_NEW" ]; then exit "$FAILED"; fi
 GONE="$(comm -23 <(sql gsrc "SELECT extname FROM pg_extension WHERE extname <> 'plpgsql'" | LC_ALL=C sort) \
   <(sql gtgt "SELECT name FROM pg_available_extensions" | LC_ALL=C sort))"
 if [ -n "$GONE" ]; then
-  check "extension missing from the target image stops the upgrade" fail "Extension\\(s\\) .* used by the source are not available.*Neither database was changed" -- run_job "$GIS_NEW" upgrade gsrc gtgt
+  check "extension missing from the target image stops the upgrade" fail "Extension\\(s\\) .* used by the source are not available.*Stopped before copying data or pausing writes" -- run_job "$GIS_NEW" upgrade gsrc gtgt
   for e in $GONE; do
     if grep -qE "^::error::Extension\\(s\\) (.* )?${e}( .*)? used by" "$LOG"; then echo "PASS: missing extension: names ${e}"; else echo "FAIL: missing extension: ${e} not named"; FAILED=1; fi
   done
