@@ -164,6 +164,26 @@ equals "rollback without a recorded original: source writable" "$(sql src "INSER
 
 if [ -z "$GIS_NEW" ]; then exit "$FAILED"; fi
 
+# Source extensions the target image lacks, e.g. postgis_tiger_geocoder: the postgis/postgis images
+# before PostGIS 3.7 install it in every database, and PostGIS 3.7 removed it. The upgrade must stop
+# before any change; then the README's fix (drop the unused extension on the source) lets it through.
+GONE="$(comm -23 <(sql gsrc "SELECT extname FROM pg_extension WHERE extname <> 'plpgsql'" | LC_ALL=C sort) \
+  <(sql gtgt "SELECT name FROM pg_available_extensions" | LC_ALL=C sort))"
+if [ -n "$GONE" ]; then
+  check "extension missing from the target image stops the upgrade" fail "Extension\\(s\\) .* used by the source are not available.*Stopped before copying data or pausing writes" -- run_job "$GIS_NEW" upgrade gsrc gtgt
+  for e in $GONE; do
+    if grep -qE "^::error::Extension\\(s\\) (.* )?${e}( .*)? used by" "$LOG"; then echo "PASS: missing extension: names ${e}"; else echo "FAIL: missing extension: ${e} not named"; FAILED=1; fi
+  done
+  if grep -q "DROP EXTENSION <name>;" "$LOG"; then echo "PASS: missing extension: fix names DROP EXTENSION"; else echo "FAIL: missing extension: fix does not name DROP EXTENSION"; FAILED=1; fi
+  equals "missing extension: nothing copied to the target" "$(sql gtgt "SELECT to_regclass('public.places') IS NULL")" t
+  equals "missing extension: source not paused" "$(sql gsrc "SHOW default_transaction_read_only")" off
+  # The README's fix, without CASCADE
+  for e in $GONE; do sql gsrc "DROP EXTENSION \"${e}\"" > /dev/null; done
+  echo "Dropped from the source, as the README says: $(paste -sd' ' <<< "$GONE")"
+else
+  echo "Every ${GIS_OLD} extension exists in ${GIS_NEW}; the missing-extension path needs an older source here"
+fi
+
 # A failure part-way through the restore commits nothing and lifts the write pause.
 # The non-superuser target role can't CREATE EXTENSION postgis in a database without it.
 sql gtgt "CREATE ROLE appuser LOGIN PASSWORD '${PW}'" > /dev/null
