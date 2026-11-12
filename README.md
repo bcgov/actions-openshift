@@ -13,8 +13,8 @@ Cleans up Helm releases, labeled resources, and PVCs in a target OpenShift names
 * See [cleanup-pr/README.md](./cleanup-pr/README.md) for detailed inputs and usage.
 
 ### 2. [cert-keeper](./cert-keeper) (Composite Action)
-Keeps a host's SSL/TLS certificate valid on an OpenShift Route: gets a free Let's Encrypt certificate when the host has none or is running low, installs it on the Route, and cleans up.
-* See [cert-keeper/README.md](./cert-keeper/README.md) for the daily workflow, how it decides, and rate limits.
+Keeps a host's SSL/TLS certificate valid on an OpenShift Route: gets a free Let's Encrypt certificate when the host has none or is running low (or installs a pre-supplied certificate from `tls_certificate` / `tls_private_key` / `tls_ca_certificate`), installs it on the Route, and cleans up.
+* See [cert-keeper/README.md](./cert-keeper/README.md) for the daily workflow, pre-supplied certificate inputs, how it decides, and rate limits.
 
 
 ### 3. [Image Import](./image-import) (Composite Action)

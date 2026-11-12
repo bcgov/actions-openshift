@@ -324,6 +324,9 @@ if ! LIVE_NOT_AFTER="$(printf '%s\n' "$LIVE_CERT" | openssl x509 -noout -enddate
   die "Route ${ROUTE_NAME} certificate expiry could not be read after apply."
 fi
 [ -n "$LIVE_NOT_AFTER" ] || die "Route ${ROUTE_NAME} certificate has no expiry after apply."
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "not_after=${LIVE_NOT_AFTER}" >> "$GITHUB_OUTPUT"
+fi
 
 echo "Applied route $ROUTE_NAME -> $TARGET_SERVICE (host $ROUTE_HOST). Certificate expires ${LIVE_NOT_AFTER}."
 summarize "dry_run=false. Applied route ${ROUTE_NAME} to ${TARGET_SERVICE} for ${ROUTE_HOST}. Certificate expires ${LIVE_NOT_AFTER}."
