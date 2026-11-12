@@ -163,7 +163,8 @@ if [ -n "$EXTS" ]; then
   done <<< "$EXTS")"
   if [ -n "$MISSING" ]; then
     stop_rehearsal
-    fail "Extension(s) $(echo "$MISSING" | paste -sd' ') used by the source are not available in PostgreSQL ${CLIENT_MAJOR} from this image." "Use an image that provides them, e.g. postgis/postgis:${CLIENT_MAJOR}-<postgis version> for PostGIS."
+    fail "Extension(s) $(echo "$MISSING" | paste -sd' ') used by the source are not available in PostgreSQL ${CLIENT_MAJOR} from this image. Stopped before copying data or pausing writes." \
+      "Use an image that provides them, e.g. postgis/postgis:${CLIENT_MAJOR}-<postgis version> for PostGIS (PostGIS 3.7 removed postgis_tiger_geocoder and address_standardizer; 3.6 images still have them). If the source does not use one, drop it on the source first with DROP EXTENSION <name>; (no CASCADE, so it refuses while anything depends on it) and re-run."
   fi
 fi
 
