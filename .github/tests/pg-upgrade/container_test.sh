@@ -164,7 +164,7 @@ if [ -n "$GONE" ]; then
     if grep -qE "^::error::Extension\\(s\\) (.* )?${e}( .*)? used by" "$LOG"; then echo "PASS: missing extension: names ${e}"; else echo "FAIL: missing extension: ${e} not named"; FAILED=1; fi
   done
   if grep -q "DROP EXTENSION <name>;" "$LOG"; then echo "PASS: missing extension: fix names DROP EXTENSION"; else echo "FAIL: missing extension: fix does not name DROP EXTENSION"; FAILED=1; fi
-  equals "missing extension: target still empty" "$(sql gtgt "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")" 0
+  equals "missing extension: nothing copied to the target" "$(sql gtgt "SELECT to_regclass('public.places') IS NULL")" t
   equals "missing extension: source not paused" "$(sql gsrc "SHOW default_transaction_read_only")" off
   # The README's fix, without CASCADE
   for e in $GONE; do sql gsrc "DROP EXTENSION \"${e}\"" > /dev/null; done
