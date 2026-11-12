@@ -151,6 +151,17 @@ check "non-empty target is refused" fail "is not empty" -- run_job "$PG_NEW" upg
 check "rollback makes the source writable" pass "accepts writes again" -- run_job "$PG_NEW" rollback src
 equals "rollback: source writable" "$(sql src "INSERT INTO public.users (name) VALUES ('after rollback') RETURNING 'ok'")" ok
 
+# A source that was read-only on purpose stays read-only when the runner's rollback Job passes the original back
+sql src "ALTER DATABASE app SET default_transaction_read_only = on"
+check "rollback restores a read-only original" pass "restored to on" -- run_job "$PG_NEW" rollback src "" -e ORIG_READ_ONLY=on
+if sql src "INSERT INTO public.users (name) VALUES ('must fail')" > /dev/null 2>&1; then
+  echo "FAIL: rollback with a read-only original: source became writable"; FAILED=1
+else
+  echo "PASS: rollback with a read-only original: source still read-only"
+fi
+check "rollback without a recorded original makes the source writable" pass "accepts writes again" -- run_job "$PG_NEW" rollback src
+equals "rollback without a recorded original: source writable" "$(sql src "INSERT INTO public.users (name) VALUES ('writable again') RETURNING 'ok'")" ok
+
 if [ -z "$GIS_NEW" ]; then exit "$FAILED"; fi
 
 # A failure part-way through the restore commits nothing and lifts the write pause.
@@ -160,6 +171,17 @@ sql gtgt "CREATE DATABASE app2 OWNER appuser TEMPLATE template0" > /dev/null
 TGT_DB=app2 TGT_USER=appuser check "failed restore rolls back" fail "nothing was committed" -- run_job "$GIS_NEW" upgrade gsrc gtgt
 equals "failed restore: target still empty" "$(sql gtgt "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'" app2)" 0
 equals "failed restore: source writable" "$(sql gsrc "INSERT INTO public.places (geom) VALUES (NULL) RETURNING 'ok'")" ok
+
+# Same failure with a source that was read-only before the upgrade: the Job's own rollback must leave it read-only
+sql gsrc "ALTER DATABASE app SET default_transaction_read_only = on"
+TGT_DB=app2 TGT_USER=appuser check "failed restore of a read-only source" fail "nothing was committed" -- run_job "$GIS_NEW" upgrade gsrc gtgt
+if sql gsrc "INSERT INTO public.places (geom) VALUES (NULL)" > /dev/null 2>&1; then
+  echo "FAIL: failed restore: read-only source became writable"; FAILED=1
+else
+  echo "PASS: failed restore: read-only source is still read-only"
+fi
+equals "failed restore: read-only setting kept" "$(sql gsrc "SELECT setting FROM pg_settings WHERE name = 'default_transaction_read_only'")" on
+sql gsrc "ALTER DATABASE app RESET default_transaction_read_only"
 
 check "PostGIS upgrade copies and verifies" pass "public.places: 301 rows" -- run_job "$GIS_NEW" upgrade gsrc gtgt
 equals "PostGIS: geometry works on the target" "$(sql gtgt "SELECT count(*) FROM public.places WHERE ST_X(geom) > -123")" 300

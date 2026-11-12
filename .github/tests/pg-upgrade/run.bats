@@ -128,18 +128,36 @@ job_json() { cat "${STATE}"/Job-*.json; }
   [ "$(wc -l < "${STATE}/deleted-np")" -eq 2 ]
 }
 
-@test "after a failed upgrade Job the runner lifts the write pause itself" {
-  export JOB_RESULT=upgrade-failed
+@test "after a failed upgrade Job the runner restores the source's original read-only setting" {
+  export JOB_RESULT=upgrade-failed STATS_LINE="pg-upgrade original-read-only: on"
   run_script
   [ "$status" -eq 1 ]
   ls "${STATE}"/Job-*-rb.json
   [ "$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "MODE") | .value' "${STATE}"/Job-*-rb.json)" = rollback ]
+  [ "$(jq -r '.spec.template.spec.containers[0].env[] | select(.name == "ORIG_READ_ONLY") | .value' "${STATE}"/Job-*-rb.json)" = on ]
+  [[ "$output" == *"back to default_transaction_read_only=on"* ]]
   [[ "$output" == *"accepts writes."* ]]
   [ ! -f "${STATE}/marker" ]
 }
 
+@test "a failed upgrade Job that never paused writes leaves the source alone" {
+  export JOB_RESULT=upgrade-failed
+  run_script
+  [ "$status" -eq 1 ]
+  ! ls "${STATE}"/Job-*-rb.json 2> /dev/null
+  [[ "$output" == *"Upgrade failed before writes were paused"* ]]
+  [ ! -f "${STATE}/marker" ]
+}
+
+@test "a rollback run by the user passes no original and clears the setting" {
+  export MODE=rollback
+  run_script
+  [ "$status" -eq 0 ]
+  [ "$(job_json | jq '[.spec.template.spec.containers[0].env[] | select(.name == "ORIG_READ_ONLY")] | length')" = 0 ]
+}
+
 @test "if lifting the write pause also fails, the step says to run rollback" {
-  export JOB_RESULT=failed
+  export JOB_RESULT=failed STATS_LINE="pg-upgrade original-read-only: default"
   run_script
   [ "$status" -eq 1 ]
   [[ "$output" == *"may still be read-only."* ]]

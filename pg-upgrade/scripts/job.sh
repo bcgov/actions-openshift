@@ -2,7 +2,8 @@
 # Runs inside the pg-upgrade Job pod, from the official postgres or postgis/postgis image.
 # MODE=upgrade:  copy SOURCE into the empty TARGET in one transaction, verify, commit; SOURCE stays read-only.
 # MODE=rehearse: copy SOURCE into a throwaway server in this pod and verify; nothing else changes.
-# MODE=rollback: make SOURCE writable again.
+# MODE=rollback: put SOURCE's default_transaction_read_only back to ORIG_READ_ONLY (its value before the
+#                upgrade paused writes); without it, clear the setting so SOURCE is writable.
 # Never prints passwords; they reach psql/pg_dump only through PGPASSWORD.
 set -euo pipefail
 
@@ -57,10 +58,19 @@ WRITES_SQL="SELECT coalesce(pg_catalog.sum(n_tup_ins + n_tup_upd + n_tup_del), 0
 TABLES_SQL="SELECT pg_catalog.format('%I.%I', n.nspname, c.relname) AS t FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'r' AND ${USER_NS} AND ${NOT_EXT_CLASS}"
 SEQS_SQL="SELECT pg_catalog.format('%I.%I', s.schemaname, s.sequencename) AS q, s.last_value FROM pg_catalog.pg_sequences s JOIN pg_catalog.pg_namespace n ON n.nspname = s.schemaname JOIN pg_catalog.pg_class c ON c.relnamespace = n.oid AND c.relname = s.sequencename WHERE ${USER_NS} AND ${NOT_EXT_CLASS}"
 
+# The database-level default_transaction_read_only before the write pause, or "default" if none was set.
+# Upgrade captures it; rollback gets it from the runner as ORIG_READ_ONLY, and clears the setting without it.
+ORIG_READ_ONLY="${ORIG_READ_ONLY:-default}"
 unfreeze_source() {
-  src_admin -v db="$SRC_DB" <<'SQL'
+  if [ "$ORIG_READ_ONLY" = default ]; then
+    src_admin -v db="$SRC_DB" <<'SQL'
 ALTER DATABASE :"db" RESET default_transaction_read_only;
 SQL
+  else
+    src_admin -v db="$SRC_DB" -v orig="$ORIG_READ_ONLY" <<'SQL'
+ALTER DATABASE :"db" SET default_transaction_read_only = :'orig';
+SQL
+  fi
 }
 
 echo "Mode: ${MODE}"
@@ -71,7 +81,11 @@ echo "Source ${SOURCE_HOST}: PostgreSQL ${SRC_MAJOR}"
 
 if [ "$MODE" = rollback ]; then
   unfreeze_source || fail "Could not make ${SOURCE_HOST} writable again." "Connect as the database owner or a superuser and run: ALTER DATABASE <name> RESET default_transaction_read_only"
-  echo "Source ${SOURCE_HOST} accepts writes again (new sessions; restart clients that are still connected)"
+  if [ "$ORIG_READ_ONLY" = default ]; then
+    echo "Source ${SOURCE_HOST} accepts writes again (new sessions; restart clients that are still connected)"
+  else
+    echo "Source ${SOURCE_HOST} default_transaction_read_only restored to ${ORIG_READ_ONLY}, as before the upgrade"
+  fi
   exit 0
 fi
 
@@ -176,7 +190,7 @@ on_exit() {
   stop_rehearsal
   if [ "$rc" -ne 0 ] && [ "$FROZEN" = 1 ]; then
     if unfreeze_source; then
-      echo "Source ${SOURCE_HOST} accepts writes again; nothing was committed to the target."
+      echo "Source ${SOURCE_HOST} write pause lifted (default_transaction_read_only back to ${ORIG_READ_ONLY}); nothing was committed to the target."
     else
       echo "::error::Could not lift the write pause on ${SOURCE_HOST}."
       echo "Fix: re-run this action with mode: rollback to make the source writable again."
@@ -186,6 +200,16 @@ on_exit() {
 trap on_exit EXIT
 
 if [ "$MODE" = upgrade ]; then
+  # Remember the source's own setting, so a failure puts it back instead of making a read-only source writable.
+  # The runner reads this line from the log if this Job is killed before it can restore it.
+  ORIG_READ_ONLY="$(src_admin -At <<'SQL'
+SELECT coalesce((SELECT pg_catalog.substr(s, pg_catalog.length('default_transaction_read_only=') + 1)
+  FROM pg_catalog.pg_db_role_setting r, pg_catalog.unnest(r.setconfig) s
+  WHERE r.setrole = 0 AND s LIKE 'default\_transaction\_read\_only=%'
+    AND r.setdatabase = (SELECT oid FROM pg_catalog.pg_database WHERE datname = pg_catalog.current_database())), 'default')
+SQL
+)"
+  echo "pg-upgrade original-read-only: ${ORIG_READ_ONLY}"
   # Write pause: new sessions on the source database start read-only, then existing sessions are ended.
   # Clients reconnect read-only; reads keep working, writes fail until the app moves to the target.
   src_admin -v db="$SRC_DB" <<'SQL' || fail "Could not pause writes on ${SOURCE_HOST}." "The source database user must own the database or be a superuser."
