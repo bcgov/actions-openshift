@@ -204,6 +204,8 @@ jobs:
       - uses: bcgov/actions-openshift/cert-keeper@<sha> # vX.Y.Z
         with:
           hostname: ${{ vars.VANITY_HOST }}
+          # Keep the existing Route name when migrating (legacy templates use
+          # <repository>-prod-frontend-vanity); use -vanity-url only for a new standalone Route.
           route_name: ${{ github.event.repository.name }}-vanity-url
           target_service: ${{ github.event.repository.name }}-prod-frontend
           tls_certificate: ${{ secrets.TLS_CERTIFICATE }}
