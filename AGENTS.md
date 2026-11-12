@@ -24,9 +24,9 @@ Repository facts and constraints for automated coding assistants.
 
 ## Action Architecture & Rules
 
-- **`cert-keeper` is standalone only**: When assisting downstream repositories with custom vanity Route TLS, always implement it as an independent workflow (`.github/workflows/cert-keeper.yml` on a daily `schedule` and `workflow_dispatch`, as in the cert-keeper README). **NEVER** embed `cert-keeper` into `merge.yml`, `release.yml`, or continuous deployment pipelines.
+- **`cert-keeper` is standalone only**: When assisting downstream repositories with custom vanity Route TLS, always implement it as an independent workflow (`.github/workflows/cert-keeper.yml` on a daily `schedule` and `workflow_dispatch` for Let's Encrypt, or on-demand `workflow_dispatch` when passing pre-supplied `tls_certificate`, `tls_private_key`, and `tls_ca_certificate`, as in the cert-keeper README). **NEVER** embed `cert-keeper` into `merge.yml`, `release.yml`, or continuous deployment pipelines.
 - **`route_name` is required on `cert-keeper`**: Never assume a default route name. Check the target repository's deployment templates or existing OpenShift routes. For existing repositories migrated from legacy templates, pass `route_name: ${{ github.event.repository.name }}-prod-frontend-vanity` explicitly; for new standalone routes, use `<repository>-vanity-url` so PR-close sweeps do not delete it.
-- **Secret Management**: Certificates belong in the `prod` GitHub Environment (`TLS_CERTIFICATE`, `TLS_PRIVATE_KEY`, `TLS_CA_CERTIFICATE`). Automated assistants must never manage secrets directly; draft copy-pasteable `gh secret set` commands in chat for human maintainers.
+- **Secret Management (pre-supplied certificates)**: When using `cert-keeper` with pre-supplied certificates instead of Let's Encrypt, certificates belong in the `prod` GitHub Environment (`TLS_CERTIFICATE`, `TLS_PRIVATE_KEY`, `TLS_CA_CERTIFICATE`). Automated assistants must never manage secrets directly; draft copy-pasteable `gh secret set` commands in chat for human maintainers.
 - **Entrust Certificate Mapping**:
   - `TLS_CERTIFICATE`: leaf only (`<host>.pem`).
   - `TLS_PRIVATE_KEY`: unencrypted private key (`<host>.key`).

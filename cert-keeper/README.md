@@ -2,7 +2,7 @@
 
 Keeps one hostname's SSL/TLS certificate valid on an OpenShift Route. When the host has no certificate of its own, or is running low, it gets a free [Let's Encrypt](https://letsencrypt.org/) certificate, installs it on your Route, and cleans up. No Service Desk ticket and no paid certificate per renewal, once the host's DNS already points at the cluster router.
 
-Each repo opts in and runs it for its own hosts. Out of scope: wildcards and DNS-01 (see `bcgov/cert-manager-proxy`), several hosts on one certificate, platforms other than OpenShift Routes, and replacing Entrust where a ministry requires it.
+Each repo opts in and runs it for its own hosts. If you must install a pre-supplied certificate (for example, an Entrust certificate stored in GitHub Secrets, replacing the removed `route-tls` action), pass `tls_certificate`, `tls_private_key`, and `tls_ca_certificate` to skip Let's Encrypt issuance and run the install step directly (see [Pre-supplied certificates](#pre-supplied-certificates-entrust--github-secrets)). Out of scope: wildcards and DNS-01 for Let's Encrypt (see `bcgov/cert-manager-proxy`), several hosts on one Let's Encrypt certificate, and platforms other than OpenShift Routes.
 
 ## In plain words
 
@@ -150,6 +150,73 @@ Pin to a release SHA, never `@main`. Also add the host to [`nr-cert-monitor`](ht
 - No Route in another namespace already claims the host.
 - To rehearse, `ca: letsencrypt-staging` proves it end to end, but it installs an untrusted certificate on the Route that the daily check will not replace on its own (run once with `force: true` afterwards), so use it only on a host nobody is using yet.
 
+## Pre-supplied certificates (Entrust / GitHub Secrets)
+
+Let's Encrypt self-renewal (above) is the recommended setup. For repositories that still install a pre-supplied certificate from GitHub Secrets (migrating from the removed `route-tls` action), pass `tls_certificate`, `tls_private_key`, and `tls_ca_certificate`. When all three are provided, `cert-keeper` skips the Let's Encrypt check and `lego` Pod, validates the PEMs with `openssl`, backs up the existing Route's certificate to a `<route_name>-backup-<hash>` Secret, and applies the Route.
+
+### Entrust package mapping (`prod` GitHub Environment secrets)
+
+| Secret | File in the Entrust package | Notes |
+|---|---|---|
+| `TLS_CERTIFICATE` | `<host>.pem` | Leaf certificate only (CN/SAN covers `hostname`) |
+| `TLS_PRIVATE_KEY` | `<host>.key` | Unencrypted private key (`BEGIN PRIVATE KEY`) |
+| `TLS_CA_CERTIFICATE` | `Entrust OV TLS Issuing RSA CA 2.pem` | Issuing intermediate CA only (issuer of the leaf first). Exclude root CAs and `.csr` |
+
+```bash
+CERT_HOST='myapp.gov.bc.ca'
+gh secret set TLS_CERTIFICATE    --env prod < "${CERT_HOST}/${CERT_HOST}.pem"
+gh secret set TLS_PRIVATE_KEY    --env prod < "${CERT_HOST}/${CERT_HOST}.key"
+gh secret set TLS_CA_CERTIFICATE --env prod < "${CERT_HOST}/Entrust OV TLS Issuing RSA CA 2.pem"
+```
+
+### Standalone `workflow_dispatch` example (pre-supplied certificates)
+
+```yaml
+name: Cert Keeper (pre-supplied)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: true = validate PEMs and check Route only, false = apply"
+        required: true
+        type: choice
+        default: "true"
+        options:
+          - "true"
+          - "false"
+
+concurrency:
+  group: cert-keeper
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  cert-keeper:
+    name: Install certificate (dry_run=${{ inputs.dry_run }})
+    environment: prod
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: bcgov/actions-openshift/cert-keeper@<sha> # vX.Y.Z
+        with:
+          hostname: ${{ vars.VANITY_HOST }}
+          route_name: ${{ github.event.repository.name }}-vanity-url
+          target_service: ${{ github.event.repository.name }}-prod-frontend
+          tls_certificate: ${{ secrets.TLS_CERTIFICATE }}
+          tls_private_key: ${{ secrets.TLS_PRIVATE_KEY }}
+          tls_ca_certificate: ${{ secrets.TLS_CA_CERTIFICATE }}
+          dry_run: ${{ inputs.dry_run }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+```
+
+To move from pre-supplied secrets to automatic Let's Encrypt renewals later, remove `tls_certificate`, `tls_private_key`, `tls_ca_certificate`, and `dry_run`, add the daily `schedule` trigger from [Usage](#usage), and delete the three `TLS_*` secrets from the `prod` environment.
+
 ## Inputs
 
 | Input | Required | Default | Notes |
@@ -160,6 +227,10 @@ Pin to a release SHA, never `@main`. Also add the host to [`nr-cert-monitor`](ht
 | `target_service` | yes | | Service the Route sends traffic to |
 | `ca` | no | `letsencrypt` | `letsencrypt` or `letsencrypt-staging`. An omitted value selects production |
 | `force` | no | `false` | Reissue now even if not due |
+| `tls_certificate` | no | none | Pre-supplied leaf certificate PEM. Pass all three `tls_*` inputs to skip Let's Encrypt and install the provided certificate |
+| `tls_private_key` | no | none | Pre-supplied unencrypted private key PEM |
+| `tls_ca_certificate` | no | none | Pre-supplied issuing CA chain PEM (issuer of the leaf first) |
+| `dry_run` | no | `false` | Pre-supplied mode only: validate PEMs, log in, and check the Route without creating the backup Secret or applying |
 | `timeout` | no | `300` | Seconds to wait for issuance, at least 30 |
 | `oc_namespace`, `oc_server`, `oc_token` | yes | | The token needs create, get and delete on pods, services, routes and networkpolicies, `pods/exec`, pod logs, and create on secrets (see [Add a host](#add-a-host-step-by-step)) |
 
@@ -167,9 +238,9 @@ Pin to a release SHA, never `@main`. Also add the host to [`nr-cert-monitor`](ht
 
 | Output | Meaning |
 |---|---|
-| `due` | `true` when a certificate was needed (and so issued and installed), `false` when the current one was left alone |
+| `due` | `true` when a certificate was needed (or pre-supplied), `false` when the current one was left alone |
 | `reason` | Why |
-| `not_after` | Expiry of the new certificate; empty when nothing was issued |
+| `not_after` | Expiry of the installed certificate; empty when nothing was installed |
 
 ## Limits
 
