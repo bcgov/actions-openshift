@@ -201,7 +201,7 @@ else
   echo "PASS: failed restore: read-only source is still read-only"
 fi
 equals "failed restore: read-only setting kept" "$(sql gsrc "SELECT setting FROM pg_settings WHERE name = 'default_transaction_read_only'")" on
-sql gsrc "ALTER DATABASE app RESET default_transaction_read_only"
+"$ENGINE" exec -e PGOPTIONS="-c default_transaction_read_only=off" gsrc psql -X -q -v ON_ERROR_STOP=1 -U app -d app -c "ALTER DATABASE app RESET default_transaction_read_only"
 
 check "PostGIS upgrade copies and verifies" pass "public.places: 301 rows" -- run_job "$GIS_NEW" upgrade gsrc gtgt
 equals "PostGIS: geometry works on the target" "$(sql gtgt "SELECT count(*) FROM public.places WHERE ST_X(geom) > -123")" 300
