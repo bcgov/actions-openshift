@@ -69,6 +69,7 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
       fullBackupSchedule: 0 9 * * *
       incrementalBackupSchedule: 0 0/5 * * * # every 5 hour incremental
     pvc:
+      enabled: true
       retention: 1 # one day hot active backup in pvc
       retentionFullType: count
       fullBackupSchedule: 0 8 * * *

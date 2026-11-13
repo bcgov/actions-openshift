@@ -346,10 +346,11 @@ with:
 The Crunchy deployment supports two backup methods:
 
 ### PVC-based Backups (Default)
-- Uses Persistent Volume Claims for storing backups
+- Uses Persistent Volume Claims for storing backups (`repo1`)
 - Configured for 1 day retention of full backups
 - Full backups scheduled daily at 8:00 UTC
 - Incremental backups scheduled every 12 hours
+- Can be disabled with `crunchy.pgBackRest.pvc.enabled: false` in `values.yml` when S3 backups (`crunchy.pgBackRest.s3.enabled: true`) are enabled (e.g. standby clusters that follow `repo2`)
 
 ### S3-based Backups (Optional)
 - Uses S3-compatible object storage
