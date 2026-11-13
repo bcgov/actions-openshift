@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "Verifying composite actions do not use relative path './' for sibling calls..."
-          if grep -rnE 'uses:\s*\./' */action.yml; then
+          if grep -rnE 'uses:\s*\./' ./*/action.yml; then
             echo "::error::Relative path './' found in action.yml. Sibling actions must be called using '$/<action>'."
             exit 1
           fi
