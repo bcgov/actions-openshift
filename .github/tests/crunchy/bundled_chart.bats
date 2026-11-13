@@ -43,3 +43,23 @@ setup() {
   # Password Secrets are applied by deploy_db.sh outside Helm
   ! grep -q 'password: "shared-pass"' "${BATS_TEST_TMPDIR}/with.yaml"
 }
+
+@test "pgBouncer service.type renders configured type" {
+  CHART="${BATS_TEST_DIRNAME}/../../../crunchy/charts/crunchy"
+  VALUES="${BATS_TEST_DIRNAME}/../../../crunchy/values.yml"
+  for svc_type in ClusterIP NodePort; do
+    helm template smoke "$CHART" --values "$VALUES" \
+      --set-string "crunchy.proxy.pgBouncer.service.type=${svc_type}" > "${BATS_TEST_TMPDIR}/${svc_type}.yaml"
+    actual="$(yq -r 'select(.kind == "PostgresCluster") | .spec.proxy.pgBouncer.service.type' "${BATS_TEST_TMPDIR}/${svc_type}.yaml")"
+    [ "$actual" = "$svc_type" ]
+  done
+}
+
+@test "pgBouncer service.type defaults to ClusterIP when service map is omitted" {
+  CHART="${BATS_TEST_DIRNAME}/../../../crunchy/charts/crunchy"
+  VALUES="${BATS_TEST_DIRNAME}/../../../crunchy/values.yml"
+  yq 'del(.crunchy.proxy.pgBouncer.service)' "$VALUES" > "${BATS_TEST_TMPDIR}/values-noservice.yml"
+  helm template smoke "$CHART" --values "${BATS_TEST_TMPDIR}/values-noservice.yml" > "${BATS_TEST_TMPDIR}/default.yaml"
+  actual="$(yq -r 'select(.kind == "PostgresCluster") | .spec.proxy.pgBouncer.service.type' "${BATS_TEST_TMPDIR}/default.yaml")"
+  [ "$actual" = "ClusterIP" ]
+}

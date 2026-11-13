@@ -117,6 +117,8 @@ crunchy: # enable it for TEST and PROD, for PR based pipelines simply use single
     pgBouncer:
       image: # it's not necessary to specify an image as the images specified in the Crunchy Postgres Operator will be pulled by default
       replicas: 2
+      service:
+        type: ClusterIP
       requests:
         cpu: 5m
         memory: 32Mi
