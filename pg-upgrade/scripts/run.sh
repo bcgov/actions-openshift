@@ -200,6 +200,7 @@ run_job() { # mode name deadline-seconds
     '[{name: "MODE", value: $m}, {name: "SOURCE_HOST", value: $s}, {name: "TARGET_HOST", value: $t}, {name: "HOME", value: "/work"}]')"
   env="$(jq -s 'add' <(echo "$env") <(secret_env SRC "$SECRET"))"
   if [ "$mode" = upgrade ]; then env="$(jq -s 'add' <(echo "$env") <(secret_env TGT "$TARGET_SECRET"))"; fi
+  if [ "$mode" = rollback ] && [ -n "${ORIG_READ_ONLY:-}" ]; then env="$(jq -c --arg v "$ORIG_READ_ONLY" '. + [{name: "ORIG_READ_ONLY", value: $v}]' <<< "$env")"; fi
   pod_labels="$(labels_json | jq -c --arg job "$name" --arg run "$RUN_KEY" '. + {"pg-upgrade/job": $job, "pg-upgrade/run": $run}')"
   jq -n --arg n "$name" --argjson l "$(labels_json)" --argjson pl "$pod_labels" --arg image "$IMAGE" \
     --rawfile script "${ACTION_PATH}/scripts/job.sh" --argjson env "$env" \
@@ -271,8 +272,13 @@ run_job() { # mode name deadline-seconds
 
 if ! run_job "$MODE" "$JOB" "$JOB_DEADLINE"; then
   if [ "$MODE" = upgrade ]; then
-    # The Job lifts the write pause itself, unless it was killed (OOM, node loss); make sure
-    echo "Making sure ${SOURCE} accepts writes again"
+    # The Job restores the source's own setting itself, unless it was killed (OOM, node loss); make sure.
+    # No original-read-only line in its log means writes were never paused (or the log was lost): leave the source alone.
+    ORIG_READ_ONLY="$(sed -nE 's/^pg-upgrade original-read-only: (.+)$/\1/p' "${JOB_LOG:-/dev/null}" | tail -n 1)"
+    if [ -z "$ORIG_READ_ONLY" ]; then
+      fail "Upgrade failed before writes were paused (or the Job log was lost); ${SOURCE} was left untouched by the runner." "If the log above was cut off, check ${SOURCE} before running with mode: rollback; otherwise fix the cause and re-run. The log stays available for a day: oc logs job/${JOB}"
+    fi
+    echo "Making sure ${SOURCE} is back to default_transaction_read_only=${ORIG_READ_ONLY}"
     if ( run_job rollback "${JOB:0:59}-rb" 240 ); then
       fail "Upgrade failed; nothing is in use from ${TARGET} and ${SOURCE} accepts writes." "Fix the cause in the log above and re-run. The log stays available for a day: oc logs job/${JOB}"
     fi
