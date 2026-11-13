@@ -269,7 +269,7 @@ spec:
       {{ end }}
       replicas: {{ .Values.crunchy.proxy.pgBouncer.replicas }}
       service:
-        type: {{ .Values.crunchy.proxy.pgBouncer.service.type | default "ClusterIP" }}
+        type: {{ (default dict .Values.crunchy.proxy.pgBouncer.service).type | default "ClusterIP" }}
       # these resources are for the "pgbouncer" container in the "postgres-crunchy-ha-pgbouncer" set of pods
       # there is a sidecar in these pods which are not mentioned here, but the requests/limits are teeny weeny by default so no worries there.
       resources:
