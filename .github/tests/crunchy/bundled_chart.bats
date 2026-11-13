@@ -43,3 +43,45 @@ setup() {
   # Password Secrets are applied by deploy_db.sh outside Helm
   ! grep -q 'password: "shared-pass"' "${BATS_TEST_TMPDIR}/with.yaml"
 }
+
+@test "pgBackRest.pvc defaults to enabled when pvc.enabled key is omitted" {
+  CHART="${BATS_TEST_DIRNAME}/../../../crunchy/charts/crunchy"
+  VALUES="${BATS_TEST_DIRNAME}/../../../crunchy/values.yml"
+  yq 'del(.crunchy.pgBackRest.pvc.enabled)' "$VALUES" > "${BATS_TEST_TMPDIR}/values-no-pvc-enabled.yml"
+  helm template smoke "$CHART" --values "${BATS_TEST_TMPDIR}/values-no-pvc-enabled.yml" > "${BATS_TEST_TMPDIR}/default-pvc.yaml"
+  grep -q 'name: repo1' "${BATS_TEST_TMPDIR}/default-pvc.yaml"
+  grep -q 'repo1-retention-full:' "${BATS_TEST_TMPDIR}/default-pvc.yaml"
+  grep -q 'repoHost:' "${BATS_TEST_TMPDIR}/default-pvc.yaml"
+}
+
+@test "pgBackRest.pvc.enabled=false with s3.enabled=true omits repo1 and repoHost" {
+  CHART="${BATS_TEST_DIRNAME}/../../../crunchy/charts/crunchy"
+  VALUES="${BATS_TEST_DIRNAME}/../../../crunchy/values.yml"
+  helm template smoke "$CHART" --values "$VALUES" \
+    --set crunchy.pgBackRest.pvc.enabled=false \
+    --set crunchy.pgBackRest.s3.enabled=true \
+    --set-string crunchy.pgBackRest.s3.bucket=test-bucket \
+    --set-string crunchy.pgBackRest.s3.endpoint=s3.example.com \
+    --set-string crunchy.pgBackRest.s3.accessKey=ak \
+    --set-string crunchy.pgBackRest.s3.secretKey=sk \
+    --set crunchy.pgBackRest.manual.enabled=true > "${BATS_TEST_TMPDIR}/s3-only.yaml"
+  run grep -q 'name: repo1' "${BATS_TEST_TMPDIR}/s3-only.yaml"
+  [ "$status" -ne 0 ]
+  run grep -q 'repo1-retention-full:' "${BATS_TEST_TMPDIR}/s3-only.yaml"
+  [ "$status" -ne 0 ]
+  run grep -q 'repoHost:' "${BATS_TEST_TMPDIR}/s3-only.yaml"
+  [ "$status" -ne 0 ]
+  grep -q 'name: repo2' "${BATS_TEST_TMPDIR}/s3-only.yaml"
+  grep -q 'repo2-retention-full:' "${BATS_TEST_TMPDIR}/s3-only.yaml"
+  grep -q 'repoName: repo2' "${BATS_TEST_TMPDIR}/s3-only.yaml"
+}
+
+@test "pgBackRest.enabled=true fails when both pvc.enabled and s3.enabled are false" {
+  CHART="${BATS_TEST_DIRNAME}/../../../crunchy/charts/crunchy"
+  VALUES="${BATS_TEST_DIRNAME}/../../../crunchy/values.yml"
+  run helm template smoke "$CHART" --values "$VALUES" \
+    --set crunchy.pgBackRest.pvc.enabled=false \
+    --set crunchy.pgBackRest.s3.enabled=false
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"crunchy.pgBackRest.enabled is true, but both pvc.enabled and s3.enabled are false"* ]]
+}
