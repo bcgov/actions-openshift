@@ -65,9 +65,12 @@ setup() {
     --set-string crunchy.pgBackRest.s3.accessKey=ak \
     --set-string crunchy.pgBackRest.s3.secretKey=sk \
     --set crunchy.pgBackRest.manual.enabled=true > "${BATS_TEST_TMPDIR}/s3-only.yaml"
-  ! grep -q 'name: repo1' "${BATS_TEST_TMPDIR}/s3-only.yaml"
-  ! grep -q 'repo1-retention-full:' "${BATS_TEST_TMPDIR}/s3-only.yaml"
-  ! grep -q 'repoHost:' "${BATS_TEST_TMPDIR}/s3-only.yaml"
+  run grep -q 'name: repo1' "${BATS_TEST_TMPDIR}/s3-only.yaml"
+  [ "$status" -ne 0 ]
+  run grep -q 'repo1-retention-full:' "${BATS_TEST_TMPDIR}/s3-only.yaml"
+  [ "$status" -ne 0 ]
+  run grep -q 'repoHost:' "${BATS_TEST_TMPDIR}/s3-only.yaml"
+  [ "$status" -ne 0 ]
   grep -q 'name: repo2' "${BATS_TEST_TMPDIR}/s3-only.yaml"
   grep -q 'repo2-retention-full:' "${BATS_TEST_TMPDIR}/s3-only.yaml"
   grep -q 'repoName: repo2' "${BATS_TEST_TMPDIR}/s3-only.yaml"
