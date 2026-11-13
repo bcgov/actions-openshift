@@ -145,7 +145,7 @@ job_json() { cat "${STATE}"/Job-*.json; }
   run_script
   [ "$status" -eq 1 ]
   ! ls "${STATE}"/Job-*-rb.json 2> /dev/null
-  [[ "$output" == *"Upgrade failed before writes were paused"* ]]
+  [[ "$output" == *"Upgrade failed before writes were paused (or the Job log was lost); app-test-database was left untouched by the runner."* ]]
   [ ! -f "${STATE}/marker" ]
 }
 

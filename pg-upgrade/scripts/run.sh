@@ -273,10 +273,10 @@ run_job() { # mode name deadline-seconds
 if ! run_job "$MODE" "$JOB" "$JOB_DEADLINE"; then
   if [ "$MODE" = upgrade ]; then
     # The Job restores the source's own setting itself, unless it was killed (OOM, node loss); make sure.
-    # No original-read-only line in its log means writes were never paused: leave the source alone.
+    # No original-read-only line in its log means writes were never paused (or the log was lost): leave the source alone.
     ORIG_READ_ONLY="$(sed -nE 's/^pg-upgrade original-read-only: (.+)$/\1/p' "${JOB_LOG:-/dev/null}" | tail -n 1)"
     if [ -z "$ORIG_READ_ONLY" ]; then
-      fail "Upgrade failed before writes were paused; ${SOURCE} was not changed." "Fix the cause in the log above and re-run. The log stays available for a day: oc logs job/${JOB}"
+      fail "Upgrade failed before writes were paused (or the Job log was lost); ${SOURCE} was left untouched by the runner." "If the log above was cut off, check ${SOURCE} before running with mode: rollback; otherwise fix the cause and re-run. The log stays available for a day: oc logs job/${JOB}"
     fi
     echo "Making sure ${SOURCE} is back to default_transaction_read_only=${ORIG_READ_ONLY}"
     if ( run_job rollback "${JOB:0:59}-rb" 240 ); then
