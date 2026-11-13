@@ -48,6 +48,7 @@ jobs:
           triggers: |
             image-import/action.yml
             image-import/import.sh
+            shared/inputs.sh
             oc-runner/action.yml
             oc-runner/scripts/
             .github/tests/image-import/
