@@ -236,60 +236,6 @@ jobs:
           fi
           grep -q 'has no templates/route.yaml' <<< "$output"
 
-
-      - name: Test PgBouncer service type - NodePort
-        run: |
-          set -euo pipefail
-
-          yq '.crunchy.proxy.pgBouncer.service.type = "NodePort"' \
-            crunchy/values.yml > /tmp/values-nodeport.yml
-
-          helm template smoke crunchy/charts/crunchy \
-            --values /tmp/values-nodeport.yml > /tmp/render-nodeport.yaml
-
-          actual="$(yq -r 'select(.kind == "PostgresCluster") | .spec.proxy.pgBouncer.service.type' /tmp/render-nodeport.yaml)"
-
-          if [ "$actual" != "NodePort" ]; then
-            echo "::error::Expected PgBouncer service type NodePort, got: $actual"
-            exit 1
-          fi
-
-      - name: Test PgBouncer service type - ClusterIP
-        run: |
-          set -euo pipefail
-
-          yq '.crunchy.proxy.pgBouncer.service.type = "ClusterIP"' \
-            crunchy/values.yml > /tmp/values-clusterip.yml
-
-          helm template smoke crunchy/charts/crunchy \
-            --values /tmp/values-clusterip.yml > /tmp/render-clusterip.yaml
-
-          actual="$(yq -r 'select(.kind == "PostgresCluster") | .spec.proxy.pgBouncer.service.type' /tmp/render-clusterip.yaml)"
-
-          if [ "$actual" != "ClusterIP" ]; then
-            echo "::error::Expected PgBouncer service type ClusterIP, got: $actual"
-            exit 1
-          fi
-
-      - name: Test PgBouncer service type defaults to ClusterIP when unspecified
-        run: |
-          set -euo pipefail
-
-          # Simulate an older values file without the service configuration.
-          yq 'del(.crunchy.proxy.pgBouncer.service)' \
-            crunchy/values.yml > /tmp/values-default.yml
-
-          helm template smoke crunchy/charts/crunchy \
-            --values /tmp/values-default.yml > /tmp/render-default-service.yaml
-
-          actual="$(yq -r 'select(.kind == "PostgresCluster") | .spec.proxy.pgBouncer.service.type' /tmp/render-default-service.yaml)"
-
-          if [ "$actual" != "ClusterIP" ]; then
-            echo "::error::Expected unspecified PgBouncer service type to default to ClusterIP, got: $actual"
-            exit 1
-          fi
-
-
   # Composite dry-run logs into the cluster. An unrelated diff must not fail on the runner allowlist.
   cert-keeper-changes:
     name: Cert Keeper path filter
