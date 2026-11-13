@@ -1,0 +1,158 @@
+name: Image Import Tests
+
+# Unit and OpenShift integration tests for image-import.
+# Always runs on pull requests and main pushes so Image Import Results reports; the test
+# jobs run only when image-import or oc-runner changed (Markdown excluded).
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  changes:
+    name: Image Import (changes)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      triggered: ${{ steps.diff.outputs.triggered }}
+    steps:
+      # diff-triggers compares against the base branch tip. The merge base keeps a
+      # newer main change out of this pull request's diff. Pushes compare the whole pushed range.
+      - name: Find the pull request merge base
+        id: base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No merge base for ${BASE_SHA}...${HEAD_SHA}"; exit 1; }
+          echo "Merge base: ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - id: diff
+        uses: bcgov/actions/diff-triggers@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+        with:
+          base: ${{ steps.base.outputs.sha || github.event.before }}
+          triggers: |
+            image-import/action.yml
+            image-import/import.sh
+            oc-runner/action.yml
+            oc-runner/scripts/
+            .github/tests/image-import/
+            .github/workflows/image-import-tests.yml
+            !*.md
+
+  unit:
+    name: Test image-import (bats)
+    needs: changes
+    if: needs.changes.outputs.triggered == 'true'
+    permissions: {}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Unit tests (bats)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats
+          bats .github/tests/image-import
+
+  test-image-import:
+    name: Test Image Import
+    needs: changes
+    # Needs OpenShift credentials: same-repo PRs only
+    if: >-
+      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+      && needs.changes.outputs.triggered == 'true'
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      # `token` defaults to the run's token, so GHCR sees a live credential
+      - name: Import onto this pull request's tag
+        uses: $/image-import
+        with:
+          image: ghcr.io/bcgov/quickstart-openshift/backend:latest
+          name: image-import
+          tag: ${{ github.event.number }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+
+      # Checked apart from the action: the tag's source and its digest match GHCR's
+      # manifest list digest for the public image
+      - name: Confirm the pull-request tag and digest
+        uses: $/oc-runner
+        env:
+          PR: ${{ github.event.number }}
+          IMAGE: ghcr.io/bcgov/quickstart-openshift/backend:latest
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            from="$(oc get imagestreamtag "image-import:${PR}" -o jsonpath='{.tag.from.name}')"
+            if [ "$from" != "$IMAGE" ]; then
+              echo "::error::ImageStream tag image-import:${PR} points at '${from}', expected '${IMAGE}'."
+              exit 1
+            fi
+            bearer="$(curl -fsS --retry 3 "https://ghcr.io/token?scope=repository:bcgov/quickstart-openshift/backend:pull&service=ghcr.io" | jq -r .token)"
+            ghcr="$(curl -fsSI --retry 3 -H "Authorization: Bearer ${bearer}" \
+              -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+              "https://ghcr.io/v2/bcgov/quickstart-openshift/backend/manifests/latest" \
+              | tr -d '\r' | awk 'tolower($0) ~ /^docker-content-digest:/ { sub(/^[^:]*:[ \t]*/, ""); print }')"
+            cluster="$(oc get imagestream image-import -o jsonpath="{.status.tags[?(@.tag==\"${PR}\")].items[0].image}")"
+            echo "GHCR ${ghcr}, ImageStream ${cluster}"
+            if [[ ! "$ghcr" =~ ^sha256:[a-f0-9]{64}$ ]] || [ "$cluster" != "$ghcr" ]; then
+              echo "::error::image-import:${PR} digest '${cluster}' does not match GHCR '${ghcr}'."
+              exit 1
+            fi
+
+      - name: Delete the pull-request tag
+        if: always()
+        uses: $/oc-runner
+        env:
+          PR: ${{ github.event.number }}
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            oc delete imagestreamtag "image-import:${PR}" --ignore-not-found
+
+  # Merge gate for this workflow: always reports, skipped jobs count as passing
+  results:
+    name: Image Import Results
+    needs:
+      - changes
+      - unit
+      - test-image-import
+    if: always()
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: bcgov/actions/workflow-results@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+        with:
+          needs: ${{ toJson(needs) }}
