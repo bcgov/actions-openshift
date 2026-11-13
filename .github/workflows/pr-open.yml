@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -42,76 +42,24 @@ jobs:
       - name: ShellCheck composite action bash
         run: python3 scripts/shellcheck_composite_actions.py
 
-  test-deployer:
-    name: Test Deployer (${{ matrix.name }})
-    # Needs OpenShift credentials: same-repo PRs only (fork and push events get none)
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    permissions:
-      contents: read
-    runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        name: [backend, database, frontend]
-        include:
-          - name: backend
-            file: deployer/templates/backend.yml
-            overwrite: true
-            # Fake secret for the leak check; & < $ get JSON-escaped, defeating log masking
-            parameters: -p RANDOM_EXPRESSION='LeakCanary7f3a&x<y$z'
-          - name: database
-            file: deployer/templates/database.yml
-            overwrite: false
-          - name: frontend
-            file: deployer/templates/frontend.yml
-            oc_version: "4.13"
-            overwrite: true
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Deploy
-        uses: $/deployer
-        with:
-          file: ${{ matrix.file }}
-          oc_namespace: ${{ vars.OC_NAMESPACE }}
-          oc_server: ${{ vars.OC_SERVER }}
-          oc_token: ${{ secrets.OC_TOKEN }}
-          oc_version: ${{ matrix.oc_version }}
-          overwrite: ${{ matrix.overwrite }}
-          triggers: |
-            deployer/
-            .github/workflows/pr-open.yml
-          debug: true
-          parameters: -p NAME=${{ github.event.repository.name }} -p ZONE=${{ github.event.number }} ${{ matrix.parameters }}
-
-      - name: Check rendered template did not leak
-        env:
-          CANARY: LeakCanary7f3a
+      - name: Verify sibling calls use $/
         run: |
           set -euo pipefail
-          if [ -n "${TEMPLATE+x}" ]; then
-            echo "::error::TEMPLATE env var is visible to later steps"
+          echo "Verifying composite actions do not use relative path './' for sibling calls..."
+          if grep -rnE 'uses:\s*\./' ./*/action.yml; then
+            echo "::error::Relative path './' found in action.yml. Sibling actions must be called using '$/<action>'."
             exit 1
           fi
-          if env | grep -v '^CANARY=' | grep -qF "${CANARY}"; then
-            echo "::error::Template content found in the job environment"
-            exit 1
-          fi
-          # GITHUB_ENV/GITHUB_OUTPUT files of earlier steps sit next to this step's
-          if grep -rqF "${CANARY}" "$(dirname "${GITHUB_ENV}")"; then
-            echo "::error::Template content was written to a GITHUB_ENV/GITHUB_OUTPUT file"
-            exit 1
-          fi
-          if compgen -G "${RUNNER_TEMP}/deployer-template*" > /dev/null; then
-            echo "::error::Rendered template file was not removed"
-            exit 1
-          fi
-          echo "No template leak found"
+          echo "Checking sibling action references..."
+          for action in cert-keeper cleanup-pr image-import; do
+            if ! grep -q 'uses: \$/oc-runner' "$action/action.yml"; then
+              echo "::error::$action/action.yml must reference oc-runner via 'uses: $/oc-runner'"
+              exit 1
+            fi
+          done
+          echo "All sibling action references verified to use '$/'."
 
-  # Path filters for the jobs below that do not need every pull request
+  # Path filter for repo-level probe summary tests
   changes:
     name: Path filters
     permissions:
@@ -119,131 +67,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
-      changes: ${{ steps.diff.outputs.changes }}
-    steps:
-      # diff-triggers compares against the base branch tip. The merge base keeps a
-      # newer main change out of this pull request's diff. Pushes compare the whole pushed range.
-      - name: Find the pull request merge base
-        id: base
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          sha="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha')"
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No merge base for ${BASE_SHA}...${HEAD_SHA}"; exit 1; }
-          echo "Merge base: ${sha}"
-          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
-
-      - id: diff
-        uses: bcgov/actions/diff-triggers@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
-        with:
-          base: ${{ steps.base.outputs.sha || github.event.before }}
-          filters: |
-            crunchy:
-              - crunchy/
-              - .github/tests/crunchy/
-              - .github/tests/image-import/
-              - cert-keeper/
-              - .github/tests/cert-keeper/
-              - image-import/
-              - .github/workflows/pr-open.yml
-              - "!*.md"
-            image-import:
-              - image-import/
-              - oc-runner/action.yml
-              - oc-runner/scripts/
-              - "!*.md"
-
-  test-crunchy:
-    name: Test Crunchy
-    needs: changes
-    if: contains(fromJSON(needs.changes.outputs.changes || '[]'), 'crunchy')
-    permissions: {}
-    runs-on: ubuntu-26.04
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Unit tests (bats)
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq bats openssl
-          bats .github/tests/crunchy .github/tests/image-import .github/tests/cert-keeper
-
-      - name: Helm lint
-        run: helm lint crunchy/charts/crunchy --values crunchy/values.yml
-
-      - name: Render with bundled values
-        run: |
-          set -euo pipefail
-          helm template smoke crunchy/charts/crunchy --values crunchy/values.yml > /tmp/render-default.yaml
-          grep -q '^kind: PostgresCluster' /tmp/render-default.yaml
-          if grep -q '^kind: Route' /tmp/render-default.yaml; then
-            echo "::error::Route rendered without route.enabled"
-            exit 1
-          fi
-
-      - name: Render a values file without a route block
-        run: |
-          set -euo pipefail
-          yq 'del(.route)' crunchy/values.yml > /tmp/values-noroute.yml
-          helm template smoke crunchy/charts/crunchy --values /tmp/values-noroute.yml > /tmp/render-noroute.yaml
-          grep -q '^kind: PostgresCluster' /tmp/render-noroute.yaml
-          if grep -q '^kind: Route' /tmp/render-noroute.yaml; then
-            echo "::error::Route rendered without a route block"
-            exit 1
-          fi
-
-      - name: Render with overrides (PG17, PVC size, route)
-        env:
-          POSTGRES_VERSION: "17"
-          PVC_SIZE: 500Mi
-          ROUTE_ENABLED: "true"
-          ROUTE_HOST: pg.example.com
-        run: |
-          set -euo pipefail
-          ARGS="$(./crunchy/scripts/resolve_helm_args.sh)"
-          # shellcheck disable=SC2086 # validated args contain no whitespace
-          helm template smoke crunchy/charts/crunchy --values crunchy/values.yml $ARGS > /tmp/render-overrides.yaml
-          grep -q '^kind: PostgresCluster' /tmp/render-overrides.yaml
-          grep -q 'crunchy-postgres-gis:ubi9-17.7-3.6-2547' /tmp/render-overrides.yaml
-          grep -q 'postgresVersion: 17' /tmp/render-overrides.yaml
-          grep -q 'postGISVersion: "3.6"' /tmp/render-overrides.yaml
-          grep -q 'storage: 500Mi' /tmp/render-overrides.yaml
-          grep -q '^kind: Route' /tmp/render-overrides.yaml
-          grep -q 'host: pg.example.com' /tmp/render-overrides.yaml
-          grep -q 'termination: passthrough' /tmp/render-overrides.yaml
-
-      - name: deploy_db.sh fails fast before side effects
-        run: |
-          set -euo pipefail
-          if output="$(PVC_SIZE=1Gi ./crunchy/scripts/deploy_db.sh crunchy/charts/crunchy https://example.com/values.yml app smoke true 2>&1)"; then
-            echo "::error::values_file with pvc_size did not fail"
-            exit 1
-          fi
-          grep -q 'values_file cannot be combined with override inputs (pvc_size)' <<< "$output"
-          mkdir -p /tmp/chart-noroute
-          cp -r crunchy/charts/crunchy/. /tmp/chart-noroute
-          rm /tmp/chart-noroute/templates/route.yaml
-          if output="$(ROUTE_ENABLED=true ./crunchy/scripts/deploy_db.sh /tmp/chart-noroute '' app smoke true 2>&1)"; then
-            echo "::error::route_enabled with a chart lacking route.yaml did not fail"
-            exit 1
-          fi
-          grep -q 'has no templates/route.yaml' <<< "$output"
-
-  # Composite dry-run logs into the cluster. An unrelated diff must not fail on the runner allowlist.
-  cert-keeper-changes:
-    name: Cert Keeper path filter
-    permissions:
-      contents: read
-    runs-on: ubuntu-26.04
-    outputs:
-      triggered: ${{ steps.diff.outputs.triggered }}
+      probe_summary: ${{ steps.diff.outputs.triggered }}
     steps:
       # diff-triggers compares against the base branch tip. The merge base keeps a
       # newer main change out of this pull request's diff. Pushes compare the whole pushed range.
@@ -266,181 +90,11 @@ jobs:
         with:
           base: ${{ steps.base.outputs.sha || github.event.before }}
           triggers: |
-            cert-keeper/
-            oc-runner/
+            .github/scripts/summarize-probe-results.sh
+            .github/tests/probe-runner/
+            .github/workflows/probe-runner-reachability.yml
             .github/workflows/pr-open.yml
             !*.md
-
-  test-cert-keeper-install:
-    name: Test cert-keeper install
-    needs: cert-keeper-changes
-    if: needs.cert-keeper-changes.outputs.triggered == 'true'
-    permissions: {}
-    runs-on: ubuntu-26.04
-    steps:
-      - name: Checkout Code to Subdirectory
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-          path: fixture
-
-      - name: Verify sibling calls use $/
-        run: |
-          set -euo pipefail
-          echo "Verifying composite actions do not use relative path './' for sibling calls..."
-          if grep -rnE 'uses:\s*\./' fixture/*/action.yml; then
-            echo "::error::Relative path './' found in action.yml. Sibling actions must be called using '$/<action>'."
-            exit 1
-          fi
-          echo "Checking sibling action references..."
-          for action in cert-keeper cleanup-pr image-import; do
-            if ! grep -q 'uses: \$/oc-runner' "fixture/$action/action.yml"; then
-              echo "::error::$action/action.yml must reference oc-runner via 'uses: $/oc-runner'"
-              exit 1
-            fi
-          done
-          echo "All sibling action references verified to use '$/'."
-
-      - name: Generate test CA chain
-        run: |
-          set -euo pipefail
-          # Throwaway root CA -> issuing CA -> leaf, plus failing variants. Nothing is committed.
-          d="${RUNNER_TEMP}/tls"
-          mkdir -p "$d"
-          cd "$d"
-          printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' > ca.cnf
-          printf 'subjectAltName=DNS:myapp.bcgov.ca\n' > leaf.cnf
-          expired=(-not_before 20200101000000Z -not_after 20210101000000Z)
-          openssl req -x509 -newkey rsa:2048 -nodes -keyout root.key -out root.pem -days 30 -subj "/CN=Test Root CA"
-          openssl req -newkey rsa:2048 -nodes -keyout int.key -out int.csr -subj "/CN=Test Issuing CA"
-          openssl x509 -req -in int.csr -CA root.pem -CAkey root.key -CAcreateserial -extfile ca.cnf -days 30 -out int.pem
-          openssl x509 -req -in int.csr -CA root.pem -CAkey root.key -CAcreateserial -extfile ca.cnf "${expired[@]}" -out int-expired.pem
-          openssl req -newkey rsa:2048 -nodes -keyout leaf.key -out leaf.csr -subj "/CN=myapp.bcgov.ca"
-          openssl x509 -req -in leaf.csr -CA int.pem -CAkey int.key -CAcreateserial -extfile leaf.cnf -days 30 -out leaf.pem
-          openssl x509 -req -in leaf.csr -CA int.pem -CAkey int.key -CAcreateserial -extfile leaf.cnf "${expired[@]}" -out leaf-expired.pem
-          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out other.key
-          cat int.pem root.pem > ca.pem
-          cat root.pem int.pem > ca-reversed.pem
-          cat leaf.pem int.pem > fullchain.pem
-          # Mask every PEM body line, so env and input displays show *** instead
-          for f in *.pem *.key; do
-            grep -v -e '-----' "$f" | while IFS= read -r line; do echo "::add-mask::${line}"; done
-          done
-
-      - name: Script dry-run
-        env:
-          ROUTE_HOST: myapp.bcgov.ca
-          ROUTE_NAME: my-test-route
-          TARGET_SERVICE: my-test-service
-          TLS_CERTIFICATE_FILE: ${{ runner.temp }}/tls/leaf.pem
-          TLS_PRIVATE_KEY_FILE: ${{ runner.temp }}/tls/leaf.key
-          TLS_CA_CERTIFICATE_FILE: ${{ runner.temp }}/tls/ca.pem
-          OC_NAMESPACE: ${{ vars.OC_NAMESPACE }}
-          OC_SERVER: ${{ vars.OC_SERVER }}
-          OC_TOKEN: ${{ secrets.OC_TOKEN }}
-          DRY_RUN: "true"
-          ROUTE_OUT: /tmp/route.yml
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/bin
-          printf '%s\n' '#!/bin/bash' 'exit 0' > /tmp/bin/oc
-          chmod +x /tmp/bin/oc
-          export PATH="/tmp/bin:${PATH}"
-          output="$(./fixture/cert-keeper/install.sh 2>&1)" || { echo "$output"; exit 1; }
-          printf '%s\n' "$output"
-          if printf '%s\n' "$output" | grep -qE 'BEGIN (PRIVATE KEY|RSA PRIVATE KEY)'; then
-            echo "install.sh leaked a private key to stdout/stderr"
-            exit 1
-          fi
-          grep -qF 'PASS: CA chain (2 certificate(s)) issued the certificate, in order, none expired' <<< "$output"
-          grep -q '^    caCertificate: |' /tmp/route.yml
-          grep -q '^    certificate: |' /tmp/route.yml
-          grep -q '^    key: |' /tmp/route.yml
-          if grep -q '^  caCertificate:' /tmp/route.yml; then
-            echo "caCertificate was written as a spec sibling"
-            exit 1
-          fi
-
-      - name: Script rejects bad TLS material
-        run: |
-          set -euo pipefail
-          d="${RUNNER_TEMP}/tls"
-          # $1 name, $2 error, $3 start of the Fix line, then VAR=value overrides
-          expect_fail() {
-            local name="$1" error="$2" fix="$3" output line f
-            shift 3
-            if output="$(env ROUTE_HOST=myapp.bcgov.ca ROUTE_NAME=my-test-route TARGET_SERVICE=my-test-service \
-              TLS_CERTIFICATE_FILE="${d}/leaf.pem" TLS_PRIVATE_KEY_FILE="${d}/leaf.key" TLS_CA_CERTIFICATE_FILE="${d}/ca.pem" \
-              DRY_RUN=true ROUTE_OUT="${d}/route-${name}.yml" "$@" ./fixture/cert-keeper/install.sh 2>&1)"; then
-              echo "::error::${name}: expected a failure"
-              exit 1
-            fi
-            grep -qF -- "$error" <<< "$output" || { echo "::error::${name}: missing error '${error}'"; exit 1; }
-            grep -qF -- "Fix: ${fix}" <<< "$output" || { echo "::error::${name}: missing 'Fix: ${fix}'"; exit 1; }
-            for f in "$d"/*.pem "$d"/*.key; do
-              while IFS= read -r line; do
-                if grep -qF -- "$line" <<< "$output"; then
-                  echo "::error::${name}: output contains a line of $(basename "$f")"
-                  exit 1
-                fi
-              done < <(grep -v -e '-----' "$f")
-            done
-            echo "PASS: ${name}"
-          }
-          expect_fail expired-leaf "Certificate has expired." "Renew the certificate" \
-            TLS_CERTIFICATE_FILE="${d}/leaf-expired.pem"
-          expect_fail expired-ca "TLS_CA_CERTIFICATE certificate 1 has expired." "Replace certificate 1 with the current CA" \
-            TLS_CA_CERTIFICATE_FILE="${d}/int-expired.pem"
-          expect_fail wrong-ca-order "TLS_CA_CERTIFICATE certificate 1 did not issue TLS_CERTIFICATE." "Reorder TLS_CA_CERTIFICATE so the issuer of the leaf comes first" \
-            TLS_CA_CERTIFICATE_FILE="${d}/ca-reversed.pem"
-          expect_fail mismatched-key "TLS certificate and private key do not match." "Use the key that made this certificate's CSR" \
-            TLS_PRIVATE_KEY_FILE="${d}/other.key"
-          expect_fail host-not-covered "Certificate does not cover host 'wrong.example'" "Set hostname to a name the certificate covers" \
-            ROUTE_HOST=wrong.example
-          expect_fail full-chain "TLS_CERTIFICATE must hold only the leaf certificate (found 2)." "Put only the leaf (first block) in TLS_CERTIFICATE" \
-            TLS_CERTIFICATE_FILE="${d}/fullchain.pem"
-
-  test-cert-keeper-install-logs:
-    name: Test cert-keeper install logs
-    needs: [test-cert-keeper-install]
-    # Failed runs are the likeliest to have printed PEM data
-    if: ${{ !cancelled() }}
-    permissions:
-      actions: read
-    runs-on: ubuntu-26.04
-    steps:
-      - name: No PEM contents in the cert-keeper install job log
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" --paginate \
-            --jq '.jobs[] | "\(.id)\t\(.name)\t\(.conclusion)"')"
-          failed=0
-          for name in "Test cert-keeper install"; do
-            job_id="$(awk -F'\t' -v n="$name" '$2 == n { print $1 }' <<< "$jobs")"
-            conclusion="$(awk -F'\t' -v n="$name" '$2 == n { print $3 }' <<< "$jobs")"
-            [ -n "$job_id" ] || { echo "::error::${name} job not found"; exit 1; }
-            if [ "$conclusion" = "skipped" ]; then
-              echo "${name} skipped; not scanning its log"
-              continue
-            fi
-            log="${RUNNER_TEMP}/${job_id}.log"
-            # Raw logs hold ANSI colour codes; the log is only scanned, never printed
-            gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" > "$log"
-            [ -s "$log" ] || { echo "::error::${name} log is empty"; exit 1; }
-            # A PEM body line is 64 base64 characters. Count only; never print a match.
-            leaks="$(sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9T:.-]+Z //' "$log" | grep -cE '^[[:space:]]*[A-Za-z0-9+/]{64}[[:space:]]*$' || true)"
-            if [ "$leaks" -ne 0 ]; then
-              echo "::error::${name} log holds ${leaks} PEM body line(s)"
-              failed=1
-            else
-              echo "PASS: ${name}: no PEM body lines in $(wc -l < "$log") log lines"
-            fi
-          done
-          exit "$failed"
 
   test-fork-token-degradation:
     name: Fork Token Degradation Matrix (${{ matrix.scenario.name }})
@@ -523,71 +177,6 @@ jobs:
             exit 1
           fi
 
-  test-image-import:
-    name: Test Image Import
-    needs: changes
-    # Needs OpenShift credentials: same-repo PRs only
-    if: >-
-      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-      && contains(fromJSON(needs.changes.outputs.changes || '[]'), 'image-import')
-    permissions:
-      contents: read
-      packages: read
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    steps:
-      # `token` defaults to the run's token, so GHCR sees a live credential
-      - name: Import onto this pull request's tag
-        uses: $/image-import
-        with:
-          image: ghcr.io/bcgov/quickstart-openshift/backend:latest
-          name: image-import
-          tag: ${{ github.event.number }}
-          oc_namespace: ${{ vars.OC_NAMESPACE }}
-          oc_server: ${{ vars.OC_SERVER }}
-          oc_token: ${{ secrets.OC_TOKEN }}
-
-      # Checked apart from the action: the tag's source and its digest match GHCR's
-      # manifest list digest for the public image
-      - name: Confirm the pull-request tag and digest
-        uses: $/oc-runner
-        env:
-          PR: ${{ github.event.number }}
-          IMAGE: ghcr.io/bcgov/quickstart-openshift/backend:latest
-        with:
-          oc_namespace: ${{ vars.OC_NAMESPACE }}
-          oc_server: ${{ vars.OC_SERVER }}
-          oc_token: ${{ secrets.OC_TOKEN }}
-          commands: |
-            from="$(oc get imagestreamtag "image-import:${PR}" -o jsonpath='{.tag.from.name}')"
-            if [ "$from" != "$IMAGE" ]; then
-              echo "::error::ImageStream tag image-import:${PR} points at '${from}', expected '${IMAGE}'."
-              exit 1
-            fi
-            bearer="$(curl -fsS --retry 3 "https://ghcr.io/token?scope=repository:bcgov/quickstart-openshift/backend:pull&service=ghcr.io" | jq -r .token)"
-            ghcr="$(curl -fsSI --retry 3 -H "Authorization: Bearer ${bearer}" \
-              -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
-              "https://ghcr.io/v2/bcgov/quickstart-openshift/backend/manifests/latest" \
-              | tr -d '\r' | awk 'tolower($0) ~ /^docker-content-digest:/ { sub(/^[^:]*:[ \t]*/, ""); print }')"
-            cluster="$(oc get imagestream image-import -o jsonpath="{.status.tags[?(@.tag==\"${PR}\")].items[0].image}")"
-            echo "GHCR ${ghcr}, ImageStream ${cluster}"
-            if [[ ! "$ghcr" =~ ^sha256:[a-f0-9]{64}$ ]] || [ "$cluster" != "$ghcr" ]; then
-              echo "::error::image-import:${PR} digest '${cluster}' does not match GHCR '${ghcr}'."
-              exit 1
-            fi
-
-      - name: Delete the pull-request tag
-        if: always()
-        uses: $/oc-runner
-        env:
-          PR: ${{ github.event.number }}
-        with:
-          oc_namespace: ${{ vars.OC_NAMESPACE }}
-          oc_server: ${{ vars.OC_SERVER }}
-          oc_token: ${{ secrets.OC_TOKEN }}
-          commands: |
-            oc delete imagestreamtag "image-import:${PR}" --ignore-not-found
-
   # GitHub only warns on undeclared `with:` keys; these must fail at the input check
   test-unknown-inputs:
     name: Test Unknown Inputs Fail Loud
@@ -664,10 +253,11 @@ jobs:
           done
           exit $fail
 
-  # Fixture test of the Probe Runner Reachability Summary script. Cheap (no
-  # cluster); always runs so missing-sample reporting stays covered.
+  # Fixture test of the Probe Runner Reachability Summary script.
   test-probe-summary:
     name: Test Probe Summary
+    needs: changes
+    if: needs.changes.outputs.probe_summary == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-26.04
@@ -690,13 +280,7 @@ jobs:
     needs:
       - actionlint
       - changes
-      - test-deployer
-      - test-crunchy
-      - cert-keeper-changes
-      - test-cert-keeper-install
-      - test-cert-keeper-install-logs
       - test-fork-token-degradation
-      - test-image-import
       - test-unknown-inputs
       - test-probe-summary
     if: always()

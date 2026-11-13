@@ -1,0 +1,147 @@
+name: Deployer Tests
+
+# OpenShift deployment and template-leak checks for deployer.
+# Always runs on pull requests and main pushes so Deployer Results reports; the deploy
+# matrix runs only on same-repo pull requests when deployer or its dependencies changed (Markdown excluded).
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  changes:
+    name: Deployer (changes)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      triggered: ${{ steps.diff.outputs.triggered }}
+    steps:
+      # diff-triggers compares against the base branch tip. The merge base keeps a
+      # newer main change out of this pull request's diff. Pushes compare the whole pushed range.
+      - name: Find the pull request merge base
+        id: base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No merge base for ${BASE_SHA}...${HEAD_SHA}"; exit 1; }
+          echo "Merge base: ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - id: diff
+        uses: bcgov/actions/diff-triggers@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+        with:
+          base: ${{ steps.base.outputs.sha || github.event.before }}
+          triggers: |
+            deployer/action.yml
+            deployer/templates/
+            shared/inputs.sh
+            oc-runner/action.yml
+            oc-runner/scripts/
+            .github/workflows/deployer-tests.yml
+            !*.md
+
+  test-deployer:
+    name: Test Deployer (${{ matrix.name }})
+    needs: changes
+    # Needs OpenShift credentials: same-repo PRs only (fork and push events get none)
+    if: >-
+      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+      && needs.changes.outputs.triggered == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [backend, database, frontend]
+        include:
+          - name: backend
+            file: deployer/templates/backend.yml
+            overwrite: true
+            # Fake secret for the leak check; & < $ get JSON-escaped, defeating log masking
+            parameters: -p RANDOM_EXPRESSION='LeakCanary7f3a&x<y$z'
+          - name: database
+            file: deployer/templates/database.yml
+            overwrite: false
+          - name: frontend
+            file: deployer/templates/frontend.yml
+            oc_version: "4.13"
+            overwrite: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Deploy
+        uses: $/deployer
+        with:
+          file: ${{ matrix.file }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          oc_version: ${{ matrix.oc_version }}
+          overwrite: ${{ matrix.overwrite }}
+          triggers: |
+            deployer/
+            oc-runner/
+            shared/inputs.sh
+            .github/workflows/deployer-tests.yml
+          debug: true
+          parameters: -p NAME=${{ github.event.repository.name }} -p ZONE=${{ github.event.number }} ${{ matrix.parameters }}
+
+      - name: Check rendered template did not leak
+        env:
+          CANARY: LeakCanary7f3a
+        run: |
+          set -euo pipefail
+          if [ -n "${TEMPLATE+x}" ]; then
+            echo "::error::TEMPLATE env var is visible to later steps"
+            exit 1
+          fi
+          if env | grep -v '^CANARY=' | grep -qF "${CANARY}"; then
+            echo "::error::Template content found in the job environment"
+            exit 1
+          fi
+          # GITHUB_ENV/GITHUB_OUTPUT files of earlier steps sit next to this step's
+          if grep -rqF "${CANARY}" "$(dirname "${GITHUB_ENV}")"; then
+            echo "::error::Template content was written to a GITHUB_ENV/GITHUB_OUTPUT file"
+            exit 1
+          fi
+          if compgen -G "${RUNNER_TEMP}/deployer-template*" > /dev/null; then
+            echo "::error::Rendered template file was not removed"
+            exit 1
+          fi
+          echo "No template leak found"
+
+  # Merge gate for this workflow: always reports, skipped jobs count as passing
+  results:
+    name: Deployer Results
+    needs:
+      - changes
+      - test-deployer
+    if: always()
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: bcgov/actions/workflow-results@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+        with:
+          needs: ${{ toJson(needs) }}

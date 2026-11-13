@@ -1,0 +1,154 @@
+name: Crunchy Tests
+
+# Crunchy chart, override and deploy_db.sh unit/render tests.
+# Always runs on pull requests and main pushes so Crunchy Results reports; the test
+# job runs only when crunchy or shared input parsing changed (Markdown excluded).
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  changes:
+    name: Crunchy (changes)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      triggered: ${{ steps.diff.outputs.triggered }}
+    steps:
+      # diff-triggers compares against the base branch tip. The merge base keeps a
+      # newer main change out of this pull request's diff. Pushes compare the whole pushed range.
+      - name: Find the pull request merge base
+        id: base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No merge base for ${BASE_SHA}...${HEAD_SHA}"; exit 1; }
+          echo "Merge base: ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - id: diff
+        uses: bcgov/actions/diff-triggers@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+        with:
+          base: ${{ steps.base.outputs.sha || github.event.before }}
+          triggers: |
+            crunchy/action.yml
+            crunchy/values.yml
+            crunchy/charts/
+            crunchy/scripts/
+            shared/inputs.sh
+            .github/tests/crunchy/
+            .github/workflows/crunchy-tests.yml
+            !*.md
+
+  test-crunchy:
+    name: Test Crunchy
+    needs: changes
+    if: needs.changes.outputs.triggered == 'true'
+    permissions: {}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Unit tests (bats, 2 workers)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats parallel
+          bats --jobs 2 .github/tests/crunchy
+
+      - name: Helm lint
+        run: helm lint crunchy/charts/crunchy --values crunchy/values.yml
+
+      - name: Render with bundled values
+        run: |
+          set -euo pipefail
+          helm template smoke crunchy/charts/crunchy --values crunchy/values.yml > /tmp/render-default.yaml
+          grep -q '^kind: PostgresCluster' /tmp/render-default.yaml
+          if grep -q '^kind: Route' /tmp/render-default.yaml; then
+            echo "::error::Route rendered without route.enabled"
+            exit 1
+          fi
+
+      - name: Render a values file without a route block
+        run: |
+          set -euo pipefail
+          yq 'del(.route)' crunchy/values.yml > /tmp/values-noroute.yml
+          helm template smoke crunchy/charts/crunchy --values /tmp/values-noroute.yml > /tmp/render-noroute.yaml
+          grep -q '^kind: PostgresCluster' /tmp/render-noroute.yaml
+          if grep -q '^kind: Route' /tmp/render-noroute.yaml; then
+            echo "::error::Route rendered without a route block"
+            exit 1
+          fi
+
+      - name: Render with overrides (PG17, PVC size, route)
+        env:
+          POSTGRES_VERSION: "17"
+          PVC_SIZE: 500Mi
+          ROUTE_ENABLED: "true"
+          ROUTE_HOST: pg.example.com
+        run: |
+          set -euo pipefail
+          ARGS="$(./crunchy/scripts/resolve_helm_args.sh)"
+          # shellcheck disable=SC2086 # validated args contain no whitespace
+          helm template smoke crunchy/charts/crunchy --values crunchy/values.yml $ARGS > /tmp/render-overrides.yaml
+          grep -q '^kind: PostgresCluster' /tmp/render-overrides.yaml
+          grep -q 'crunchy-postgres-gis:ubi9-17.7-3.6-2547' /tmp/render-overrides.yaml
+          grep -q 'postgresVersion: 17' /tmp/render-overrides.yaml
+          grep -q 'postGISVersion: "3.6"' /tmp/render-overrides.yaml
+          grep -q 'storage: 500Mi' /tmp/render-overrides.yaml
+          grep -q '^kind: Route' /tmp/render-overrides.yaml
+          grep -q 'host: pg.example.com' /tmp/render-overrides.yaml
+          grep -q 'termination: passthrough' /tmp/render-overrides.yaml
+
+      - name: deploy_db.sh fails fast before side effects
+        run: |
+          set -euo pipefail
+          if output="$(PVC_SIZE=1Gi ./crunchy/scripts/deploy_db.sh crunchy/charts/crunchy https://example.com/values.yml app smoke true 2>&1)"; then
+            echo "::error::values_file with pvc_size did not fail"
+            exit 1
+          fi
+          grep -q 'values_file cannot be combined with override inputs (pvc_size)' <<< "$output"
+          mkdir -p /tmp/chart-noroute
+          cp -r crunchy/charts/crunchy/. /tmp/chart-noroute
+          rm /tmp/chart-noroute/templates/route.yaml
+          if output="$(ROUTE_ENABLED=true ./crunchy/scripts/deploy_db.sh /tmp/chart-noroute '' app smoke true 2>&1)"; then
+            echo "::error::route_enabled with a chart lacking route.yaml did not fail"
+            exit 1
+          fi
+          grep -q 'has no templates/route.yaml' <<< "$output"
+
+  # Merge gate for this workflow: always reports, skipped jobs count as passing
+  results:
+    name: Crunchy Results
+    needs:
+      - changes
+      - test-crunchy
+    if: always()
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: bcgov/actions/workflow-results@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+        with:
+          needs: ${{ toJson(needs) }}
