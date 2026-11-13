@@ -96,3 +96,43 @@ stub_curl() {
   [[ "$output" == *"::error title=cert-keeper::Port 80 on ${HOST} did not answer"* ]]
   [[ "$output" == *"Fix: point ${HOST} at the OpenShift router"* ]]
 }
+
+parse_inputs() {
+  local script="${BATS_TEST_TMPDIR}/parse-inputs.sh"
+  awk '
+    /^    - name: Parse Inputs$/ { in_step=1; next }
+    in_step && /^      run: \|$/ { in_run=1; next }
+    in_run && /^    - / { exit }
+    in_run { sub(/^        /, ""); print }
+  ' "${BATS_TEST_DIRNAME}/../../../cert-keeper/action.yml" > "$script"
+  SHARED_INPUTS="${BATS_TEST_DIRNAME}/../../../shared/inputs.sh" bash "$script"
+}
+
+@test "parse inputs: default ACME mode sets supplied=false and dry_run=false" {
+  INPUT_CA="" INPUT_FORCE="" INPUT_DRY_RUN="" HAS_CERT=false HAS_KEY=false HAS_CA=false run parse_inputs
+  [ "$status" -eq 0 ]
+  grep -qx 'ca=letsencrypt' "$GITHUB_OUTPUT"
+  grep -qx 'force=false' "$GITHUB_OUTPUT"
+  grep -qx 'dry_run=false' "$GITHUB_OUTPUT"
+  grep -qx 'supplied=false' "$GITHUB_OUTPUT"
+}
+
+@test "parse inputs: pre-supplied mode sets supplied=true and allows dry_run" {
+  INPUT_CA="" INPUT_FORCE="" INPUT_DRY_RUN="true" HAS_CERT=true HAS_KEY=true HAS_CA=true run parse_inputs
+  [ "$status" -eq 0 ]
+  grep -qx 'dry_run=true' "$GITHUB_OUTPUT"
+  grep -qx 'supplied=true' "$GITHUB_OUTPUT"
+}
+
+@test "parse inputs: incomplete pre-supplied inputs fail with missing list" {
+  INPUT_CA="" INPUT_FORCE="" INPUT_DRY_RUN="false" HAS_CERT=true HAS_KEY=false HAS_CA=true run parse_inputs
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error title=cert-keeper: incomplete certificate inputs::"* ]]
+  [[ "$output" == *"missing: tls_private_key"* ]]
+}
+
+@test "parse inputs: dry_run=true without pre-supplied PEMs fails" {
+  INPUT_CA="" INPUT_FORCE="" INPUT_DRY_RUN="true" HAS_CERT=false HAS_KEY=false HAS_CA=false run parse_inputs
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error title=dry_run: requires pre-supplied certificate::"* ]]
+}

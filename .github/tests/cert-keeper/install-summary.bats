@@ -240,6 +240,8 @@ esac
 STUB
   chmod +x "${bin}/oc"
   expires="$(openssl x509 -in "${BATS_TEST_TMPDIR}/leaf.pem" -noout -enddate | sed 's/^notAfter=//')"
+  output_file="${BATS_TEST_TMPDIR}/github-output"
+  : > "$output_file"
   cd "$WORK"
   run env \
     PATH="${bin}:${PATH}" \
@@ -255,9 +257,11 @@ STUB
     OC_TOKEN=token-should-not-leak \
     DRY_RUN=false \
     ROUTE_OUT="${WORK}/route.yml" \
+    GITHUB_OUTPUT="$output_file" \
     GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" \
     "$SCRIPT"
   [ "$status" -eq 0 ]
+  grep -Fx "not_after=${expires}" "$output_file"
   grep -F "dry_run=false. Applied route app-vanity to app for app.example.gov.bc.ca. Certificate expires ${expires}." "$GITHUB_STEP_SUMMARY"
   ! grep -F 'token-should-not-leak' "$GITHUB_STEP_SUMMARY"
   ! grep -F 'BEGIN PRIVATE KEY' "$GITHUB_STEP_SUMMARY"

@@ -1,5 +1,5 @@
 name: "Cert Keeper"
-description: "Keeps one hostname's SSL/TLS certificate valid on an OpenShift Route: gets a free Let's Encrypt certificate when the host has none or is running low, installs it on the Route, and cleans up."
+description: "Keeps one hostname's SSL/TLS certificate valid on an OpenShift Route: gets a free Let's Encrypt certificate when the host has none or is running low (or installs a pre-supplied certificate), installs it on the Route, and cleans up."
 inputs:
   hostname:
     description: "Hostname to keep certified (e.g. myapp.gov.bc.ca). One host, no scheme, no wildcard. Its A/CNAME must already reach the OpenShift router."
@@ -22,6 +22,22 @@ inputs:
     description: "If true, get and install a new certificate even when the current one is not due, for example after a key leak. Counts against the 5 certificates per week limit for this host."
     required: false
     default: "false"
+  tls_certificate:
+    description: "Pre-supplied leaf certificate PEM. Pass together with tls_private_key and tls_ca_certificate to install an existing certificate (e.g. from GitHub secrets) instead of issuing one from Let's Encrypt."
+    required: false
+    default: ""
+  tls_private_key:
+    description: "Pre-supplied private TLS key PEM."
+    required: false
+    default: ""
+  tls_ca_certificate:
+    description: "Pre-supplied issuing CA certificate chain PEM (issuer of the leaf first)."
+    required: false
+    default: ""
+  dry_run:
+    description: "For pre-supplied certificates only: if true, validate the PEMs, log in, and check the Route without creating the backup Secret or applying the Route."
+    required: false
+    default: "false"
   oc_namespace:
     description: "OpenShift namespace."
     required: true
@@ -37,14 +53,14 @@ inputs:
     default: "300"
 outputs:
   due:
-    description: "true when a new certificate was needed (and so issued and installed), false when the current one was left alone."
-    value: ${{ steps.decide.outputs.due }}
+    description: "true when a certificate was needed (or pre-supplied), false when the current one was left alone."
+    value: ${{ steps.inputs.outputs.supplied == 'true' && 'true' || steps.decide.outputs.due }}
   reason:
-    description: "Why a new certificate was or was not needed."
-    value: ${{ steps.decide.outputs.reason }}
+    description: "Why a certificate was or was not needed."
+    value: ${{ steps.inputs.outputs.supplied == 'true' && 'pre-supplied certificate' || steps.decide.outputs.reason }}
   not_after:
-    description: "Expiry of the newly issued certificate; empty when nothing was issued."
-    value: ${{ steps.issue.outputs.not_after }}
+    description: "Expiry of the installed certificate; empty when nothing was installed."
+    value: ${{ steps.install.outputs.not_after || steps.issue.outputs.not_after }}
 
 runs:
   using: "composite"
@@ -63,18 +79,48 @@ runs:
       env:
         INPUT_CA: ${{ inputs.ca }}
         INPUT_FORCE: ${{ inputs.force }}
+        INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        HAS_CERT: ${{ inputs.tls_certificate != '' }}
+        HAS_KEY: ${{ inputs.tls_private_key != '' }}
+        HAS_CA: ${{ inputs.tls_ca_certificate != '' }}
         SHARED_INPUTS: ${{ github.action_path }}/../shared/inputs.sh
       run: |
         # shellcheck source=/dev/null
         source "$SHARED_INPUTS"
         ca="$(input_enum ca "$INPUT_CA" "letsencrypt letsencrypt-staging" letsencrypt)" || { echo "$ca"; exit 1; }
         force="$(input_bool force "$INPUT_FORCE" false)" || { echo "$force"; exit 1; }
-        echo "ca=${ca}" >> "$GITHUB_OUTPUT"
-        echo "force=${force}" >> "$GITHUB_OUTPUT"
+        dry_run="$(input_bool dry_run "$INPUT_DRY_RUN" false)" || { echo "$dry_run"; exit 1; }
+        missing=()
+        [ "${HAS_CERT:-false}" = "true" ] || missing+=(tls_certificate)
+        [ "${HAS_KEY:-false}" = "true" ] || missing+=(tls_private_key)
+        [ "${HAS_CA:-false}" = "true" ] || missing+=(tls_ca_certificate)
+        case "${#missing[@]}" in
+          0)
+            supplied=true
+            ;;
+          3)
+            if [ "$dry_run" = "true" ]; then
+              echo "::error title=dry_run: requires pre-supplied certificate::dry_run=true requires tls_certificate, tls_private_key and tls_ca_certificate. To rehearse Let's Encrypt issuance on an unused host, set ca: letsencrypt-staging."
+              exit 1
+            fi
+            supplied=false
+            ;;
+          *)
+            echo "::error title=cert-keeper: incomplete certificate inputs::Pre-supplied certificate mode requires tls_certificate, tls_private_key and tls_ca_certificate (missing: ${missing[*]}). Pass all three, or omit all three to issue a Let's Encrypt certificate."
+            exit 1
+            ;;
+        esac
+        {
+          echo "ca=${ca}"
+          echo "force=${force}"
+          echo "dry_run=${dry_run}"
+          echo "supplied=${supplied}"
+        } >> "$GITHUB_OUTPUT"
 
     # Reads the certificate the host serves today (check.sh, read-only)
     - name: Check current certificate
       id: gate
+      if: steps.inputs.outputs.supplied == 'false'
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
@@ -87,6 +133,7 @@ runs:
 
     - name: Decide
       id: decide
+      if: steps.inputs.outputs.supplied == 'false'
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
@@ -104,7 +151,7 @@ runs:
       run: bash "${ACTION_PATH}/preflight.sh"
 
     - name: OpenShift CLI
-      if: steps.decide.outputs.due == 'true'
+      if: steps.decide.outputs.due == 'true' || steps.inputs.outputs.supplied == 'true'
       uses: $/oc-runner
       with:
         oc_namespace: ${{ inputs.oc_namespace }}
@@ -114,7 +161,7 @@ runs:
     # Before issuing, so a refusal costs no certificate: the install step rewrites
     # the whole Route, so it must be this host's own
     - name: Check the Route
-      if: steps.decide.outputs.due == 'true'
+      if: steps.decide.outputs.due == 'true' || steps.inputs.outputs.supplied == 'true'
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
@@ -137,18 +184,19 @@ runs:
       run: bash "${ACTION_PATH}/issue.sh"
 
     - name: Install on the Route
-      if: steps.decide.outputs.due == 'true'
+      id: install
+      if: steps.decide.outputs.due == 'true' || steps.inputs.outputs.supplied == 'true'
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
         ROUTE_HOST: ${{ inputs.hostname }}
         ROUTE_NAME: ${{ inputs.route_name }}
         TARGET_SERVICE: ${{ inputs.target_service }}
-        TLS_CERTIFICATE: ${{ steps.issue.outputs.tls_certificate }}
-        TLS_PRIVATE_KEY: ${{ steps.issue.outputs.tls_private_key }}
-        TLS_CA_CERTIFICATE: ${{ steps.issue.outputs.tls_ca_certificate }}
+        TLS_CERTIFICATE: ${{ inputs.tls_certificate || steps.issue.outputs.tls_certificate }}
+        TLS_PRIVATE_KEY: ${{ inputs.tls_private_key || steps.issue.outputs.tls_private_key }}
+        TLS_CA_CERTIFICATE: ${{ inputs.tls_ca_certificate || steps.issue.outputs.tls_ca_certificate }}
         OC_NAMESPACE: ${{ inputs.oc_namespace }}
         OC_SERVER: ${{ inputs.oc_server }}
         OC_TOKEN: ${{ inputs.oc_token }}
-        DRY_RUN: "false"
+        DRY_RUN: ${{ steps.inputs.outputs.dry_run }}
       run: bash "${ACTION_PATH}/install.sh"
