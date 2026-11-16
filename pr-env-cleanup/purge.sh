@@ -270,9 +270,9 @@ fi
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
     if [ "${DRY_RUN}" = "true" ]; then
-      echo "### Stale PR Cleanup (dry run)"
+      echo "### PR Environment Cleanup (dry run)"
     else
-      echo "### Stale PR Cleanup"
+      echo "### PR Environment Cleanup"
     fi
     echo
     echo "- Prefix: \`${PREFIX}\`"

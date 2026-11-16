@@ -1,4 +1,4 @@
-name: "Cleanup Stale PRs"
+name: "PR Environment Cleanup"
 description: "Purge stale or closed pull request OpenShift deployments (by label) and Crunchy PostgreSQL PR users/databases."
 
 inputs:
@@ -105,7 +105,7 @@ runs:
         debug="$(input_debug "$INPUT_DEBUG")" || { echo "$debug"; exit 1; }
 
         if [ "$cleanup_label" != "true" ] && [ "$crunchy" != "true" ]; then
-          echo "::error title=cleanup-stale-prs: nothing enabled::At least one of cleanup_label or crunchy must be true."
+          echo "::error title=pr-env-cleanup: nothing enabled::At least one of cleanup_label or crunchy must be true."
           exit 1
         fi
         if ! [[ "$INPUT_DAYS" =~ ^[1-9][0-9]*$ ]]; then

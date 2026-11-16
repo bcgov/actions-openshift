@@ -51,7 +51,7 @@ jobs:
             exit 1
           fi
           echo "Checking sibling action references..."
-          for action in cert-keeper cleanup-pr cleanup-stale-prs image-import; do
+          for action in cert-keeper cleanup-pr image-import pr-env-cleanup; do
             if ! grep -q 'uses: \$/oc-runner' "$action/action.yml"; then
               echo "::error::$action/action.yml must reference oc-runner via 'uses: $/oc-runner'"
               exit 1

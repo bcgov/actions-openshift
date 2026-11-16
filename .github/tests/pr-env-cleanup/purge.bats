@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# Unit tests for cleanup-stale-prs/purge.sh (stubbed oc and curl)
+# Unit tests for pr-env-cleanup/purge.sh (stubbed oc and curl)
 
 setup() {
-  SCRIPT="${BATS_TEST_DIRNAME}/../../../cleanup-stale-prs/purge.sh"
+  SCRIPT="${BATS_TEST_DIRNAME}/../../../pr-env-cleanup/purge.sh"
   D="${BATS_TEST_TMPDIR}"
   mkdir -p "${D}/bin"
 

@@ -1,4 +1,4 @@
-# Cleanup Stale PRs
+# PR Environment Cleanup
 
 Scheduled sweep action that removes leftover PR deployments in OpenShift (by `app` label) and/or stale PR databases/users (`app-<pr>`) in a shared Crunchy `PostgresCluster`.
 
@@ -49,7 +49,7 @@ In `bcgov/quickstart-openshift`'s `.github/workflows/scheduled.yml`, this replac
       pull-requests: read
     steps:
       - name: Clean up stale PR deployments
-        uses: bcgov/actions-openshift/cleanup-stale-prs@vX.Y.Z
+        uses: bcgov/actions-openshift/pr-env-cleanup@vX.Y.Z
         with:
           oc_namespace: ${{ vars.OC_NAMESPACE }}
           oc_server: ${{ vars.OC_SERVER }}
@@ -62,7 +62,7 @@ For a repository whose OpenShift templates use a custom prefix (for example `nr-
 
 ```yaml
       - name: Clean up stale PR deployments and Crunchy DBs
-        uses: bcgov/actions-openshift/cleanup-stale-prs@vX.Y.Z
+        uses: bcgov/actions-openshift/pr-env-cleanup@vX.Y.Z
         with:
           prefix: fom
           crunchy: true

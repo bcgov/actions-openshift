@@ -12,9 +12,9 @@ Every action fails at its first step when a caller passes an input it does not d
 Cleans up Helm releases, labeled resources, and PVCs in a target OpenShift namespace on pull request close or merge.
 * See [cleanup-pr/README.md](./cleanup-pr/README.md) for detailed inputs and usage.
 
-### 2. [Cleanup Stale PRs](./cleanup-stale-prs) (Composite Action)
+### 2. [PR Environment Cleanup](./pr-env-cleanup) (Composite Action)
 Scheduled sweep that cleans up closed or inactive PR OpenShift deployments (by `app` label) and/or `app-<pr>` users/databases in a shared Crunchy `PostgresCluster`.
-* See [cleanup-stale-prs/README.md](./cleanup-stale-prs/README.md) for detailed inputs and usage.
+* See [pr-env-cleanup/README.md](./pr-env-cleanup/README.md) for detailed inputs and usage.
 
 ### 3. [cert-keeper](./cert-keeper) (Composite Action)
 Keeps a host's SSL/TLS certificate valid on an OpenShift Route: gets a free Let's Encrypt certificate when the host has none or is running low (or installs a pre-supplied certificate from `tls_certificate` / `tls_private_key` / `tls_ca_certificate`), installs it on the Route, and cleans up.
