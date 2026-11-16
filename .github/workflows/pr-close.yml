@@ -1,32 +1,117 @@
 name: PR Closed
 
+# Cancels any active live-OpenShift PR test workflows for the PR, then cleans up
+# deployer resources and the PR image-import tag. On open/synchronize PRs that change
+# this workflow, runs the cancellation lookup in dry-run mode without deleting cluster state.
 on:
   pull_request:
-    types: [closed]
+    types: [opened, synchronize, reopened, closed]
 
 concurrency:
-  # Shares the PR workflow's group so cleanup cancels any running test deploy
-  group: PR-${{ github.event_name }}-${{ github.event.number }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number }}
   cancel-in-progress: true
 
 permissions: {}
 
 jobs:
+  changes:
+    name: PR Closed (changes)
+    if: github.event.action != 'closed'
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      triggered: ${{ steps.diff.outputs.triggered }}
+    steps:
+      - name: Find the pull request merge base
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No merge base for ${BASE_SHA}...${HEAD_SHA}"; exit 1; }
+          echo "Merge base: ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - id: diff
+        uses: bcgov/actions/diff-triggers@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+        with:
+          base: ${{ steps.base.outputs.sha }}
+          triggers: |
+            .github/workflows/pr-close.yml
+            !*.md
+
   cleanup-deployer-test:
     name: Cleanup Deployer Test
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: changes
+    if: >-
+      !cancelled()
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && (github.event.action == 'closed' || needs.changes.outputs.triggered == 'true')
     permissions:
+      actions: write
       contents: read
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
-      - uses: $/cleanup-pr
+      - name: Cancel and wait for split PR test workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DRY_RUN: ${{ github.event.action != 'closed' }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 180))
+          while :; do
+            mapfile -t run_ids < <(
+              gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs" \
+                -f event=pull_request \
+                -f branch="$HEAD_REF" \
+                -F per_page=100 \
+                | jq -r --arg pr "$PR" --arg sha "$HEAD_SHA" '
+                    .workflow_runs[]
+                    | select(
+                        .status != "completed"
+                        and (.path == ".github/workflows/deployer-tests.yml" or .path == ".github/workflows/image-import-tests.yml")
+                        and (((.pull_requests // []) | any(.number == ($pr | tonumber))) or .head_sha == $sha)
+                      )
+                    | .id
+                  '
+            )
+            if (( ${#run_ids[@]} == 0 )); then
+              echo "No active Deployer Tests or Image Import Tests runs remain for PR #${PR}."
+              break
+            fi
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "Dry run: active split PR test runs matching PR #${PR}: ${run_ids[*]}"
+              break
+            fi
+            for id in "${run_ids[@]}"; do
+              echo "Cancelling active workflow run ${id}..."
+              gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/${id}/cancel" >/dev/null 2>&1 || true
+            done
+            if (( SECONDS >= deadline )); then
+              echo "::error::Timed out waiting for split PR test workflows to finish: ${run_ids[*]}"
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - if: github.event.action == 'closed'
+        uses: $/cleanup-pr
         with:
           oc_namespace: ${{ vars.OC_NAMESPACE }}
           oc_server: ${{ vars.OC_SERVER }}
           oc_token: ${{ secrets.OC_TOKEN }}
 
       - name: Delete image-import pull-request tag
+        if: github.event.action == 'closed'
         uses: $/oc-runner
         env:
           PR: ${{ github.event.number }}
@@ -36,3 +121,20 @@ jobs:
           oc_token: ${{ secrets.OC_TOKEN }}
           commands: |
             oc delete imagestreamtag "image-import:${PR}" --ignore-not-found
+
+  results:
+    name: PR Closed Results
+    needs:
+      - changes
+      - cleanup-deployer-test
+    if: always()
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: bcgov/actions/workflow-results@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+        with:
+          needs: ${{ toJson(needs) }}
