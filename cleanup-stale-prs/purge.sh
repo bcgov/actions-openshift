@@ -55,20 +55,11 @@ parse_epoch() {
   date -u -d "$ts" +%s 2>/dev/null
 }
 
-# Queries GitHub PR state once per PR number and caches the decision.
-# Sets global PR_DECISION ("true"|"false") and PR_REASON.
-check_pr_purge() {
-  local pr="$1"
-  local fallback_ts="${2:-}"
-
-  if [ -n "${PR_PURGE_CACHE[$pr]+x}" ]; then
-    PR_DECISION="${PR_PURGE_CACHE[$pr]}"
-    PR_REASON="${PR_REASON_CACHE[$pr]}"
-    return 0
-  fi
-
-  local resp_file http_status curl_cfg state updated_at updated_epoch fallback_epoch
-  resp_file="$(mktemp)"
+# Runs a GitHub REST API GET into $resp_file and echoes the HTTP status code.
+github_api_get() {
+  local path="$1"
+  local resp_file="$2"
+  local curl_cfg http_status
 
   # Never expose TOKEN in ps or set -x trace
   { set +x; } 2>/dev/null
@@ -83,14 +74,35 @@ check_pr_purge() {
   } > "$curl_cfg"
 
   http_status="$(curl -sS -K "$curl_cfg" -o "$resp_file" -w '%{http_code}' \
-    "${GITHUB_API_URL}/repos/${REPOSITORY}/pulls/${pr}")" || {
-    rm -f "$curl_cfg" "$resp_file"
-    fail "Failed to query GitHub PR #${pr} for ${REPOSITORY}."
+    "${GITHUB_API_URL}${path}")" || {
+    rm -f "$curl_cfg"
+    return 1
   }
   rm -f "$curl_cfg"
   if [ "${DEBUG}" = "true" ]; then
     set -x
   fi
+  printf '%s' "$http_status"
+}
+
+# Queries GitHub PR state once per PR number and caches the decision.
+# Sets global PR_DECISION ("true"|"false") and PR_REASON.
+check_pr_purge() {
+  local pr="$1"
+
+  if [ -n "${PR_PURGE_CACHE[$pr]+x}" ]; then
+    PR_DECISION="${PR_PURGE_CACHE[$pr]}"
+    PR_REASON="${PR_REASON_CACHE[$pr]}"
+    return 0
+  fi
+
+  local resp_file http_status state updated_at updated_epoch verify_status body
+  resp_file="$(mktemp)"
+
+  http_status="$(github_api_get "/repos/${REPOSITORY}/pulls/${pr}" "$resp_file")" || {
+    rm -f "$resp_file"
+    fail "Failed to query GitHub PR #${pr} for ${REPOSITORY}."
+  }
 
   case "$http_status" in
     200)
@@ -115,17 +127,22 @@ check_pr_purge() {
       fi
       ;;
     404)
+      # Distinguish an unreadable repo/token (404 on private repos) from a nonexistent PR number
+      verify_status="$(github_api_get "/repos/${REPOSITORY}/pulls?state=all&per_page=1" "$resp_file")" || {
+        rm -f "$resp_file"
+        fail "Failed to verify pull request read access for ${REPOSITORY}."
+      }
+      body="$(cat "$resp_file" 2>/dev/null || true)"
       rm -f "$resp_file"
-      if fallback_epoch="$(parse_epoch "$fallback_ts")" && [ "$fallback_epoch" -lt "$CUTOFF_EPOCH" ]; then
-        PR_DECISION="true"
-        PR_REASON="PR #${pr} not found on GitHub; created ${fallback_ts} (>${DAYS}d)"
-      else
-        PR_DECISION="false"
-        PR_REASON="PR #${pr} not found on GitHub; within ${DAYS}d window or unknown age"
+      if [ "$verify_status" != "200" ]; then
+        fail "Cannot read pull requests for ${REPOSITORY} (HTTP ${verify_status}): ${body}"
       fi
+      # Fail closed: never delete resources whose PR state cannot be confirmed
+      PR_DECISION="false"
+      PR_REASON="PR #${pr} not found on GitHub; skipping (fail closed)"
+      echo "::warning::${PR_REASON}"
       ;;
     *)
-      local body
       body="$(cat "$resp_file" 2>/dev/null || true)"
       rm -f "$resp_file"
       fail "GitHub API returned HTTP ${http_status} for ${REPOSITORY} PR #${pr}: ${body}"
@@ -137,10 +154,10 @@ check_pr_purge() {
 }
 
 sweep_labels() {
-  local deploys_json name app_label created_ts suffix pr
+  local deploys_json name app_label suffix pr
   deploys_json="$(oc get deploy -o json)"
 
-  while IFS='|' read -r name app_label created_ts; do
+  while IFS='|' read -r name app_label; do
     [ -n "$name" ] || continue
     [[ "$name" == "${PREFIX}-"* ]] || continue
     suffix="${name#"${PREFIX}-"}"
@@ -150,7 +167,7 @@ sweep_labels() {
       continue
     fi
 
-    check_pr_purge "$pr" "$created_ts"
+    check_pr_purge "$pr"
     if [ "$PR_DECISION" != "true" ]; then
       echo "Keeping deployment ${name}: ${PR_REASON}"
       continue
@@ -173,11 +190,11 @@ sweep_labels() {
       oc delete all,jobs,cronjobs,cm,pvc,secret,networkpolicy,routes,hpa -l "app=${app_label}" --ignore-not-found
     fi
     DELETED_LABELS+=("$app_label")
-  done < <(jq -r '.items[]? | [.metadata.name // "", .metadata.labels.app // "", .metadata.creationTimestamp // ""] | join("|")' <<< "$deploys_json")
+  done < <(jq -r '.items[]? | [.metadata.name // "", .metadata.labels.app // ""] | join("|")' <<< "$deploys_json")
 }
 
 sweep_crunchy() {
-  local repo_name release_name cluster_name cluster_json user_name pr fallback_ts
+  local repo_name release_name cluster_name cluster_json err_file user_name pr
   repo_name="${REPOSITORY#*/}"
   if [ -n "${CRUNCHY_RELEASE_NAME}" ]; then
     release_name="${CRUNCHY_RELEASE_NAME}"
@@ -186,10 +203,18 @@ sweep_crunchy() {
   fi
   cluster_name="${release_name}-crunchy"
 
-  if ! cluster_json="$(oc get "PostgresCluster/${cluster_name}" -o json 2>/dev/null)"; then
-    echo "Crunchy PostgresCluster ${cluster_name} not found; skipping Crunchy cleanup."
-    return 0
+  err_file="$(mktemp)"
+  if ! cluster_json="$(oc get "PostgresCluster/${cluster_name}" -o json 2>"$err_file")"; then
+    if grep -qiE '\(NotFound\)|not found|the server doesn'\''t have a resource type' "$err_file"; then
+      rm -f "$err_file"
+      echo "Crunchy PostgresCluster ${cluster_name} not found; skipping Crunchy cleanup."
+      return 0
+    fi
+    cat "$err_file" >&2
+    rm -f "$err_file"
+    fail "Failed to read Crunchy PostgresCluster ${cluster_name}."
   fi
+  rm -f "$err_file"
 
   while IFS= read -r user_name; do
     [ -n "$user_name" ] || continue
@@ -199,12 +224,7 @@ sweep_crunchy() {
       continue
     fi
 
-    fallback_ts=""
-    if [ -z "${PR_PURGE_CACHE[$pr]+x}" ]; then
-      fallback_ts="$(oc get secret "${cluster_name}-pguser-app-${pr}" -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null || true)"
-    fi
-
-    check_pr_purge "$pr" "$fallback_ts"
+    check_pr_purge "$pr"
     if [ "$PR_DECISION" != "true" ]; then
       echo "Keeping Crunchy user app-${pr} on ${cluster_name}: ${PR_REASON}"
       continue

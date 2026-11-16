@@ -44,14 +44,7 @@ case "${1:-}" in
         if [ -f "${CLUSTER_JSON}" ]; then
           cat "${CLUSTER_JSON}"
         else
-          echo "Error from server (NotFound)" >&2
-          exit 1
-        fi
-        ;;
-      secret)
-        if [ -n "${SECRET_CREATED_AT:-}" ]; then
-          printf '%s' "${SECRET_CREATED_AT}"
-        else
+          echo "${CLUSTER_ERROR_MSG:-Error from server (NotFound)}" >&2
           exit 1
         fi
         ;;
@@ -86,6 +79,12 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 printf '%s | %s\n' "$url" "${cfg//$'\n'/; }" >> "${CURL_LOG}"
+if [[ "$url" == *"/pulls?"* ]]; then
+  code="${PULLS_LIST_CODE:-200}"
+  printf '[]' > "$out"
+  printf '%s' "$code"
+  exit 0
+fi
 pr="${url##*/}"
 if [ -f "${PR_RESPONSES}/${pr}.code" ]; then
   code="$(cat "${PR_RESPONSES}/${pr}.code")"
@@ -203,20 +202,26 @@ JSON
   grep -q 'repos/bcgov/nr-fom/pulls/42' "${CURL_LOG}"
 }
 
-@test "404 PR falls back to creationTimestamp" {
+@test "404 PR fails closed when repo is readable and fails fast when pulls endpoint is unreadable" {
   cat > "${DEPLOYS_JSON}" << 'JSON'
 {
   "items": [
-    {"metadata": {"name": "quickstart-openshift-900-backend", "labels": {"app": "quickstart-openshift-900"}, "creationTimestamp": "2026-11-01T00:00:00Z"}},
-    {"metadata": {"name": "quickstart-openshift-901-backend", "labels": {"app": "quickstart-openshift-901"}, "creationTimestamp": "2026-11-15T00:00:00Z"}}
+    {"metadata": {"name": "quickstart-openshift-900-backend", "labels": {"app": "quickstart-openshift-900"}, "creationTimestamp": "2026-10-01T00:00:00Z"}}
   ]
 }
 JSON
 
-  run_purge
+  # Readable repo, genuinely nonexistent PR -> fail closed (nothing deleted)
+  PULLS_LIST_CODE=200 run_purge
   [ "$status" -eq 0 ]
-  [ "$(wc -l < "${OC_DELETE_LOG}")" -eq 1 ]
-  grep -qxF 'delete all,jobs,cronjobs,cm,pvc,secret,networkpolicy,routes,hpa -l app=quickstart-openshift-900 --ignore-not-found' "${OC_DELETE_LOG}"
+  [ ! -s "${OC_DELETE_LOG}" ]
+  [[ "$output" == *"skipping (fail closed)"* ]]
+
+  # Unreadable repo/pulls (e.g. private repo without pull-requests: read) -> fail fast
+  PULLS_LIST_CODE=404 run_purge
+  [ "$status" -eq 1 ]
+  [ ! -s "${OC_DELETE_LOG}" ]
+  [[ "$output" == *"Cannot read pull requests"* ]]
 }
 
 @test "crunchy sweep removes closed/stale PR users, caches PR lookups, and skips non-PR users" {
@@ -281,6 +286,12 @@ JSON
   CLEANUP_LABEL=false CRUNCHY=true CRUNCHY_RELEASE_NAME="missing-pg" run_purge
   [ "$status" -eq 0 ]
   [ ! -s "${USER_CHANGE_LOG}" ]
+
+  # RBAC / outage errors on PostgresCluster must fail fast rather than silently skip
+  CLUSTER_ERROR_MSG="Error from server (Forbidden): postgresclusters is forbidden" \
+    CLEANUP_LABEL=false CRUNCHY=true CRUNCHY_RELEASE_NAME="forbidden-pg" run_purge
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed to read Crunchy PostgresCluster forbidden-pg-crunchy"* ]]
 }
 
 @test "dry_run selects targets without deleting OpenShift resources or Crunchy users" {
