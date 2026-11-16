@@ -1,0 +1,94 @@
+name: Cleanup Stale PRs Tests
+
+# Unit tests for cleanup-stale-prs/purge.sh.
+# Always runs on pull requests and main pushes so Cleanup Stale PRs Results reports;
+# the test job runs only when cleanup-stale-prs or its dependencies changed (Markdown excluded).
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  changes:
+    name: Cleanup Stale PRs (changes)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      triggered: ${{ steps.diff.outputs.triggered }}
+    steps:
+      # diff-triggers compares against the base branch tip. The merge base keeps a
+      # newer main change out of this pull request's diff. Pushes compare the whole pushed range.
+      - name: Find the pull request merge base
+        id: base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No merge base for ${BASE_SHA}...${HEAD_SHA}"; exit 1; }
+          echo "Merge base: ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - id: diff
+        uses: bcgov/actions/diff-triggers@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+        with:
+          base: ${{ steps.base.outputs.sha || github.event.before }}
+          triggers: |
+            cleanup-stale-prs/action.yml
+            cleanup-stale-prs/purge.sh
+            crunchy/scripts/user_change.sh
+            shared/inputs.sh
+            oc-runner/action.yml
+            oc-runner/scripts/
+            .github/tests/cleanup-stale-prs/
+            .github/workflows/cleanup-stale-prs-tests.yml
+            !*.md
+
+  unit:
+    name: Test cleanup-stale-prs (bats)
+    needs: changes
+    if: needs.changes.outputs.triggered == 'true'
+    permissions: {}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Unit tests (bats)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats parallel
+          bats --jobs 2 .github/tests/cleanup-stale-prs
+
+  # Merge gate for this workflow: always reports, skipped jobs count as passing
+  results:
+    name: Cleanup Stale PRs Results
+    needs:
+      - changes
+      - unit
+    if: always()
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: bcgov/actions/workflow-results@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+        with:
+          needs: ${{ toJson(needs) }}
