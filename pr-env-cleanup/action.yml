@@ -1,0 +1,158 @@
+name: "PR Environment Cleanup"
+description: "Purge stale or closed pull request OpenShift deployments (by label) and Crunchy PostgreSQL PR users/databases."
+
+inputs:
+  ### Required
+  oc_namespace:
+    description: "OpenShift namespace (e.g. abc123-dev)"
+    required: true
+  oc_server:
+    description: "OpenShift API server URL with port (e.g. https://api.silver.devops.gov.bc.ca:6443)"
+    required: true
+  oc_token:
+    description: "OpenShift access token"
+    required: true
+
+  ### Typical / recommended
+  prefix:
+    description: "Deployment name prefix to match (<prefix>-<pr>...). Defaults to repository name; override when templates use a custom prefix (e.g. fom for nr-fom)."
+    required: false
+    default: ${{ github.event.repository.name }}
+  cleanup_label:
+    description: "Delete labeled OpenShift resources for stale or closed PR deployments"
+    required: false
+    default: "true"
+  crunchy:
+    description: "Clean up app-<pr> users and databases in the repo's Crunchy PostgresCluster"
+    required: false
+    default: "false"
+  crunchy_release_name:
+    description: "Crunchy Helm release name override (same as crunchy release_name); defaults to pg-<md5> of the repository name"
+    required: false
+    default: ""
+  days:
+    description: "Inactivity threshold in days for open PRs (compared against GitHub PR updated_at); closed PRs are always cleaned up"
+    required: false
+    default: "7"
+  include_open:
+    description: "Also clean up open PRs inactive for at least days; set to false to clean up closed PRs only"
+    required: false
+    default: "true"
+  dry_run:
+    description: "Log what would be cleaned up without deleting OpenShift resources or Crunchy users/databases"
+    required: false
+    default: "false"
+
+  ### Usually not needed
+  repository:
+    description: "GitHub owner/repo used to query pull request state"
+    required: false
+    default: ${{ github.repository }}
+  token:
+    description: "GitHub token used to query pull request state"
+    required: false
+    default: ${{ github.token }}
+  debug:
+    description: "Enable bash xtrace (set -x). Also enabled when re-run with debug logging."
+    required: false
+    default: "false"
+
+outputs:
+  deleted_labels:
+    description: "JSON array of app labels deleted (or selected when dry_run is true)"
+    value: ${{ steps.purge.outputs.deleted_labels }}
+  deleted_crunchy_prs:
+    description: "JSON array of PR numbers removed from Crunchy (or selected when dry_run is true)"
+    value: ${{ steps.purge.outputs.deleted_crunchy_prs }}
+  blocked:
+    description: "true when OpenShift login failed because the runner IP is blocked from the OpenShift API"
+    value: ${{ steps.login.outputs.blocked }}
+  unreachable:
+    description: "true when OpenShift login failed because neither the API nor the cluster router answered"
+    value: ${{ steps.login.outputs.unreachable }}
+
+runs:
+  using: "composite"
+  steps:
+    # Undeclared inputs fail here; GitHub only warns
+    - name: Check inputs
+      uses: bcgov/actions/input-enforcer@d209bb08aabe15e5e69aca53b24d338a7b2843d5 # v0.12.0
+      with:
+        inputs: ${{ toJSON(inputs) }}
+        action_path: ${{ github.action_path }}
+
+    # Shared input rules (shared/inputs.sh); bad values fail before OpenShift login
+    - name: Parse Inputs
+      id: inputs
+      shell: bash
+      env:
+        INPUT_CLEANUP_LABEL: ${{ inputs.cleanup_label }}
+        INPUT_CRUNCHY: ${{ inputs.crunchy }}
+        INPUT_INCLUDE_OPEN: ${{ inputs.include_open }}
+        INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        INPUT_DEBUG: ${{ inputs.debug }}
+        INPUT_DAYS: ${{ inputs.days }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_PREFIX: ${{ inputs.prefix }}
+        SHARED_INPUTS: ${{ github.action_path }}/../shared/inputs.sh
+      run: |
+        # shellcheck source=/dev/null
+        source "$SHARED_INPUTS"
+        cleanup_label="$(input_bool cleanup_label "$INPUT_CLEANUP_LABEL" true)" || { echo "$cleanup_label"; exit 1; }
+        crunchy="$(input_bool crunchy "$INPUT_CRUNCHY" false)" || { echo "$crunchy"; exit 1; }
+        include_open="$(input_bool include_open "$INPUT_INCLUDE_OPEN" true)" || { echo "$include_open"; exit 1; }
+        dry_run="$(input_bool dry_run "$INPUT_DRY_RUN" false)" || { echo "$dry_run"; exit 1; }
+        debug="$(input_debug "$INPUT_DEBUG")" || { echo "$debug"; exit 1; }
+
+        if [ "$cleanup_label" != "true" ] && [ "$crunchy" != "true" ]; then
+          echo "::error title=pr-env-cleanup: nothing enabled::At least one of cleanup_label or crunchy must be true."
+          exit 1
+        fi
+        if ! [[ "$INPUT_DAYS" =~ ^[1-9][0-9]*$ ]]; then
+          echo "::error title=days: invalid integer::Invalid days input: '${INPUT_DAYS}'. Use a positive integer (e.g. 7)."
+          exit 1
+        fi
+        if ! [[ "$INPUT_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+          echo "::error title=repository: invalid format::Invalid repository input: '${INPUT_REPOSITORY}'. Use owner/repo."
+          exit 1
+        fi
+
+        prefix="${INPUT_PREFIX}"
+        if [ -z "$prefix" ]; then
+          prefix="${INPUT_REPOSITORY#*/}"
+        fi
+
+        {
+          echo "cleanup_label=${cleanup_label}"
+          echo "crunchy=${crunchy}"
+          echo "include_open=${include_open}"
+          echo "dry_run=${dry_run}"
+          echo "debug=${debug}"
+          echo "prefix=${prefix}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: OpenShift login
+      id: login
+      uses: $/oc-runner
+      with:
+        oc_namespace: ${{ inputs.oc_namespace }}
+        oc_server: ${{ inputs.oc_server }}
+        oc_token: ${{ inputs.oc_token }}
+        debug: ${{ steps.inputs.outputs.debug }}
+
+    - name: Purge stale PR environments
+      id: purge
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        REPOSITORY: ${{ inputs.repository }}
+        PREFIX: ${{ steps.inputs.outputs.prefix }}
+        CLEANUP_LABEL: ${{ steps.inputs.outputs.cleanup_label }}
+        CRUNCHY: ${{ steps.inputs.outputs.crunchy }}
+        CRUNCHY_RELEASE_NAME: ${{ inputs.crunchy_release_name }}
+        DAYS: ${{ inputs.days }}
+        INCLUDE_OPEN: ${{ steps.inputs.outputs.include_open }}
+        DRY_RUN: ${{ steps.inputs.outputs.dry_run }}
+        TOKEN: ${{ inputs.token }}
+        DEBUG: ${{ steps.inputs.outputs.debug }}
+      run: bash "${ACTION_PATH}/purge.sh"

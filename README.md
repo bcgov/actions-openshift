@@ -12,12 +12,16 @@ Every action fails at its first step when a caller passes an input it does not d
 Cleans up Helm releases, labeled resources, and PVCs in a target OpenShift namespace on pull request close or merge.
 * See [cleanup-pr/README.md](./cleanup-pr/README.md) for detailed inputs and usage.
 
-### 2. [cert-keeper](./cert-keeper) (Composite Action)
+### 2. [PR Environment Cleanup](./pr-env-cleanup) (Composite Action)
+Scheduled sweep that cleans up closed or inactive PR OpenShift deployments (by `app` label) and/or `app-<pr>` users/databases in a shared Crunchy `PostgresCluster`.
+* See [pr-env-cleanup/README.md](./pr-env-cleanup/README.md) for detailed inputs and usage.
+
+### 3. [cert-keeper](./cert-keeper) (Composite Action)
 Keeps a host's SSL/TLS certificate valid on an OpenShift Route: gets a free Let's Encrypt certificate when the host has none or is running low (or installs a pre-supplied certificate from `tls_certificate` / `tls_private_key` / `tls_ca_certificate`), installs it on the Route, and cleans up.
 * See [cert-keeper/README.md](./cert-keeper/README.md) for the daily workflow, pre-supplied certificate inputs, how it decides, and rate limits.
 
 
-### 3. [Image Import](./image-import) (Composite Action)
+### 4. [Image Import](./image-import) (Composite Action)
 Imports one GHCR image into a namespace ImageStream (`referencePolicy: Local`, `importMode: PreserveOriginal`) and checks the imported digest against GHCR.
 * See [image-import/README.md](./image-import/README.md) for the reference format and pull spec.
 
@@ -30,7 +34,7 @@ Imports one GHCR image into a namespace ImageStream (`referencePolicy: Local`, `
     oc_token: ${{ secrets.OC_TOKEN }}
 ```
 
-### 4. [oc-runner](./oc-runner) (Composite Action)
+### 5. [oc-runner](./oc-runner) (Composite Action)
 Login and run `oc` commands (and optional cronjobs) on OpenShift.
 * See [oc-runner/README.md](./oc-runner/README.md) for inputs and usage.
 
@@ -44,7 +48,7 @@ Login and run `oc` commands (and optional cronjobs) on OpenShift.
 ```
 
 
-### 5. [deployer](./deployer) (Composite Action)
+### 6. [deployer](./deployer) (Composite Action)
 Deploy to OpenShift using templates. Verification or penetration tests.
 * See [deployer/README.md](./deployer/README.md).
 
@@ -52,7 +56,7 @@ Deploy to OpenShift using templates. Verification or penetration tests.
 - uses: bcgov/actions-openshift/deployer@vX.Y.Z
 ```
 
-### 6. [sysdig-monitor](./sysdig-monitor/) (Composite Action)
+### 7. [sysdig-monitor](./sysdig-monitor/) (Composite Action)
 Create/update Sysdig email alerts for an OpenShift app on PROD deploy.
 * See [sysdig-monitor/README.md](./sysdig-monitor/README.md) for inputs and usage.
 
@@ -64,7 +68,7 @@ Create/update Sysdig email alerts for an OpenShift app on PROD deploy.
     app: my-app
 ```
 
-### 7. SchemaSpy (`.github/workflows/.schema-spy.yml`)
+### 8. SchemaSpy (`.github/workflows/.schema-spy.yml`)
 A reusable workflow that spins up a Postgres/PostGIS service, runs migrations using Flyway, generates interactive database documentation with SchemaSpy, and automatically publishes the results to GitHub Pages.
 
 #### Example Usage:
@@ -79,7 +83,7 @@ jobs:
       deploy_dir: docs/schema
 ```
 
-### 8. Runner reachability records (`.github/workflows/probe-runner-*.yml`)
+### 9. Runner reachability records (`.github/workflows/probe-runner-*.yml`)
 Internal records of whether GitHub-hosted runner IPs can reach the OpenShift APIs (background: #49). Nothing alerts on blocked runners; the runs stay green.
 * `probe-runner-reachability.yml` runs every 6 hours, probes the gold and silver APIs (:6443) and the silver router (:443) from 20 runners, writes a table to the run summary and uploads a `probe-results` JSON artifact (kept 14 days). A blocked runner is a warning; the run fails only when samples are missing, and then skips the upload so an earlier, complete record is kept.
 * `probe-runner-report.yml` runs weekly and summarizes the past 14 days of `probe-results`: this week vs last week, block rate per /24 runner IP range (always, sometimes or never blocked), and the gold vs silver split.
