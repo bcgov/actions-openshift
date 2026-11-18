@@ -7,9 +7,9 @@ on:
       - main
 
 concurrency:
-  # Keyed by PR number on pull_request and commit SHA on push, with cancel-in-progress
-  # disabled for push so back-to-back merges to main do not cancel each other
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.sha }}
+  # Keyed by event and ref, with cancel-in-progress disabled on push so
+  # back-to-back merges to main do not cancel in-progress runs
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 permissions: {}
