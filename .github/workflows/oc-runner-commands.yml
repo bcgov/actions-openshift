@@ -118,7 +118,10 @@ jobs:
   connect-retry:
     name: Test oc-runner connect-timeout retry
     needs: changes
-    if: needs.changes.outputs.triggered == 'true'
+    # Needs OpenShift credentials: pushes and same-repo PRs only (forks have no OC_TOKEN)
+    if: >-
+      needs.changes.outputs.triggered == 'true'
+      && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
     # Real login, then a block whose first run fails with a simulated API connect timeout
     # (marker file). oc-runner must run the whole block once more and pass on the retry's output
     permissions: {}

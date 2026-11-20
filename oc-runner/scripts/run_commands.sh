@@ -79,11 +79,16 @@ run_block() {
   kill -TERM "$watchdog_pid" 2>/dev/null || true
   wait "$watchdog_pid" 2>/dev/null || true
   exec {out_fd}>&- {err_fd}>&-
-  # A failed block's log is read for the retry check, so let tee finish copying it. Not after
-  # success or the timeout input, where a leftover child still holding the output must not
-  # keep the step open.
+  # A failed block's log is read for the retry check, so give tee up to 5 s to finish copying
+  # it. A background child left by the block can hold the output open, so the wait is bounded
+  # and the copies are then stopped. Not after success or the timeout input.
   if [ "$cmd_rc" -ne 0 ] && [ ! -e "$TIMEOUT_MARK" ]; then
-    wait "$out_pid" "$err_pid" 2>/dev/null || true
+    local _
+    for _ in $(seq 50); do
+      kill -0 "$out_pid" 2>/dev/null || kill -0 "$err_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill "$out_pid" "$err_pid" 2>/dev/null || true
   fi
 }
 

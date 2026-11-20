@@ -131,3 +131,23 @@ fi'
   [ "$(grep -c 'retrying commands' <<< "$output")" -eq 1 ]
   [[ "$output" == *"commands block failed with exit code 5."* ]]
 }
+
+@test "connect retry: a failed block's leftover background child does not hold the step" {
+  export CONNECT_RETRY_DELAY=0 COMMANDS_TIMEOUT=60s
+  export COMMANDS='sleep 30 3>&- & echo "Error: something else" >&2; exit 3'
+  start=$SECONDS
+  run bash -c '"$SCRIPT" > "$BATS_TEST_TMPDIR/out" 2>&1'
+  [ "$status" -eq 3 ]
+  [ $((SECONDS - start)) -lt 15 ]
+  grep -q 'commands block failed with exit code 3.' "$BATS_TEST_TMPDIR/out"
+}
+
+@test "connect retry: the timeout message is still caught when a background child holds the output" {
+  export CONNECT_RETRY_DELAY=0 COMMANDS_TIMEOUT=60s
+  export COMMANDS='echo run >> "$BATS_TEST_TMPDIR/runs"; sleep 30 3>&- & echo "Unable to connect to the server: dial tcp 10.0.0.1:6443: i/o timeout" >&2; exit 1'
+  start=$SECONDS
+  run bash -c '"$SCRIPT" > "$BATS_TEST_TMPDIR/out" 2>&1'
+  [ "$status" -eq 1 ]
+  [ "$(wc -l < "$BATS_TEST_TMPDIR/runs")" -eq 2 ]
+  [ $((SECONDS - start)) -lt 30 ]
+}
