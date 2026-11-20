@@ -85,3 +85,69 @@ run_script() {
   [[ "$output" == *"the limit is 524288 bytes"* ]]
   [ ! -s "$GITHUB_OUTPUT" ]
 }
+
+@test "connect retry: success runs the block once" {
+  export CONNECT_RETRY_DELAY=0
+  export COMMANDS='echo run >> "$BATS_TEST_TMPDIR/runs"'
+  run_script
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BATS_TEST_TMPDIR/runs")" -eq 1 ]
+  [[ "$output" != *"retrying commands"* ]]
+}
+
+@test "connect retry: other failures are not retried and keep their exit code" {
+  export CONNECT_RETRY_DELAY=0
+  export COMMANDS='echo run >> "$BATS_TEST_TMPDIR/runs"; echo "Error: UPGRADE FAILED: x509: certificate signed by unknown authority" >&2; exit 3'
+  run_script
+  [ "$status" -eq 3 ]
+  [ "$(wc -l < "$BATS_TEST_TMPDIR/runs")" -eq 1 ]
+  [[ "$output" != *"retrying commands"* ]]
+  [[ "$output" == *"commands block failed with exit code 3."* ]]
+}
+
+@test "connect retry: a connect timeout is retried once, then success" {
+  export CONNECT_RETRY_DELAY=0
+  export COMMANDS='echo run >> "$BATS_TEST_TMPDIR/runs"
+echo "attempt-output" >> "$GITHUB_OUTPUT"
+if [ ! -e "$BATS_TEST_TMPDIR/marker" ]; then
+  touch "$BATS_TEST_TMPDIR/marker"
+  echo "Unable to connect to the server: dial tcp 142.34.194.119:6443: i/o timeout" >&2
+  exit 1
+fi'
+  run_script
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BATS_TEST_TMPDIR/runs")" -eq 2 ]
+  [[ "$output" == *"::warning title=bcgov/actions-openshift/oc-runner: retrying commands::"*"exit code 1"*"running the whole block once more in 0s."* ]]
+  # Only the retry's output is passed on
+  [ "$(grep -c '^attempt-output$' "$GITHUB_OUTPUT")" -eq 1 ]
+}
+
+@test "connect retry: a second connect timeout fails with its exit code" {
+  export CONNECT_RETRY_DELAY=0
+  export COMMANDS='echo run >> "$BATS_TEST_TMPDIR/runs"; echo "Error: Kubernetes cluster unreachable: Get \"https://api.silver.devops.gov.bc.ca:6443/version\": dial tcp 142.34.194.119:6443: i/o timeout" >&2; exit 5'
+  run_script
+  [ "$status" -eq 5 ]
+  [ "$(wc -l < "$BATS_TEST_TMPDIR/runs")" -eq 2 ]
+  [ "$(grep -c 'retrying commands' <<< "$output")" -eq 1 ]
+  [[ "$output" == *"commands block failed with exit code 5."* ]]
+}
+
+@test "connect retry: a failed block's leftover background child does not hold the step" {
+  export CONNECT_RETRY_DELAY=0 COMMANDS_TIMEOUT=60s
+  export COMMANDS='sleep 30 3>&- & echo "Error: something else" >&2; exit 3'
+  start=$SECONDS
+  run bash -c '"$SCRIPT" > "$BATS_TEST_TMPDIR/out" 2>&1'
+  [ "$status" -eq 3 ]
+  [ $((SECONDS - start)) -lt 15 ]
+  grep -q 'commands block failed with exit code 3.' "$BATS_TEST_TMPDIR/out"
+}
+
+@test "connect retry: the timeout message is still caught when a background child holds the output" {
+  export CONNECT_RETRY_DELAY=0 COMMANDS_TIMEOUT=60s
+  export COMMANDS='echo run >> "$BATS_TEST_TMPDIR/runs"; sleep 30 3>&- & echo "Unable to connect to the server: dial tcp 10.0.0.1:6443: i/o timeout" >&2; exit 1'
+  start=$SECONDS
+  run bash -c '"$SCRIPT" > "$BATS_TEST_TMPDIR/out" 2>&1'
+  [ "$status" -eq 1 ]
+  [ "$(wc -l < "$BATS_TEST_TMPDIR/runs")" -eq 2 ]
+  [ $((SECONDS - start)) -lt 30 ]
+}
