@@ -9,7 +9,7 @@ setup() {
   tags() { # file tag...
     local f="$1"
     shift
-    printf '%s\n' "$@" | jq -R . | jq -sc '{results: map({name: .})}' > "${TAGS_DIR}/${f}.json"
+    printf '%s\n' "$@" | jq -R . | jq -sc '{results: map({name: ., images: [{os: "linux", architecture: "amd64", status: "active"}]})}' > "${TAGS_DIR}/${f}.json"
   }
   tags postgres 18 18.0 17 17.6 16 latest 19beta1 18-bookworm
   for m in 13 14 15 16; do tags "postgis-$m" "$m-3.4" "$m-3.5" "$m-3.5-alpine"; done
@@ -59,4 +59,26 @@ out() { sed -n "s/^$1=//p" "$GITHUB_OUTPUT"; }
   run "$SCRIPT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"No postgis/postgis:14-<x.y> tag"* ]]
+}
+
+@test "tags without an active linux/amd64 image are ignored" {
+  cat > "${TAGS_DIR}/postgres.json" <<'JSON'
+{"results":[
+  {"name":"21","images":[{"os":"linux","architecture":"amd64","status":"inactive"}]},
+  {"name":"20","images":[{"os":"linux","architecture":"arm64","status":"active"}]},
+  {"name":"19","images":[]},
+  {"name":"18","images":[{"os":"linux","architecture":"amd64","status":"active"}]},
+  {"name":"17","images":[{"os":"linux","architecture":"amd64","status":"active"}]}
+]}
+JSON
+  cat > "${TAGS_DIR}/postgis-18.json" <<'JSON'
+{"results":[
+  {"name":"18-3.7","images":[]},
+  {"name":"18-3.6","images":[{"os":"linux","architecture":"amd64","status":"active"}]}
+]}
+JSON
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(out newest)" = 18 ]
+  [ "$(out containers | jq -r '.include[] | select(.name == "17 → 18") | .gis_new')" = "postgis/postgis:18-3.6" ]
 }

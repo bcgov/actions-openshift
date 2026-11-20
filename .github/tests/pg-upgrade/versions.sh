@@ -16,16 +16,21 @@ fail() {
 
 SOURCES="${SOURCES:-13 14 15 16 17}"
 GOLDEN="${GOLDEN:-17}"
+ARCH="${ARCH:-amd64}"
 HUB=https://hub.docker.com/v2/repositories
 
-tags() { # file-name url -> tag names
+tags() { # file-name url -> tag names with an active linux/$ARCH manifest
   local json
   if [ -n "${TAGS_DIR:-}" ]; then
     json="$(cat "${TAGS_DIR}/$1.json")" || return 1
   else
     json="$(curl -fsS --retry 3 --retry-all-errors --max-time 30 "$2")" || return 1
   fi
-  jq -r '.results[].name' <<< "$json"
+  jq -r --arg arch "$ARCH" '
+    .results[]
+    | select((.images // []) | any(.os == "linux" and .architecture == $arch and (.status // "active") == "active"))
+    | .name
+  ' <<< "$json"
 }
 
 NEWEST="$(tags postgres "${HUB}/library/postgres/tags?page_size=100&ordering=last_updated" | grep -E '^[0-9]+$' | sort -n | tail -n 1)" \
