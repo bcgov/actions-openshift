@@ -115,6 +115,48 @@ jobs:
             exit 1
           fi
 
+  connect-retry:
+    name: Test oc-runner connect-timeout retry
+    needs: changes
+    if: needs.changes.outputs.triggered == 'true'
+    # Real login, then a block whose first run fails with a simulated API connect timeout
+    # (marker file). oc-runner must run the whole block once more and pass on the retry's output
+    permissions: {}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: oc
+        uses: $/oc-runner
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            oc whoami
+            runs_file="${RUNNER_TEMP}/connect-retry-runs"
+            [ -e "$runs_file" ] || echo 0 > "$runs_file"
+            runs=$(( $(cat "$runs_file") + 1 ))
+            echo "$runs" > "$runs_file"
+            if [ "$runs" -eq 1 ]; then
+              echo "Unable to connect to the server: dial tcp 192.0.2.1:6443: i/o timeout (simulated)" >&2
+              exit 1
+            fi
+            echo "runs=${runs}" >> "$GITHUB_OUTPUT"
+
+      - name: Check the block ran twice
+        env:
+          COMMANDS_OUTPUT: ${{ steps.oc.outputs.commands }}
+        run: |
+          echo "commands output: ${COMMANDS_OUTPUT}"
+          if [ "${COMMANDS_OUTPUT}" != "runs=2" ]; then
+            echo "::error::Expected one retry after the simulated connect timeout (runs=2), got '${COMMANDS_OUTPUT}'"
+            exit 1
+          fi
+
   # Merge gate for this workflow: always reports, skipped jobs count as passing
   results:
     name: OC Runner Results
@@ -122,6 +164,7 @@ jobs:
       - changes
       - commands
       - unreachable-api
+      - connect-retry
     if: always()
     permissions:
       contents: read

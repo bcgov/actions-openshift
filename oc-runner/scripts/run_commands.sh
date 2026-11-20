@@ -43,31 +43,68 @@ if [ "${DEBUG:-false}" = "true" ]; then
   VERBOSE_ARGS=(-x)
 fi
 
+# One retry, only when the block failed on an API connect timeout (Silver drops connects from
+# a runner IP for a while). Any other failure fails at once with its own exit code.
+CONNECT_TIMEOUT_RE='dial tcp [^[:space:]]+: i/o timeout|Unable to connect to the server: .*timeout'
+CONNECT_RETRY_DELAY="${CONNECT_RETRY_DELAY:-10}"
+ATTEMPT_LOG="$(mktemp)"
+trap 'rm -f "$ACTION_OUTPUT_FILE" "$COMMANDS_FILE" "$TIMEOUT_MARK" "$ATTEMPT_LOG"' EXIT
+
+# Runs the block once and sets cmd_rc. Output is shown live and copied to ATTEMPT_LOG.
 # Watchdog instead of coreutils timeout: timeout exits 124 both when it stops the block
 # and when the block itself exits 124 (for example a command wrapped in its own
 # `timeout`). The watchdog writes TIMEOUT_MARK before it stops the block, so only a
 # block it stopped is reported as a timeout.
-bash -euo pipefail "${VERBOSE_ARGS[@]}" "$COMMANDS_FILE" &
-cmd_pid=$!
-(
-  sleep "$COMMANDS_TIMEOUT" &
-  sleep_pid=$!
-  trap 'kill "$sleep_pid" 2>/dev/null; exit 0' TERM
-  wait "$sleep_pid"
-  touch "$TIMEOUT_MARK"
-  kill -TERM "$cmd_pid" 2>/dev/null
-) >/dev/null 2>&1 &
-watchdog_pid=$!
+run_block() {
+  local out_fd err_fd out_pid err_pid cmd_pid watchdog_pid
+  : > "$ATTEMPT_LOG"
+  exec {out_fd}> >(tee -a "$ATTEMPT_LOG")
+  out_pid=$!
+  exec {err_fd}> >(tee -a "$ATTEMPT_LOG" >&2)
+  err_pid=$!
+  bash -euo pipefail "${VERBOSE_ARGS[@]}" "$COMMANDS_FILE" 1>&"$out_fd" 2>&"$err_fd" &
+  cmd_pid=$!
+  (
+    sleep "$COMMANDS_TIMEOUT" &
+    sleep_pid=$!
+    trap 'kill "$sleep_pid" 2>/dev/null; exit 0' TERM
+    wait "$sleep_pid"
+    touch "$TIMEOUT_MARK"
+    kill -TERM "$cmd_pid" 2>/dev/null
+  ) >/dev/null 2>&1 {out_fd}>&- {err_fd}>&- &
+  watchdog_pid=$!
 
-cmd_rc=0
-wait "$cmd_pid" || cmd_rc=$?
-kill -TERM "$watchdog_pid" 2>/dev/null || true
-wait "$watchdog_pid" 2>/dev/null || true
+  cmd_rc=0
+  wait "$cmd_pid" || cmd_rc=$?
+  kill -TERM "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+  exec {out_fd}>&- {err_fd}>&-
+  # A failed block's log is read for the retry check, so let tee finish copying it. Not after
+  # success or the timeout input, where a leftover child still holding the output must not
+  # keep the step open.
+  if [ "$cmd_rc" -ne 0 ] && [ ! -e "$TIMEOUT_MARK" ]; then
+    wait "$out_pid" "$err_pid" 2>/dev/null || true
+  fi
+}
 
-if [ -e "$TIMEOUT_MARK" ]; then
-  echo "::error title=${ACTION_SOURCE}: commands timed out::[${ACTION_SOURCE}] commands exceeded timeout ${COMMANDS_TIMEOUT}."
-  exit 124
-fi
+attempt=1
+while :; do
+  run_block
+  if [ -e "$TIMEOUT_MARK" ]; then
+    echo "::error title=${ACTION_SOURCE}: commands timed out::[${ACTION_SOURCE}] commands exceeded timeout ${COMMANDS_TIMEOUT}."
+    exit 124
+  fi
+  if [ "$cmd_rc" -ne 0 ] && [ "$attempt" -eq 1 ] && grep -Eq "$CONNECT_TIMEOUT_RE" "$ATTEMPT_LOG"; then
+    echo "::warning title=${ACTION_SOURCE}: retrying commands::[${ACTION_SOURCE}] commands block failed (exit code ${cmd_rc}) on an OpenShift API connect timeout; running the whole block once more in ${CONNECT_RETRY_DELAY}s."
+    # Outputs from the failed attempt are dropped; the retry writes its own
+    : > "$ACTION_OUTPUT_FILE"
+    sleep "$CONNECT_RETRY_DELAY"
+    attempt=2
+    continue
+  fi
+  break
+done
+
 if [ "$cmd_rc" -ne 0 ]; then
   if [ "$cmd_rc" -eq 124 ]; then
     echo "::error::[${ACTION_SOURCE}] Exit code 124 came from a command inside the commands block (for example its own 'timeout'), not from the ${COMMANDS_TIMEOUT} timeout input."
@@ -79,7 +116,7 @@ fi
 # Allows plain `echo "value" >> "$GITHUB_OUTPUT"` without requiring `commands=`.
 if [ -s "$ACTION_OUTPUT_FILE" ]; then
   MAPPED_FILE="$(mktemp)"
-  trap 'rm -f "$ACTION_OUTPUT_FILE" "$COMMANDS_FILE" "$TIMEOUT_MARK" "$MAPPED_FILE"' EXIT
+  trap 'rm -f "$ACTION_OUTPUT_FILE" "$COMMANDS_FILE" "$TIMEOUT_MARK" "$ATTEMPT_LOG" "$MAPPED_FILE"' EXIT
   {
     if grep -q '^commands=' "$ACTION_OUTPUT_FILE"; then
       sed -n 's/^commands=//p' "$ACTION_OUTPUT_FILE"
