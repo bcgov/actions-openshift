@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # oc-runner login: input gate, API pre-flight, oc install and service-account token login.
 # Env: SERVER_URL, NAMESPACE, TOKEN_INPUT, OC (mirror channel, e.g. stable-4.18).
+# API connections per login: pre-flight /version, token request, oc version. The kubeconfig is
+# written locally, so there is no oc login or oc project round trip.
 # Writes blocked=true|false and unreachable=true|false to $GITHUB_OUTPUT.
 # A runner whose IP is blocked from the API, or an API and router that both stop answering,
 # is reported as a titled annotation and a step summary, so the check shows it is not a code problem.
@@ -105,6 +107,19 @@ if ! command -v oc &>/dev/null; then
   rm -f oc.tar.gz
 fi
 
+# Kubeconfig for the minted pipeline token, written locally (no API calls), with the namespace set
+# explicitly. Names match what oc login writes, so callers that switch contexts by name still work.
+write_kubeconfig() {
+  local token="$1" cluster user context
+  cluster="$(sed -E 's#^https://##; s#/.*$##; s#\.#-#g' <<< "${SERVER_URL}")"
+  user="system:serviceaccount:${NAMESPACE}:pipeline"
+  context="${NAMESPACE}/${cluster}/${user}"
+  oc config set-cluster "${cluster}" --server="${SERVER_URL}" > /dev/null
+  oc config set-credentials "${user}/${cluster}" --token="${token}" > /dev/null
+  oc config set-context "${context}" --cluster="${cluster}" --user="${user}/${cluster}" --namespace="${NAMESPACE}" > /dev/null
+  oc config use-context "${context}" > /dev/null
+}
+
 # OpenShift login with smart retry
 DELAY="${LOGIN_RETRY_DELAY:-2}"
 SA_TOKEN_URL="${SERVER_URL}/api/v1/namespaces/${NAMESPACE}/serviceaccounts/pipeline/token"
@@ -136,11 +151,10 @@ while [ "$attempt" -le "$ATTEMPTS" ]; do
     TOKEN=$(echo "$BODY" | jq -r '.status.token' 2>/dev/null || true)
     if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
       echo "Error: Failed to parse token from response."
-    elif OC_OUT=$(oc login --server="${SERVER_URL}" --token="${TOKEN}" 2>&1); then
+    else
+      write_kubeconfig "$TOKEN"
       echo "Login successful!"
       break
-    else
-      echo "Token acquired, but 'oc login' failed. Error: $OC_OUT"
     fi
   # Retry paths: timeouts (000), request timeouts (408), rate limits (429), or server errors (5xx)
   elif [ "$HTTP_CODE" = "000" ] || [ "$HTTP_CODE" = "408" ] || [ "$HTTP_CODE" = "429" ] || [[ "$HTTP_CODE" =~ ^5[0-9]{2}$ ]]; then
@@ -175,13 +189,7 @@ while [ "$attempt" -le "$ATTEMPTS" ]; do
   attempt=$((attempt + 1))
 done
 
-# Verify namespace
-if [ "$(oc project -q)" != "${NAMESPACE}" ]; then
-  echo "Project and token do not match!"
-  exit 1
-fi
-
-# Version for client, kustomize, server and Kubernetes
+# Version for client, kustomize, server and Kubernetes; also the first authenticated call
 echo -e "\nInput Version: ${OC}"
 oc version
 echo
