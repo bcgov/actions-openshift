@@ -48,12 +48,12 @@ case "$url" in
     esac ;;
 esac
 STUB
+  export OC_CALLS="${BATS_TEST_TMPDIR}/oc_calls"
+  : > "$OC_CALLS"
   cat > "${STUBS}/oc" <<'STUB'
 #!/usr/bin/env bash
-case "$1" in
-  project) echo "$NAMESPACE" ;;
-  *) echo "oc $*" ;;
-esac
+echo "$*" >> "$OC_CALLS"
+echo "oc $*"
 STUB
   chmod +x "${STUBS}/curl" "${STUBS}/oc"
 }
@@ -133,4 +133,18 @@ run_script() {
   [[ "$output" != *"title="* ]]
   grep -qx 'blocked=false' "$GITHUB_OUTPUT"
   grep -qx 'unreachable=false' "$GITHUB_OUTPUT"
+}
+
+@test "successful login writes the kubeconfig locally; oc version is its only API call" {
+  run_script
+  [ "$status" -eq 0 ]
+  cluster=api-silver-devops-gov-bc-ca:6443
+  user=system:serviceaccount:abc123-dev:pipeline
+  diff "$OC_CALLS" - <<EOF
+config set-cluster ${cluster} --server=https://api.silver.devops.gov.bc.ca:6443
+config set-credentials ${user}/${cluster} --token=sha256~abc
+config set-context abc123-dev/${cluster}/${user} --cluster=${cluster} --user=${user}/${cluster} --namespace=abc123-dev
+config use-context abc123-dev/${cluster}/${user}
+version
+EOF
 }
