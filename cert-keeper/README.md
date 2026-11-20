@@ -62,8 +62,9 @@ The ACME account key is ephemeral (one per run). Both containers use `goacme/leg
 
 ## Add a host, step by step
 
-1. **DNS and port 80.** The host's A or CNAME record must already point at the cluster router (a one-time Service Desk step for a new name), and plain HTTP on port 80 must reach it.
-2. **Create a GitHub Environment** named `prod` in the repo's Settings, then set its variables and secret. The OpenShift API address is the same for every Silver namespace; the rest are yours.
+1. **DNS and port 80.** The host's A or CNAME record must already point at the cluster router (a one-time Service Desk step for a new name), and plain HTTP on port 80 must reach it (`curl -sI http://myapp.nrs.gov.bc.ca/` returns any HTTP status, including `302` or `503`).
+2. **Existing Route and service (when migrating an existing vanity URL).** Inspect and back up the live Route in OpenShift (`oc get route -n abc123-prod` and `oc get route <route-name> -n abc123-prod -o yaml > route-backup.yaml`), confirm it routes single-service traffic with standard edge TLS (no custom `spec.port`, `spec.path`, or `alternateBackends` that `install.sh`'s `oc apply` omits), and set `route_name` and `target_service` to match it (legacy templates often use `<repo>-prod-frontend-vanity` instead of `<repo>-vanity-url`). Leave the existing Route in place—do not delete it first; `cert-keeper` backs up the old TLS material to a Secret and updates the Route in place. Note that single-host Let's Encrypt certificates drop secondary SANs such as `www.<host>` unless managed on a separate Route.
+3. **GitHub Environment and variables.** Create or reuse a `prod` GitHub Environment with branch protection allowing `main` and no required reviewers—or, if `prod` already gates deployments with required reviewers, use a separate `main`-restricted environment (for example `cert-keeper`) holding only its variables and secret so scheduled runs are not blocked without weakening `prod` approvals (`OC_SERVER` is the same for every Silver namespace):
 
    ```bash
    gh variable set VANITY_HOST  --env prod --body "myapp.nrs.gov.bc.ca"
@@ -72,16 +73,17 @@ The ACME account key is ephemeral (one per run). Both containers use `goacme/leg
    gh secret set OC_TOKEN --env prod   # paste the token when prompted
    ```
 
-3. **Token permissions.** The token for `OC_NAMESPACE` must be able to create, get and delete pods, services, routes and networkpolicies, to exec into pods and read their logs, and to create secrets (the install step saves the old certificate as a backup Secret). Events are listed for diagnostics only.
-4. **Add the workflow** from [Usage](#usage) as `.github/workflows/cert-keeper.yml`, with your own Route and Service names, in a pull request.
-5. **First run.** Run it from the Actions tab. By default it asks for a real, browser-trusted certificate. To rehearse first, add `ca: letsencrypt-staging`, but be careful: staging installs an **untrusted** certificate on the Route, so browsers show a warning. The daily check only looks at dates and the host name, so it will not replace that certificate until a third of its life is left. After a rehearsal, run once with `force: true` and the default `ca` to put a trusted certificate back. Use staging only on a host nobody is using yet.
-6. **Check it worked.** `ssl_verify=0` means the certificate is trusted:
+4. **Token permissions.** Verify the workflow `OC_TOKEN` itself (not a personal cluster login) can `create`, `get`, and `delete` pods, services, networkpolicies, and routes (`list`, `get`, `create`, `patch` on routes), `create` on `pods/exec`, `get` on `pods/log`, and `get`, `create`, and `patch` on secrets (the install step lists routes, checks/creates/labels the backup Secret, and applies the Route). Check with `oc auth can-i --token="<OC_TOKEN>" -n abc123-prod ...`. Events are listed for diagnostics only.
+5. **Failure alerts (`CODEOWNERS`).** Ensure `.github/CODEOWNERS` or `.github/codeowners` contains at least one uncommented `@user` handle so `workflow-notifier` (`v0.14.0+`) can open an alert issue on failure without a checkout step.
+6. **Add the workflow** from [Usage](#usage) as `.github/workflows/cert-keeper.yml`, with your own Route and Service names, in a pull request.
+7. **First run.** Run it from the Actions tab. If the current certificate has a third or less of its lifetime left (or none), it renews immediately; otherwise it exits `due=false`. By default it asks for a real, browser-trusted certificate. To rehearse first, add `ca: letsencrypt-staging`, but be careful: staging installs an **untrusted** certificate on the Route, so browsers show a warning. The daily check only looks at dates and the host name, so it will not replace that certificate until a third of its life is left. After a rehearsal, run once with `force: true` and the default `ca` to put a trusted certificate back. Use staging only on a host nobody is using yet.
+8. **Check it worked.** `ssl_verify=0` means the certificate is trusted:
 
    ```bash
    curl -sS -o /dev/null -w 'http=%{http_code} ssl_verify=%{ssl_verify_result}\n' https://myapp.nrs.gov.bc.ca/
    ```
 
-7. **Optional second pair of eyes.** Add the host to [`nr-cert-monitor`](https://github.com/bcgov/nr-cert-monitor) with a pull request to its `rules.yml`.
+9. **Optional second pair of eyes.** Add the host to [`nr-cert-monitor`](https://github.com/bcgov/nr-cert-monitor) with a pull request to its `rules.yml`.
 
 ## Usage
 
@@ -116,29 +118,23 @@ jobs:
       issues: write
     timeout-minutes: 15
     steps:
-      # workflow-notifier reads CODEOWNERS from the workspace
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - uses: bcgov/actions-openshift/cert-keeper@<sha> # vX.Y.Z
         with:
           hostname: ${{ vars.VANITY_HOST }}
           route_name: ${{ github.event.repository.name }}-vanity-url
           target_service: ${{ github.event.repository.name }}-prod-frontend
-          force: ${{ inputs.force || 'false' }}
+          force: ${{ inputs.force }}
           oc_namespace: ${{ vars.OC_NAMESPACE }}
           oc_server: ${{ vars.OC_SERVER }}
           oc_token: ${{ secrets.OC_TOKEN }}
 
       - name: Notify CODEOWNERS
         if: failure()
-        uses: bcgov/actions/workflow-notifier@4026bfd276b8a5839029106099b13edfb594b2c3 # v0.8.0
+        uses: bcgov/actions/workflow-notifier@acc058abf85bb183dad21b839a92a40a4ff47af3 # v0.14.0
         with:
           title: "Certificate renewal failed"
-          labels: ""
           notify_author: "false"
-          notify_codeowners: "true"
+          notify_codeowners: "always"
 ```
 
 Pin to a release SHA, never `@main`. Also add the host to [`nr-cert-monitor`](https://github.com/bcgov/nr-cert-monitor) if you want a second set of eyes: it checks the certificate itself, so it still alerts if this workflow stops running.
