@@ -37,7 +37,7 @@ runs:
   steps:
     # Undeclared inputs fail here; GitHub only warns
     - name: Check inputs
-      uses: bcgov/actions/input-enforcer@6c8ac0469fcf0d826533bc526c90119b8f149884 # v0.13.0
+      uses: bcgov/actions/input-enforcer@acc058abf85bb183dad21b839a92a40a4ff47af3 # v0.14.0
       with:
         inputs: ${{ toJSON(inputs) }}
         action_path: ${{ github.action_path }}
