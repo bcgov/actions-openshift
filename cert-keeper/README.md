@@ -112,7 +112,7 @@ jobs:
   cert-keeper:
     name: Keep certificate valid
     environment: prod
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       issues: write
@@ -192,7 +192,7 @@ jobs:
   cert-keeper:
     name: Install certificate (dry_run=${{ inputs.dry_run }})
     environment: prod
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     timeout-minutes: 10
