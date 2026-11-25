@@ -104,6 +104,26 @@ jobs:
           debug: true
           parameters: -p NAME=${{ github.event.repository.name }} -p ZONE=${{ github.event.number }} ${{ matrix.parameters }}
 
+      # Second overwrite=false run: the Deployment already exists, so rollout
+      # status must be skipped rather than waiting on the existing object.
+      - name: Deploy existing database without overwrite
+        if: matrix.name == 'database'
+        uses: $/deployer
+        with:
+          file: ${{ matrix.file }}
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          oc_version: ${{ matrix.oc_version }}
+          overwrite: false
+          triggers: |
+            deployer/
+            oc-runner/
+            shared/inputs.sh
+            .github/workflows/deployer-tests.yml
+          debug: true
+          parameters: -p NAME=${{ github.event.repository.name }} -p ZONE=${{ github.event.number }} ${{ matrix.parameters }}
+
       - name: Check rendered template did not leak
         env:
           CANARY: LeakCanary7f3a
@@ -128,12 +148,97 @@ jobs:
           fi
           echo "No template leak found"
 
+  confirm-rollout-skip:
+    name: Confirm rollout skip
+    needs: [changes, test-deployer]
+    if: >-
+      !cancelled()
+      && needs.changes.outputs.triggered == 'true'
+      && needs.test-deployer.result == 'success'
+    permissions:
+      actions: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Existing deployment skips rollout status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" --paginate \
+            --jq '.jobs[] | "\(.id)\t\(.name)\t\(.conclusion)"')"
+
+          plain_log() {
+            local name="$1" dest="$2" job_id conclusion
+            job_id="$(awk -F'\t' -v n="$name" '$2 == n { print $1 }' <<< "$jobs")"
+            conclusion="$(awk -F'\t' -v n="$name" '$2 == n { print $3 }' <<< "$jobs")"
+            [ -n "$job_id" ] || { echo "::error::${name} job not found"; exit 1; }
+            [ "$conclusion" = "success" ] || { echo "::error::${name} conclusion is ${conclusion}"; exit 1; }
+            gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" > "${dest}.raw"
+            [ -s "${dest}.raw" ] || { echo "::error::${name} log is empty"; exit 1; }
+            # Raw logs hold ANSI colour codes; match against a stripped copy, never print it
+            sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9T:.-]+Z //' "${dest}.raw" > "$dest"
+          }
+
+          count() {
+            # $1 = file, $2 = regex; print match count
+            grep -cE "$2" "$1" || true
+          }
+
+          failed=0
+          db="${RUNNER_TEMP}/database.plain"
+          be="${RUNNER_TEMP}/backend.plain"
+          fe="${RUNNER_TEMP}/frontend.plain"
+          plain_log "Test Deployer (database)" "$db"
+          plain_log "Test Deployer (backend)" "$be"
+          plain_log "Test Deployer (frontend)" "$fe"
+
+          db_created="$(count "$db" '^deployment\.apps/[^[:space:]]+ created$')"
+          db_skip="$(count "$db" '^Overwrite=false; Deployment already exists; skipping rollout status$')"
+          db_rolled="$(count "$db" 'successfully rolled out')"
+          be_rolled="$(count "$be" 'successfully rolled out')"
+          fe_rolled="$(count "$fe" 'successfully rolled out')"
+          be_apply="$(count "$be" '^Overwrite=true; using oc apply$')"
+          fe_apply="$(count "$fe" '^Overwrite=true; using oc apply$')"
+
+          check() {
+            local label="$1" ok="$2" detail="$3"
+            if [ "$ok" = "1" ]; then
+              echo "PASS: ${label}: ${detail}"
+            else
+              echo "::error::${label}: ${detail}"
+              failed=1
+            fi
+          }
+
+          # First overwrite=false run creates the Deployment and follows its rollout.
+          # Shared NetworkPolicies may already exist; that must not skip the wait.
+          check "database create followed rollout" \
+            "$( [ "$db_created" -ge 1 ] && [ "$db_rolled" -eq 1 ] && echo 1 || echo 0 )" \
+            "created=${db_created} successfully-rolled-out=${db_rolled} (want created>=1, rolled-out=1)"
+          # Second overwrite=false run finds the Deployment already present and skips.
+          check "database existing deploy skipped rollout" \
+            "$( [ "$db_skip" -eq 1 ] && echo 1 || echo 0 )" \
+            "skip-log=${db_skip} (want 1)"
+          # Apply path still follows rollouts.
+          check "backend apply followed rollout" \
+            "$( [ "$be_apply" -ge 1 ] && [ "$be_rolled" -ge 1 ] && echo 1 || echo 0 )" \
+            "apply=${be_apply} successfully-rolled-out=${be_rolled}"
+          check "frontend apply followed rollout" \
+            "$( [ "$fe_apply" -ge 1 ] && [ "$fe_rolled" -ge 1 ] && echo 1 || echo 0 )" \
+            "apply=${fe_apply} successfully-rolled-out=${fe_rolled}"
+
+          exit "$failed"
+
   # Merge gate for this workflow: always reports, skipped jobs count as passing
   results:
     name: Deployer Results
     needs:
       - changes
       - test-deployer
+      - confirm-rollout-skip
     if: always()
     permissions:
       contents: read

@@ -227,12 +227,26 @@ runs:
         TEMPLATE_FILE: ${{ steps.process.outputs.template_file }}
       run: |
         # Expand for deployment steps
+        # Follow only rollouts this action started: oc apply, or oc create
+        # when it actually created the Deployment. If overwrite=false and the
+        # Deployment already exists, skip oc rollout status so an untouched,
+        # already-unhealthy Deployment does not fail the run.
+        DEPLOYMENT=$(jq -r '.items[] | select(.kind=="Deployment").metadata.name //empty' "${TEMPLATE_FILE}")
+        FOLLOW_ROLLOUT=false
+
         if [ "${OVERWRITE}" != "false" ]; then
           echo "Overwrite=true; using oc apply"
           oc apply --timeout="${TIMEOUT}" -f "${TEMPLATE_FILE}"
+          FOLLOW_ROLLOUT=true
         else
           # Allow AlreadyExists errors and expected failures
           echo "Overwrite=false; using oc create"
+          # Other objects in the template may already exist (shared names);
+          # only skip when this Deployment itself is already present.
+          # shellcheck disable=SC2086 # quoting changes multi-Deployment templates; left as is
+          if [ -n "${DEPLOYMENT}" ] && [ -z "$(oc get deployment ${DEPLOYMENT} -o name --ignore-not-found)" ]; then
+            FOLLOW_ROLLOUT=true
+          fi
           CREATE_ERR="$(mktemp "${RUNNER_TEMP}/deployer-create-err.XXXXXX")"
           trap 'rm -f "${CREATE_ERR:-}"' EXIT
           if oc create -f "${TEMPLATE_FILE}" 2>"${CREATE_ERR}"; then
@@ -245,6 +259,9 @@ runs:
               grep -Ei '^[[:space:]]*warning:' "${CREATE_ERR}" >&2 || true
               grep -E '^[[:space:]]*Error from server \(AlreadyExists\):' "${CREATE_ERR}" | sed 's/.*: //'
               rm -f "${CREATE_ERR}"
+              if [ -n "${DEPLOYMENT}" ] && [ "${FOLLOW_ROLLOUT}" != "true" ]; then
+                echo "Overwrite=false; Deployment already exists; skipping rollout status"
+              fi
             else
               cat "${CREATE_ERR}" >&2
               exit "${CREATE_EXIT}"
@@ -252,10 +269,9 @@ runs:
           fi
         fi
 
-        # Follow any active deployments
-        DEPLOYMENT=$(jq -r '.items[] | select(.kind=="Deployment").metadata.name //empty' "${TEMPLATE_FILE}")
+        # Follow any active deployments this action started
         # shellcheck disable=SC2046 # quoting changes multi-Deployment templates; left as is
-        if [ ! -z "${DEPLOYMENT}" ]&&[ ! -z $(oc get deployment ${DEPLOYMENT} -o name --ignore-not-found) ]; then
+        if [ "${FOLLOW_ROLLOUT}" = "true" ] && [ ! -z "${DEPLOYMENT}" ]&&[ ! -z $(oc get deployment ${DEPLOYMENT} -o name --ignore-not-found) ]; then
           oc rollout status deployment/${DEPLOYMENT} -w
         fi
 
