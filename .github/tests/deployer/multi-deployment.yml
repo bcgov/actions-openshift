@@ -1,0 +1,64 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: deployer-multi-deployment
+parameters:
+  - name: NAME
+    description: Module name
+    value: actions-openshift
+  - name: ZONE
+    description: Deployment zone, e.g. the pull request number
+    required: true
+objects:
+  - kind: Deployment
+    apiVersion: apps/v1
+    metadata:
+      name: "${NAME}-${ZONE}-multi-a"
+      labels:
+        app: ${NAME}-${ZONE}
+        component: multi-a
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          deployment: "${NAME}-${ZONE}-multi-a"
+      strategy:
+        type: Recreate
+      template:
+        metadata:
+          labels:
+            app: ${NAME}-${ZONE}
+            component: multi-a
+            deployment: "${NAME}-${ZONE}-multi-a"
+        spec:
+          containers:
+            - name: multi-a
+              image: postgres:17
+              imagePullPolicy: IfNotPresent
+              command: ["sleep", "infinity"]
+  - kind: Deployment
+    apiVersion: apps/v1
+    metadata:
+      name: "${NAME}-${ZONE}-multi-b"
+      labels:
+        app: ${NAME}-${ZONE}
+        component: multi-b
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          deployment: "${NAME}-${ZONE}-multi-b"
+      strategy:
+        type: Recreate
+      template:
+        metadata:
+          labels:
+            app: ${NAME}-${ZONE}
+            component: multi-b
+            deployment: "${NAME}-${ZONE}-multi-b"
+        spec:
+          containers:
+            - name: multi-b
+              image: postgres:17
+              imagePullPolicy: IfNotPresent
+              command: ["sleep", "infinity"]
