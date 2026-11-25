@@ -52,6 +52,7 @@ jobs:
             oc-runner/action.yml
             oc-runner/scripts/
             .github/workflows/deployer-tests.yml
+            .github/tests/deployer/
             !*.md
 
   test-deployer:
@@ -68,7 +69,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [backend, database, frontend]
+        name: [backend, database, frontend, multi]
         include:
           - name: backend
             file: deployer/templates/backend.yml
@@ -82,6 +83,9 @@ jobs:
             file: deployer/templates/frontend.yml
             oc_version: "4.13"
             overwrite: true
+          - name: multi
+            file: .github/tests/deployer/multi-deployment.yml
+            overwrite: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -101,13 +105,14 @@ jobs:
             oc-runner/
             shared/inputs.sh
             .github/workflows/deployer-tests.yml
+            .github/tests/deployer/
           debug: true
           parameters: -p NAME=${{ github.event.repository.name }} -p ZONE=${{ github.event.number }} ${{ matrix.parameters }}
 
-      # Second overwrite=false run: the Deployment already exists, so rollout
+      # Second overwrite=false run: each Deployment already exists, so rollout
       # status must be skipped rather than waiting on the existing object.
-      - name: Deploy existing database without overwrite
-        if: matrix.name == 'database'
+      - name: Deploy existing objects without overwrite
+        if: matrix.name == 'database' || matrix.name == 'multi'
         uses: $/deployer
         with:
           file: ${{ matrix.file }}
@@ -121,6 +126,7 @@ jobs:
             oc-runner/
             shared/inputs.sh
             .github/workflows/deployer-tests.yml
+            .github/tests/deployer/
           debug: true
           parameters: -p NAME=${{ github.event.repository.name }} -p ZONE=${{ github.event.number }} ${{ matrix.parameters }}
 
@@ -191,13 +197,20 @@ jobs:
           db="${RUNNER_TEMP}/database.plain"
           be="${RUNNER_TEMP}/backend.plain"
           fe="${RUNNER_TEMP}/frontend.plain"
+          multi="${RUNNER_TEMP}/multi.plain"
           plain_log "Test Deployer (database)" "$db"
           plain_log "Test Deployer (backend)" "$be"
           plain_log "Test Deployer (frontend)" "$fe"
+          plain_log "Test Deployer (multi)" "$multi"
 
-          db_created="$(count "$db" '^deployment\.apps/[^[:space:]]+ created$')"
-          db_skip="$(count "$db" '^Overwrite=false; Deployment already exists; skipping rollout status$')"
+          skip_re='^Overwrite=false; Deployment [^[:space:]]+ already exists; skipping rollout status$'
+          created_re='^deployment\.apps/[^[:space:]]+ created$'
+          db_created="$(count "$db" "$created_re")"
+          db_skip="$(count "$db" "$skip_re")"
           db_rolled="$(count "$db" 'successfully rolled out')"
+          multi_created="$(count "$multi" "$created_re")"
+          multi_skip="$(count "$multi" "$skip_re")"
+          multi_rolled="$(count "$multi" 'successfully rolled out')"
           be_rolled="$(count "$be" 'successfully rolled out')"
           fe_rolled="$(count "$fe" 'successfully rolled out')"
           be_apply="$(count "$be" '^Overwrite=true; using oc apply$')"
@@ -222,6 +235,13 @@ jobs:
           check "database existing deploy skipped rollout" \
             "$( [ "$db_skip" -eq 1 ] && echo 1 || echo 0 )" \
             "skip-log=${db_skip} (want 1)"
+          # Two-Deployment template: both are created and followed, then both skipped.
+          check "multi create followed both rollouts" \
+            "$( [ "$multi_created" -eq 2 ] && [ "$multi_rolled" -eq 2 ] && echo 1 || echo 0 )" \
+            "created=${multi_created} successfully-rolled-out=${multi_rolled} (want created=2, rolled-out=2)"
+          check "multi existing deploy skipped both rollouts" \
+            "$( [ "$multi_skip" -eq 2 ] && echo 1 || echo 0 )" \
+            "skip-log=${multi_skip} (want 2)"
           # Apply path still follows rollouts.
           check "backend apply followed rollout" \
             "$( [ "$be_apply" -ge 1 ] && [ "$be_rolled" -ge 1 ] && echo 1 || echo 0 )" \

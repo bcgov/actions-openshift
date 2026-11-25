@@ -228,51 +228,87 @@ runs:
       run: |
         # Expand for deployment steps
         # Follow only rollouts this action started: oc apply, or oc create
-        # when it actually created the Deployment. If overwrite=false and the
-        # Deployment already exists, skip oc rollout status so an untouched,
-        # already-unhealthy Deployment does not fail the run.
-        DEPLOYMENT=$(jq -r '.items[] | select(.kind=="Deployment").metadata.name //empty' "${TEMPLATE_FILE}")
-        FOLLOW_ROLLOUT=false
+        # when it actually created that Deployment. With overwrite=false, the
+        # create output decides per Deployment (not a pre-check), so two
+        # concurrent runs cannot both skip. AlreadyExists for that
+        # Deployment skips; any unclear result follows.
+        deployments=()
+        while IFS= read -r name; do
+          [ -n "${name}" ] && deployments+=("${name}")
+        done < <(jq -r '.items[] | select(.kind=="Deployment").metadata.name //empty' "${TEMPLATE_FILE}")
+
+        follow_rollouts() {
+          local name
+          for name in "$@"; do
+            if [ -n "$(oc get deployment "${name}" -o name --ignore-not-found)" ]; then
+              oc rollout status "deployment/${name}" -w
+            fi
+          done
+        }
+
+        created_deployment() {
+          local name="$1"
+          grep -qxF "deployment.apps/${name} created" "${CREATE_OUT}" \
+            || grep -qxF "deployment/${name} created" "${CREATE_OUT}"
+        }
+
+        already_exists_deployment() {
+          local name="$1"
+          grep -qF "Error from server (AlreadyExists): deployments.apps \"${name}\" already exists" "${CREATE_ERR}" \
+            || grep -qF "Error from server (AlreadyExists): deployment.apps \"${name}\" already exists" "${CREATE_ERR}" \
+            || grep -qF "Error from server (AlreadyExists): deployments \"${name}\" already exists" "${CREATE_ERR}"
+        }
+
+        # Use the oc create result to decide each Deployment.
+        decide_create_rollouts() {
+          local name
+          follow_deployments=()
+          skip_deployments=()
+          for name in "${deployments[@]}"; do
+            if created_deployment "${name}"; then
+              follow_deployments+=("${name}")
+            elif already_exists_deployment "${name}"; then
+              skip_deployments+=("${name}")
+            else
+              echo "Overwrite=false; Deployment ${name} create result unclear; following rollout status"
+              follow_deployments+=("${name}")
+            fi
+          done
+        }
 
         if [ "${OVERWRITE}" != "false" ]; then
           echo "Overwrite=true; using oc apply"
           oc apply --timeout="${TIMEOUT}" -f "${TEMPLATE_FILE}"
-          FOLLOW_ROLLOUT=true
+          follow_rollouts "${deployments[@]}"
         else
           # Allow AlreadyExists errors and expected failures
           echo "Overwrite=false; using oc create"
-          # Other objects in the template may already exist (shared names);
-          # only skip when this Deployment itself is already present.
-          # shellcheck disable=SC2086 # quoting changes multi-Deployment templates; left as is
-          if [ -n "${DEPLOYMENT}" ] && [ -z "$(oc get deployment ${DEPLOYMENT} -o name --ignore-not-found)" ]; then
-            FOLLOW_ROLLOUT=true
-          fi
+          CREATE_OUT="$(mktemp "${RUNNER_TEMP}/deployer-create-out.XXXXXX")"
           CREATE_ERR="$(mktemp "${RUNNER_TEMP}/deployer-create-err.XXXXXX")"
-          trap 'rm -f "${CREATE_ERR:-}"' EXIT
-          if oc create -f "${TEMPLATE_FILE}" 2>"${CREATE_ERR}"; then
+          trap 'rm -f "${CREATE_OUT:-}" "${CREATE_ERR:-}"' EXIT
+          if oc create -f "${TEMPLATE_FILE}" >"${CREATE_OUT}" 2>"${CREATE_ERR}"; then
+            cat "${CREATE_OUT}"
             [ -s "${CREATE_ERR}" ] && cat "${CREATE_ERR}" >&2 || true
-            rm -f "${CREATE_ERR}"
+            decide_create_rollouts
           else
             CREATE_EXIT=$?
             UNEXPECTED_ERRORS="$(grep -Ev '^[[:space:]]*Error from server \(AlreadyExists\):' "${CREATE_ERR}" | grep -Evi '^[[:space:]]*warning:' | grep -Ev '^[[:space:]]*$' || true)"
             if grep -qE '^[[:space:]]*Error from server \(AlreadyExists\):' "${CREATE_ERR}" && [ -z "${UNEXPECTED_ERRORS}" ]; then
+              [ -s "${CREATE_OUT}" ] && cat "${CREATE_OUT}"
               grep -Ei '^[[:space:]]*warning:' "${CREATE_ERR}" >&2 || true
               grep -E '^[[:space:]]*Error from server \(AlreadyExists\):' "${CREATE_ERR}" | sed 's/.*: //'
-              rm -f "${CREATE_ERR}"
-              if [ -n "${DEPLOYMENT}" ] && [ "${FOLLOW_ROLLOUT}" != "true" ]; then
-                echo "Overwrite=false; Deployment already exists; skipping rollout status"
-              fi
+              decide_create_rollouts
             else
+              cat "${CREATE_OUT}"
               cat "${CREATE_ERR}" >&2
               exit "${CREATE_EXIT}"
             fi
           fi
-        fi
-
-        # Follow any active deployments this action started
-        # shellcheck disable=SC2046 # quoting changes multi-Deployment templates; left as is
-        if [ "${FOLLOW_ROLLOUT}" = "true" ] && [ ! -z "${DEPLOYMENT}" ]&&[ ! -z $(oc get deployment ${DEPLOYMENT} -o name --ignore-not-found) ]; then
-          oc rollout status deployment/${DEPLOYMENT} -w
+          for name in "${skip_deployments[@]}"; do
+            echo "Overwrite=false; Deployment ${name} already exists; skipping rollout status"
+          done
+          follow_rollouts "${follow_deployments[@]}"
+          rm -f "${CREATE_OUT}" "${CREATE_ERR}"
         fi
 
     # Always runs (success, failure, cancellation); rm -f never fails
