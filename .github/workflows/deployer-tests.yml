@@ -91,6 +91,23 @@ jobs:
         with:
           persist-credentials: false
 
+      # Later pushes to the same PR reuse ZONE, so leftover Deployments would
+      # turn the first overwrite=false run into an already-exists case.
+      - name: Remove leftover test Deployments
+        if: matrix.name == 'database' || matrix.name == 'multi'
+        uses: $/oc-runner
+        env:
+          REPO: ${{ github.event.repository.name }}
+          ZONE: ${{ github.event.number }}
+        with:
+          oc_namespace: ${{ vars.OC_NAMESPACE }}
+          oc_server: ${{ vars.OC_SERVER }}
+          oc_token: ${{ secrets.OC_TOKEN }}
+          commands: |
+            oc delete deployment "${REPO}-${ZONE}-database" --ignore-not-found
+            oc delete deployment "${REPO}-${ZONE}-multi-a" --ignore-not-found
+            oc delete deployment "${REPO}-${ZONE}-multi-b" --ignore-not-found
+
       - name: Deploy
         uses: $/deployer
         with:

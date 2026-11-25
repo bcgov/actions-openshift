@@ -248,15 +248,16 @@ runs:
 
         created_deployment() {
           local name="$1"
-          grep -qxF "deployment.apps/${name} created" "${CREATE_OUT}" \
-            || grep -qxF "deployment/${name} created" "${CREATE_OUT}"
+          # oc may colour the line or prefix it; match the created verb for this name
+          sed -E 's/\x1b\[[0-9;]*m//g' "${CREATE_OUT}" \
+            | grep -qE "deployment(\.apps)?/${name}[[:space:]]+created"
         }
 
         already_exists_deployment() {
           local name="$1"
-          grep -qF "Error from server (AlreadyExists): deployments.apps \"${name}\" already exists" "${CREATE_ERR}" \
-            || grep -qF "Error from server (AlreadyExists): deployment.apps \"${name}\" already exists" "${CREATE_ERR}" \
-            || grep -qF "Error from server (AlreadyExists): deployments \"${name}\" already exists" "${CREATE_ERR}"
+          # oc may prefix the resource line (e.g. error when creating "file": ...)
+          sed -E 's/\x1b\[[0-9;]*m//g' "${CREATE_ERR}" "${CREATE_OUT}" \
+            | grep -qE "deployments?(\.apps)?[[:space:]]+\"${name}\"[[:space:]]+already exists"
         }
 
         # Use the oc create result to decide each Deployment.
