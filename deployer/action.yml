@@ -248,16 +248,21 @@ runs:
 
         created_deployment() {
           local name="$1"
-          # oc may colour the line or prefix it; match the created verb for this name
-          sed -E 's/\x1b\[[0-9;]*m//g' "${CREATE_OUT}" \
-            | grep -qE "deployment(\.apps)?/${name}[[:space:]]+created"
+          # Literal, whole-line match so a dotted name cannot match a neighbour
+          sed -E 's/\x1b\[[0-9;]*m//g' "${CREATE_OUT}" | grep -qxF "deployment.apps/${name} created" \
+            || sed -E 's/\x1b\[[0-9;]*m//g' "${CREATE_OUT}" | grep -qxF "deployment/${name} created"
         }
 
         already_exists_deployment() {
           local name="$1"
-          # oc may prefix the resource line (e.g. error when creating "file": ...)
+          # Literal notice; oc may prefix it (e.g. error when creating "file": ...)
+          # The quotes around the name keep it from matching a longer neighbour
           sed -E 's/\x1b\[[0-9;]*m//g' "${CREATE_ERR}" "${CREATE_OUT}" \
-            | grep -qE "deployments?(\.apps)?[[:space:]]+\"${name}\"[[:space:]]+already exists"
+            | grep -qF "deployments.apps \"${name}\" already exists" \
+            || sed -E 's/\x1b\[[0-9;]*m//g' "${CREATE_ERR}" "${CREATE_OUT}" \
+            | grep -qF "deployment.apps \"${name}\" already exists" \
+            || sed -E 's/\x1b\[[0-9;]*m//g' "${CREATE_ERR}" "${CREATE_OUT}" \
+            | grep -qF "deployments \"${name}\" already exists"
         }
 
         # Use the oc create result to decide each Deployment.
