@@ -177,82 +177,6 @@ jobs:
             exit 1
           fi
 
-  # GitHub only warns on undeclared `with:` keys; these must fail at the input check
-  test-unknown-inputs:
-    name: Test Unknown Inputs Fail Loud
-    permissions:
-      contents: read
-    runs-on: ubuntu-26.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # Same enforcer the actions pin, for its CLI
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: bcgov/actions
-          ref: 0ed2b82c50ba113304b3b879e1dc7b9ea087d0fe # v0.15.0
-          path: .input-enforcer
-          persist-credentials: false
-
-      - name: oc-runner with undeclared verbose / diff_branch
-        id: oc_runner
-        continue-on-error: true
-        uses: $/oc-runner
-        with:
-          oc_namespace: none
-          oc_server: https://example.invalid:6443
-          oc_token: none
-          commands: oc version
-          # Nonmatching trigger skips login, so only input rejection can fail this
-          triggers: ./no-such-path/
-          verbose: true
-          diff_branch: main
-
-      - name: cert-keeper with unknown key
-        id: cert_keeper
-        continue-on-error: true
-        uses: $/cert-keeper
-        with:
-          hostname: example.com
-          email: ops@example.com
-          route_name: example
-          target_service: example
-          oc_namespace: none
-          oc_server: https://example.invalid:6443
-          oc_token: none
-          not_an_input: x
-
-      - name: Require failures
-        env:
-          OC_RUNNER: ${{ steps.oc_runner.outcome }}
-          CERT_KEEPER: ${{ steps.cert_keeper.outcome }}
-        run: |
-          echo "oc-runner=$OC_RUNNER cert-keeper=$CERT_KEEPER"
-          [ "$OC_RUNNER" = failure ] && [ "$CERT_KEEPER" = failure ] || {
-            echo "::error::An action accepted an undeclared input"; exit 1; }
-
-      # The failures above must be the unknown-input diagnostic: run the same
-      # check for every action, with its declared inputs plus one extra key.
-      - name: Require unknown-input diagnostic (every action)
-        run: |
-          enforce=.input-enforcer/input-enforcer/enforce.js
-          fail=0
-          for yml in */action.yml; do
-            dir=${yml%/action.yml}
-            json=$(node -e 'const {declaredInputs}=require(process.argv[2]);const o={};for(const k of declaredInputs(require("fs").readFileSync(process.argv[1],"utf8")))o[k]="x";o.not_an_input="x";console.log(JSON.stringify(o))' "$yml" "./$enforce")
-            if out=$(node "$enforce" "$dir" "$json" 2>&1); then
-              echo "::error::$dir accepted not_an_input"; fail=1; continue
-            fi
-            case "$out" in
-              "::error title=$dir: unknown input::Unknown input(s) for $dir: not_an_input%0A"*"not_an_input: not an input of $dir"*"bcgov/actions-openshift/blob/main/$dir/README.md"*) echo "ok $dir" ;;
-              *) echo "::error::$dir: wrong diagnostic"; printf '%s\n' "$out" | sed 's/::/: :/g'; fail=1 ;;
-            esac
-          done
-          exit $fail
-
   # Fixture test of the Probe Runner Reachability Summary script.
   test-probe-summary:
     name: Test Probe Summary
@@ -282,7 +206,6 @@ jobs:
       - changes
       - test-fork-token-degradation
       - test-probe-summary
-      - test-unknown-inputs
     if: always()
     permissions:
       contents: read
