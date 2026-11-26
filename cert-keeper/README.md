@@ -130,7 +130,7 @@ jobs:
 
       - name: Notify CODEOWNERS
         if: failure()
-        uses: bcgov/actions/workflow-notifier@acc058abf85bb183dad21b839a92a40a4ff47af3 # v0.14.0
+        uses: bcgov/actions/workflow-notifier@0ed2b82c50ba113304b3b879e1dc7b9ea087d0fe # v0.15.0
         with:
           title: "Certificate renewal failed"
           notify_author: "false"
