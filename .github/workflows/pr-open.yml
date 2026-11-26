@@ -281,8 +281,8 @@ jobs:
       - actionlint
       - changes
       - test-fork-token-degradation
-      - test-unknown-inputs
       - test-probe-summary
+      - test-unknown-inputs
     if: always()
     permissions:
       contents: read

@@ -1,0 +1,235 @@
+name: Expected Failure Tests
+
+# Tests that make an action fail on purpose (continue-on-error steps that must fail)
+# and so log error or 'Unexpected input(s)' annotations. bcgov/actions workflow-results
+# (v0.15.0+) fails its gate on such annotations in any job of its run, so these live
+# here, without a results gate; each job reports as its own check. Moved from pr-open.yml,
+# oc-runner-commands.yml and cert-check-tests.yml with the same triggers.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+permissions: {}
+
+jobs:
+  changes:
+    name: Expected Failure Tests (changes)
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      oc_runner: ${{ steps.oc_runner.outputs.triggered }}
+      cert_check: ${{ steps.cert_check.outputs.triggered }}
+    steps:
+      # diff-triggers compares against the base branch tip. The merge base keeps a
+      # newer main change out of this pull request's diff. Pushes compare the whole pushed range.
+      - name: Find the pull request merge base
+        id: base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.merge_base_commit.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No merge base for ${BASE_SHA}...${HEAD_SHA}"; exit 1; }
+          echo "Merge base: ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      # Same triggers as oc-runner-commands.yml, plus this file
+      - id: oc_runner
+        uses: bcgov/actions/diff-triggers@acc058abf85bb183dad21b839a92a40a4ff47af3 # v0.14.0
+        with:
+          base: ${{ steps.base.outputs.sha || github.event.before }}
+          triggers: |
+            oc-runner/
+            shared/
+            cert-keeper/action.yml
+            cert-keeper/check.sh
+            cleanup-pr/action.yml
+            sysdig-monitor/action.yml
+            .github/tests/oc-runner/
+            .github/tests/shared/
+            .github/workflows/oc-runner-commands.yml
+            .github/workflows/expected-failure-tests.yml
+            !*.md
+
+      # Same triggers as cert-check-tests.yml, plus this file
+      - id: cert_check
+        uses: bcgov/actions/diff-triggers@acc058abf85bb183dad21b839a92a40a4ff47af3 # v0.14.0
+        with:
+          base: ${{ steps.base.outputs.sha || github.event.before }}
+          triggers: |
+            cert-keeper/check.sh
+            shared/inputs.sh
+            .github/tests/cert-keeper/check.bats
+            .github/workflows/cert-check-tests.yml
+            .github/workflows/expected-failure-tests.yml
+            !*.md
+
+  # GitHub only warns on undeclared `with:` keys; these must fail at the input check
+  test-unknown-inputs:
+    name: Test Unknown Inputs Fail Loud
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same enforcer the actions pin, for its CLI
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: bcgov/actions
+          ref: acc058abf85bb183dad21b839a92a40a4ff47af3 # v0.14.0
+          path: .input-enforcer
+          persist-credentials: false
+
+      - name: oc-runner with undeclared verbose / diff_branch
+        id: oc_runner
+        continue-on-error: true
+        uses: $/oc-runner
+        with:
+          oc_namespace: none
+          oc_server: https://example.invalid:6443
+          oc_token: none
+          commands: oc version
+          # Nonmatching trigger skips login, so only input rejection can fail this
+          triggers: ./no-such-path/
+          verbose: true
+          diff_branch: main
+
+      - name: cert-keeper with unknown key
+        id: cert_keeper
+        continue-on-error: true
+        uses: $/cert-keeper
+        with:
+          hostname: example.com
+          email: ops@example.com
+          route_name: example
+          target_service: example
+          oc_namespace: none
+          oc_server: https://example.invalid:6443
+          oc_token: none
+          not_an_input: x
+
+      - name: Require failures
+        env:
+          OC_RUNNER: ${{ steps.oc_runner.outcome }}
+          CERT_KEEPER: ${{ steps.cert_keeper.outcome }}
+        run: |
+          echo "oc-runner=$OC_RUNNER cert-keeper=$CERT_KEEPER"
+          [ "$OC_RUNNER" = failure ] && [ "$CERT_KEEPER" = failure ] || {
+            echo "::error::An action accepted an undeclared input"; exit 1; }
+
+      # The failures above must be the unknown-input diagnostic: run the same
+      # check for every action, with its declared inputs plus one extra key.
+      - name: Require unknown-input diagnostic (every action)
+        run: |
+          enforce=.input-enforcer/input-enforcer/enforce.js
+          fail=0
+          for yml in */action.yml; do
+            dir=${yml%/action.yml}
+            json=$(node -e 'const {declaredInputs}=require(process.argv[2]);const o={};for(const k of declaredInputs(require("fs").readFileSync(process.argv[1],"utf8")))o[k]="x";o.not_an_input="x";console.log(JSON.stringify(o))' "$yml" "./$enforce")
+            if out=$(node "$enforce" "$dir" "$json" 2>&1); then
+              echo "::error::$dir accepted not_an_input"; fail=1; continue
+            fi
+            case "$out" in
+              "::error title=$dir: unknown input::Unknown input(s) for $dir: not_an_input%0A"*"not_an_input: not an input of $dir"*"bcgov/actions-openshift/blob/main/$dir/README.md"*) echo "ok $dir" ;;
+              *) echo "::error::$dir: wrong diagnostic"; printf '%s\n' "$out" | sed 's/::/: :/g'; fail=1 ;;
+            esac
+          done
+          exit $fail
+
+  unreachable-api:
+    name: Test oc-runner blocked output
+    needs: changes
+    if: needs.changes.outputs.oc_runner == 'true'
+    # No credentials: silver's API name points at a non-routable address on this runner, so
+    # pre-flight times out while the real silver router still answers. The action must fail
+    # with blocked=true (unreachable=true if the router is down too), and the composite
+    # outputs must survive the failed step
+    permissions: {}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Point the silver API at a non-routable address
+        run: echo "10.255.255.1 api.silver.devops.gov.bc.ca" | sudo tee -a /etc/hosts
+
+      - id: oc
+        continue-on-error: true
+        uses: $/oc-runner
+        with:
+          oc_namespace: abc123-dev
+          oc_server: https://api.silver.devops.gov.bc.ca:6443
+          oc_token: not-a-real-token-not-a-real-token-0000
+
+      - name: Check outcome and outputs
+        env:
+          OUTCOME: ${{ steps.oc.outcome }}
+          BLOCKED: ${{ steps.oc.outputs.blocked }}
+          UNREACHABLE: ${{ steps.oc.outputs.unreachable }}
+        run: |
+          echo "outcome=${OUTCOME} blocked=${BLOCKED} unreachable=${UNREACHABLE}"
+          if [ "${OUTCOME}" != failure ]; then
+            echo "::error::oc-runner should fail against a non-routable API"
+            exit 1
+          fi
+          if [ "${BLOCKED}${UNREACHABLE}" != truefalse ] && [ "${BLOCKED}${UNREACHABLE}" != falsetrue ]; then
+            echo "::error::Expected exactly one of blocked/unreachable to be true"
+            exit 1
+          fi
+
+  cert-failing-host:
+    name: Test cert check (failing host, ${{ matrix.runner }})
+    needs: changes
+    if: needs.changes.outputs.cert_check == 'true'
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-26.04, ubuntu-slim]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Nothing listens on port 1, so the host is unreadable, which is a finding
+      # on any day and any certificate
+      - name: Failing check fails the step (for if failure() notify)
+        id: failing
+        continue-on-error: true
+        shell: bash
+        env:
+          INPUT_HOSTS: github.com:1
+          INPUT_LIFETIME_DIVISOR: "3"
+          INPUT_MARGIN_DAYS: "0"
+          INPUT_TIMEOUT: "3"
+          INPUT_FAIL_ON_FINDINGS: "true"
+        run: bash cert-keeper/check.sh
+
+      - name: Check failing step outcome
+        env:
+          OUTCOME: ${{ steps.failing.outcome }}
+          FINDINGS: ${{ steps.failing.outputs.findings }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::Expected the step to fail, got ${OUTCOME}"; exit 1; }
+          jq -e 'length == 1' <<< "$FINDINGS" > /dev/null || { echo "::error::Expected findings on failure, got ${FINDINGS}"; exit 1; }
+          echo "Failing step failed and still set findings"

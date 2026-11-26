@@ -93,7 +93,7 @@ jobs:
 
       # results lists the host whether or not it needs attention, so this proves
       # a live read without depending on when github.com renews. Findings are
-      # covered by the bats tests and the failing step below.
+      # covered by the bats tests and the failing-host job in expected-failure-tests.yml.
       - name: Known host (github.com)
         id: known
         shell: bash
@@ -115,30 +115,6 @@ jobs:
           jq -e 'length == 1 and .[0].host == "github.com" and (.[0].status | IN("ok", "expiring")) and (.[0].not_after | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")) and ((.[0].lifetime_days | tonumber) > 0)' <<< "$RESULTS" > /dev/null \
             || { echo "::error::Expected github.com read as ok or expiring with an expiry date, got ${RESULTS}"; exit 1; }
           echo "Known-host check passed: $(jq -r '.[0].not_after' <<< "$RESULTS")"
-
-      # Nothing listens on port 1, so the host is unreadable, which is a finding
-      # on any day and any certificate
-      - name: Failing check fails the step (for if failure() notify)
-        id: failing
-        continue-on-error: true
-        shell: bash
-        env:
-          INPUT_HOSTS: github.com:1
-          INPUT_LIFETIME_DIVISOR: "3"
-          INPUT_MARGIN_DAYS: "0"
-          INPUT_TIMEOUT: "3"
-          INPUT_FAIL_ON_FINDINGS: "true"
-        run: bash cert-keeper/check.sh
-
-      - name: Check failing step outcome
-        env:
-          OUTCOME: ${{ steps.failing.outcome }}
-          FINDINGS: ${{ steps.failing.outputs.findings }}
-        run: |
-          set -euo pipefail
-          [ "$OUTCOME" = "failure" ] || { echo "::error::Expected the step to fail, got ${OUTCOME}"; exit 1; }
-          jq -e 'length == 1' <<< "$FINDINGS" > /dev/null || { echo "::error::Expected findings on failure, got ${FINDINGS}"; exit 1; }
-          echo "Failing step failed and still set findings"
 
   # Merge gate for this workflow: always reports, skipped jobs count as passing
   results:
