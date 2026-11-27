@@ -46,7 +46,7 @@ jobs:
 
       # Same triggers as oc-runner-commands.yml, plus this file
       - id: oc_runner
-        uses: bcgov/actions/diff-triggers@acc058abf85bb183dad21b839a92a40a4ff47af3 # v0.14.0
+        uses: bcgov/actions/diff-triggers@0ed2b82c50ba113304b3b879e1dc7b9ea087d0fe # v0.15.0
         with:
           base: ${{ steps.base.outputs.sha || github.event.before }}
           triggers: |
@@ -64,7 +64,7 @@ jobs:
 
       # Same triggers as cert-check-tests.yml, plus this file
       - id: cert_check
-        uses: bcgov/actions/diff-triggers@acc058abf85bb183dad21b839a92a40a4ff47af3 # v0.14.0
+        uses: bcgov/actions/diff-triggers@0ed2b82c50ba113304b3b879e1dc7b9ea087d0fe # v0.15.0
         with:
           base: ${{ steps.base.outputs.sha || github.event.before }}
           triggers: |
@@ -91,7 +91,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: bcgov/actions
-          ref: acc058abf85bb183dad21b839a92a40a4ff47af3 # v0.14.0
+          ref: 0ed2b82c50ba113304b3b879e1dc7b9ea087d0fe # v0.15.0
           path: .input-enforcer
           persist-credentials: false
 
